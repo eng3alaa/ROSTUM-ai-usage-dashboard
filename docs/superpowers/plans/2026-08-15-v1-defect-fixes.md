@@ -101,6 +101,7 @@ export function findBrowser() {
   const cands = [
     process.env.CHROME_PATH,
     'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    (process.env.LOCALAPPDATA || '') + '/Google/Chrome/Application/chrome.exe',
     'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
   ].filter(Boolean);
   for (const c of cands) if (fs.existsSync(c)) return c;
@@ -108,7 +109,7 @@ export function findBrowser() {
 }
 
 export async function launch() {
-  return puppeteer.launch({ executablePath: findBrowser(), headless: 'new' });
+  return puppeteer.launch({ executablePath: findBrowser(), headless: true });
 }
 
 /** Open the dashboard in a fresh page. opts: {tz, seedData} */
@@ -176,13 +177,20 @@ const ok = (name, cond, detail = '') => results.push({ name, pass: !!cond, detai
 
 await generate();
 const browser = await launch();
-const dir = path.join(import.meta.dirname, 'checks');
-fs.mkdirSync(dir, { recursive: true });
-for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')).sort()) {
-  const mod = await import(pathToFileURL(path.join(dir, f)).href);
-  await mod.run({ browser, ok });
+try {
+  const dir = path.join(import.meta.dirname, 'checks');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')).sort()) {
+    const mod = await import(pathToFileURL(path.join(dir, f)).href);
+    try {
+      await mod.run({ browser, ok });
+    } catch (err) {
+      ok(f + ': threw', false, err && err.message || String(err));
+    }
+  }
+} finally {
+  await browser.close();
 }
-await browser.close();
 
 let fails = 0;
 for (const r of results) {
