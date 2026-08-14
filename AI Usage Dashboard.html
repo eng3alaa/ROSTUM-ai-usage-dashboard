@@ -724,6 +724,20 @@ const Store = {
   load() {
     const saved = LS.get('data', null);
     if (saved) { this.sources = saved.sources || {}; this.billed = saved.billed || {}; this.projects = saved.projects || []; }
+    // migrate v1 billed arrays to {rows, at, stale} envelopes
+    for (const [k, v] of Object.entries(this.billed)) {
+      if (Array.isArray(v)) this.billed[k] = { rows: v, at: null, stale: false };
+    }
+  },
+  billedRows(id) {
+    const v = this.billed[id];
+    if (!v) return [];
+    return Array.isArray(v) ? v : (v.rows || []);
+  },
+  setBilled(id, rows) {                    // rows: array (fresh), []: truthful empty, null: fetch failed → stale
+    if (rows) this.billed[id] = { rows, at: Date.now(), stale: false };
+    else if (this.billed[id]) this.billed[id] = { rows: this.billedRows(id), at: (this.billed[id].at ?? null), stale: true };
+    this.persist();
   },
   persist() {
     try { LS.set('data', { sources: this.sources, billed: this.billed, projects: this.projects }); }
@@ -1677,12 +1691,16 @@ const App = {
     renderSparkline($('spark-msgs'), spark(byDayMsgs));
 
     // actual billed
-    let billed = 0, any = false;
-    for (const list of Object.values(Store.billed)) {
-      for (const b of list || []) if (b.d >= win.from && b.d <= win.to) { billed += b.amount; any = true; }
+    let billed = 0, any = false, anyStale = false;
+    for (const id of Object.keys(Store.billed)) {
+      const env = Store.billed[id];
+      if (env && !Array.isArray(env) && env.stale) anyStale = true;
+      for (const b of Store.billedRows(id)) if (b.d >= win.from && b.d <= win.to) { billed += b.amount; any = true; }
     }
     $('kpi-billed').textContent = any ? fmtUSD(billed) : '—';
-    $('kpi-billed-note').textContent = any ? 'as reported by provider cost APIs' : 'Connect Anthropic/OpenAI admin keys';
+    $('kpi-billed-note').textContent = any
+      ? (anyStale ? '⚠ includes stale data — a cost fetch failed; re-sync to refresh' : 'as reported by provider cost APIs')
+      : 'Connect Anthropic/OpenAI admin keys';
   },
 
   /* ---------- daily stacked chart ---------- */
@@ -2009,7 +2027,7 @@ const App = {
     try {
       const { usage, cost } = await fetchAnthropicAll(key, days);
       Store.setSource('anthropic', usage.rows, { days });
-      if (cost && cost.length) { Store.billed.anthropic = cost; Store.persist(); }
+      Store.setBilled('anthropic', cost);
       status.textContent = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
       status.appendChild(document.createTextNode(`${usage.rows.length} usage rows${cost && cost.length ? ' + billed costs' : ''} · updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`));
@@ -2032,7 +2050,7 @@ const App = {
     try {
       const { usage, cost } = await fetchOpenAIAll(key, days);
       Store.setSource('openai', usage.rows, { days });
-      if (cost && cost.length) { Store.billed.openai = cost; Store.persist(); }
+      Store.setBilled('openai', cost);
       status.textContent = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
       status.appendChild(document.createTextNode(`${usage.rows.length} usage rows${cost && cost.length ? ' + billed costs' : ''} · updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`));
@@ -2056,7 +2074,11 @@ const App = {
         if (f.name.endsWith('.csv')) {
           const res = parseGenericCSV(await f.text());
           Store.setSource('csv', (Store.sources.csv ? Store.sources.csv.rows : []).concat(res.rows), res.meta);
-          if (res.billed && res.billed.length) { Store.billed.csv = (Store.billed.csv || []).concat(res.billed); Store.persist(); }
+          if (res.billed && res.billed.length) {
+            const bm = new Map(Store.billedRows('csv').map(b => [b.d, b]));
+            for (const b of res.billed) bm.set(b.d, b);           // re-import replaces same-day amounts
+            Store.setBilled('csv', [...bm.values()].sort((a, b2) => a.d < b2.d ? -1 : 1));
+          }
           notes.push(`${f.name}: imported ${res.meta.rows} CSV rows`);
           continue;
         }
@@ -2075,14 +2097,14 @@ const App = {
           Store.setSource('anthropic', res.rows, {});
           notes.push(`${f.name}: Anthropic usage report — ${res.rows.length} rows`);
         } else if (kind === 'anthropic-cost') {
-          Store.billed.anthropic = parseAnthropicCost(obj); Store.persist();
+          Store.setBilled('anthropic', parseAnthropicCost(obj));
           notes.push(`${f.name}: Anthropic billed costs imported`);
         } else if (kind === 'openai-usage') {
           const res = parseOpenAIUsage(obj);
           Store.setSource('openai', res.rows, {});
           notes.push(`${f.name}: OpenAI usage report — ${res.rows.length} rows`);
         } else if (kind === 'openai-cost') {
-          Store.billed.openai = parseOpenAICost(obj); Store.persist();
+          Store.setBilled('openai', parseOpenAICost(obj));
           notes.push(`${f.name}: OpenAI billed costs imported`);
         } else if (kind === 'empty-report') {
           notes.push(`${f.name}: recognized usage/cost report, but every day in it is empty — nothing to import`);
