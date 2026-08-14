@@ -11,6 +11,7 @@ export function findBrowser() {
   const cands = [
     process.env.CHROME_PATH,
     'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    (process.env.LOCALAPPDATA || '') + '/Google/Chrome/Application/chrome.exe',
     'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
   ].filter(Boolean);
   for (const c of cands) if (fs.existsSync(c)) return c;
@@ -18,7 +19,7 @@ export function findBrowser() {
 }
 
 export async function launch() {
-  return puppeteer.launch({ executablePath: findBrowser(), headless: 'new' });
+  return puppeteer.launch({ executablePath: findBrowser(), headless: true });
 }
 
 /** Open the dashboard in a fresh page. opts: {tz, seedData} */

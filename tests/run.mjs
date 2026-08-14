@@ -9,13 +9,20 @@ const ok = (name, cond, detail = '') => results.push({ name, pass: !!cond, detai
 
 await generate();
 const browser = await launch();
-const dir = path.join(import.meta.dirname, 'checks');
-fs.mkdirSync(dir, { recursive: true });
-for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')).sort()) {
-  const mod = await import(pathToFileURL(path.join(dir, f)).href);
-  await mod.run({ browser, ok });
+try {
+  const dir = path.join(import.meta.dirname, 'checks');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')).sort()) {
+    const mod = await import(pathToFileURL(path.join(dir, f)).href);
+    try {
+      await mod.run({ browser, ok });
+    } catch (err) {
+      ok(f + ': threw', false, err && err.message || String(err));
+    }
+  }
+} finally {
+  await browser.close();
 }
-await browser.close();
 
 let fails = 0;
 for (const r of results) {
