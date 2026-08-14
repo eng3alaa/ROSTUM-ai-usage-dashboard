@@ -12,7 +12,7 @@
 - Spec: `docs/superpowers/specs/2026-08-15-ai-accounts-rich-dashboard-design.md` (section "v1 defects folded into v2" lists the 13 defects; this plan implements all of them).
 - Reviews: `docs/superpowers/reviews/2026-08-15-v1-code-review.md` and `...-codex-second-opinion.md`.
 - ⚠️ The HTML file currently contains literal NUL (0x00) bytes (used as string separators), so `grep`/`rg` treat it as binary. Use `grep -an`, `rg -a`, or the Read tool. Task 7 removes them.
-- All dashboard functions (`parseClaudeLogs`, `sniffJSON`, `Store`, `App`, …) are top-level in a classic `<script>`, so they are `window` globals — call them directly in `page.evaluate`.
+- All dashboard functions (`parseClaudeLogs`, `sniffJSON`, `Store`, `App`, …) are top-level in a classic `<script>`, so they are callable as bare identifiers inside `page.evaluate` (function declarations land on `window`; `const`/`let` bindings like `dayKey`, `LS`, `Pricing` live in the global lexical scope — same callability, NOT `window` properties).
 - Every task ends with a commit. Do not batch commits across tasks.
 
 ## File structure
@@ -233,10 +233,12 @@ export async function run({ browser, ok }) {
 
   ok('baseline: page loads without console errors', errors.length === 0, errors.join(' | '));
 
-  const globals = await page.evaluate(() =>
-    ['parseClaudeLogs', 'parseChatGPTExport', 'parseGenericCSV', 'parseAnthropicUsage',
-     'parseOpenAIUsage', 'sniffJSON', 'dayKey', 'makeAgg'].map((n) => typeof window[n]));
-  ok('baseline: parser globals exposed', globals.every((t) => t === 'function'), globals.join(','));
+  const globals = await page.evaluate(() => [
+    typeof parseClaudeLogs, typeof parseChatGPTExport, typeof parseGenericCSV,
+    typeof parseAnthropicUsage, typeof parseOpenAIUsage, typeof sniffJSON,
+    typeof dayKey, typeof makeAgg,
+  ]);
+  ok('baseline: parser globals callable from page.evaluate', globals.every((t) => t === 'function'), globals.join(','));
 
   // Exact token math + in-scan dedupe on the synthetic session log
   const sessText = fs.readFileSync(path.join(OUT, 'claude-logs', 'projects', '-D--proj1', 'sess-aaa.jsonl'), 'utf8');
