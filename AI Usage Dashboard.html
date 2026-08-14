@@ -1983,7 +1983,9 @@ const App = {
       if (!files.length) { status.textContent = 'No .jsonl session logs found in that folder. Pick your .claude folder (it contains a "projects" subfolder).'; return; }
       prog.hidden = false; prog.value = 0; prog.max = files.length;
       document.querySelectorAll('.card').forEach(c => c.classList.add('stale'));
+      const gen = ++this._gen.local;
       const res = await parseClaudeLogs(files, (done) => { prog.value = done; });
+      if (gen !== this._gen.local) return;   // superseded by a newer scan
       Store.projects = res.projects;
       Store.setSource('local', res.rows, res.meta);
       $('rescan-local').hidden = false;
@@ -2039,7 +2041,10 @@ const App = {
     } catch (e) { console.warn(e); }
   },
 
+  _gen: { local: 0, anthropic: 0, openai: 0 },
+
   async fetchAnthropic() {
+    const gen = ++this._gen.anthropic;
     const key = $('anthropic-key').value.trim();
     const status = $('anthropic-status');
     if (!key) { status.textContent = 'Paste an Admin API key first (starts with sk-ant-admin).'; return; }
@@ -2048,6 +2053,7 @@ const App = {
     status.textContent = 'Fetching usage…';
     try {
       const { usage, cost } = await fetchAnthropicAll(key, days);
+      if (gen !== this._gen.anthropic) return;   // superseded by a newer fetch
       Store.setSource('anthropic', usage.rows, { days });
       Store.setBilled('anthropic', cost);
       status.textContent = '';
@@ -2063,6 +2069,7 @@ const App = {
   },
 
   async fetchOpenAI() {
+    const gen = ++this._gen.openai;
     const key = $('openai-key').value.trim();
     const status = $('openai-status');
     if (!key) { status.textContent = 'Paste an Admin key first (starts with sk-admin).'; return; }
@@ -2071,6 +2078,7 @@ const App = {
     status.textContent = 'Fetching usage…';
     try {
       const { usage, cost } = await fetchOpenAIAll(key, days);
+      if (gen !== this._gen.openai) return;   // superseded by a newer fetch
       Store.setSource('openai', usage.rows, { days });
       Store.setBilled('openai', cost);
       status.textContent = '';
@@ -2198,10 +2206,12 @@ const App = {
     $('openai-cmd').textContent = openaiPSCommand($('openai-key').value.trim(), parseInt($('openai-days').value, 10));
   },
 
-  refreshAll() {
-    if (this.dirHandle) this.rescan();
-    if (LS.get('key:anthropic', null) && $('anthropic-key').value) this.fetchAnthropic();
-    if (LS.get('key:openai', null) && $('openai-key').value) this.fetchOpenAI();
+  async refreshAll() {
+    const jobs = [];
+    if (this.dirHandle) jobs.push(this.rescan());
+    if (LS.get('key:anthropic', null) && $('anthropic-key').value) jobs.push(this.fetchAnthropic());
+    if (LS.get('key:openai', null) && $('openai-key').value) jobs.push(this.fetchOpenAI());
+    await Promise.allSettled(jobs);
     this.render();
   },
 
