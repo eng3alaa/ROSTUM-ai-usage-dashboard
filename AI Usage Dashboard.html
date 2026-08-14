@@ -719,7 +719,7 @@ const PLATFORM_ORDER = ['Claude Code/Desktop', 'Anthropic API', 'OpenAI API', 'C
 
 const Store = {
   sources: {},       // srcId -> { rows: [], meta: {} }
-  billed: {},        // srcId -> [{d, amount}] real billed cost per day
+  billed: {},        // srcId -> {rows: [{d, amount}], at, stale} envelope (v1 arrays migrate on load)
   projects: [],      // [{name, msgs, in, cw, cr, out, cost}] from local logs
   load() {
     const saved = LS.get('data', null);
@@ -745,7 +745,14 @@ const Store = {
   },
   setSource(id, rows, meta) { this.sources[id] = { rows, meta: { ...meta, updated: Date.now() } }; this.persist(); },
   clearAll() { this.sources = {}; this.billed = {}; this.projects = []; LS.del('data'); },
-  allRows() { return Object.values(this.sources).flatMap(s => s.rows || []); },
+  allRows() {
+    const localSids = new Set(((this.sources.local || {}).rows || []).map(r => r.sid).filter(Boolean));
+    return Object.entries(this.sources).flatMap(([id, s]) => {
+      let rows = s.rows || [];
+      if (id === 'local-import' && localSids.size) rows = rows.filter(r => !r.sid || !localSids.has(r.sid));
+      return rows;
+    });
+  },
   platforms() {
     const set = new Set(this.allRows().map(r => r.platform));
     return PLATFORM_ORDER.filter(p => set.has(p)).concat([...set].filter(p => !PLATFORM_ORDER.includes(p)));
@@ -790,13 +797,13 @@ const ColorMap = {
 
 /* ---------- generic aggregation helper ---------- */
 function makeAgg() {
-  const map = new Map(); // day\0model\0platform -> bundle
+  const map = new Map(); // day / platform / model [/ sid] -> bundle
   return {
-    add(d, platform, model, t) {
+    add(d, platform, model, t, sid) {
       if (!d) return;
-      const key = d + ' ' + platform + ' ' + model;
+      const key = d + '\u0001' + platform + '\u0001' + model + '\u0001' + (sid || '');
       let b = map.get(key);
-      if (!b) { b = { d, platform, model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0, est: t.est ? 1 : 0 }; map.set(key, b); }
+      if (!b) { b = { d, platform, model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0, est: t.est ? 1 : 0 }; if (sid) b.sid = sid; map.set(key, b); }
       b.in += t.in || 0; b.cw += t.cw || 0; b.cr += t.cr || 0; b.out += t.out || 0; b.msgs += t.msgs || 0;
       if (t.est) b.est = 1;
     },
@@ -863,6 +870,7 @@ async function parseClaudeLogs(files, onProgress) {
     const m = path.match(/(?:^|\/)projects\/([^/]+)\//);
     let projectDir = m ? m[1] : null;
     let projectCwd = null;
+    const sid = (path.split('/').pop() || '').replace(/\.jsonl$/i, '');   // session UUID = file basename
     for await (const line of readLines(file)) {
       lines++;
       if (!line || line[0] !== '{') continue;
@@ -881,10 +889,10 @@ async function parseClaudeLogs(files, onProgress) {
       }
       const t = { in: u.input_tokens || 0, cw: cw || 0, cr: u.cache_read_input_tokens || 0, out: u.output_tokens || 0, msgs: 1 };
       const d = dayKey(obj.timestamp || file.lastModified);
-      agg.add(d, 'Claude Code/Desktop', model, t);
+      agg.add(d, 'Claude Code/Desktop', model, t, sid);
       msgs++;
       const projName = prettyProject(projectCwd || projectDir);
-      const pk = projName + ' ' + model;
+      const pk = projName + '\u0001' + model;
       let pb = projMap.get(pk);
       if (!pb) { pb = { project: projName, model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0 }; projMap.set(pk, pb); }
       pb.in += t.in; pb.cw += t.cw; pb.cr += t.cr; pb.out += t.out; pb.msgs += 1;
@@ -2122,8 +2130,8 @@ const App = {
     if (jsonlFiles.length) {
       try {
         const res = await parseClaudeLogs(jsonlFiles, null);
+        if (res.projects.length && !Store.sources.local) Store.projects = res.projects;   // folder scan wins; assign BEFORE persist
         Store.setSource('local-import', res.rows, res.meta);
-        if (res.projects.length && !Store.projects.length) Store.projects = res.projects;
         notes.push(`${jsonlFiles.length} .jsonl files: ${fmtInt(res.meta.msgs)} messages imported`);
       } catch (e) { notes.push(`.jsonl import failed — ${e.message || e}`); }
     }

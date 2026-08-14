@@ -24,6 +24,27 @@ export async function run({ browser, ok }) {
     ok('merge: re-dropping the same CSV does not double usage',
       totals.n === 2 && totals.in === 300 && totals.out === 130, JSON.stringify(totals));
     ok('merge: re-dropping the same CSV does not double billed', Math.abs(totals.billed - 3.0) < 1e-9, totals.billed);
+
+    const fs2 = await import('node:fs');
+    const path2 = await import('node:path');
+    const { OUT } = await import('../lib/harness.mjs');
+    const sessText = fs2.readFileSync(path2.join(OUT, 'claude-logs', 'projects', '-D--proj1', 'sess-aaa.jsonl'), 'utf8');
+    const dd = await page.evaluate(async (text) => {
+      localStorage.removeItem('aiusage:data');
+      Store.sources = {}; Store.billed = {}; Store.projects = [];
+      // 1) same session arrives via the dropzone...
+      await App.handleImportFiles([new File([text], 'sess-aaa.jsonl')]);
+      // 2) ...and via the folder scan
+      const res = await parseClaudeLogs([{ path: 'projects/-D--proj1/sess-aaa.jsonl', file: new File([text], 'sess-aaa.jsonl') }], null);
+      Store.projects = res.projects;
+      Store.setSource('local', res.rows, res.meta);
+      const t = { in: 0, msgs: 0 };
+      for (const r of Store.allRows()) { t.in += r.in; t.msgs += r.msgs; }
+      t.persistedProjects = (JSON.parse(localStorage.getItem('aiusage:data')).projects || []).length;
+      return t;
+    }, sessText);
+    ok('dedupe: same session via folder + dropzone counted once', dd.in === 110 && dd.msgs === 2, JSON.stringify(dd));
+    ok('dedupe: projects persisted to localStorage', dd.persistedProjects > 0, dd.persistedProjects);
   } finally {
     await page.close();
   }
