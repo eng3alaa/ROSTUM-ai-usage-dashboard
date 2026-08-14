@@ -14,6 +14,7 @@
 - ⚠️ The HTML file currently contains literal NUL (0x00) bytes (used as string separators), so `grep`/`rg` treat it as binary. Use `grep -an`, `rg -a`, or the Read tool. Task 7 removes them.
 - All dashboard functions (`parseClaudeLogs`, `sniffJSON`, `Store`, `App`, …) are top-level in a classic `<script>`, so they are callable as bare identifiers inside `page.evaluate` (function declarations land on `window`; `const`/`let` bindings like `dayKey`, `LS`, `Pricing` live in the global lexical scope — same callability, NOT `window` properties).
 - Every task ends with a commit. Do not batch commits across tasks.
+- **Standing amendment (from Task 2 quality review):** in every check file, wrap the body between `openDashboard(...)` and the end in `try { ... } finally { await page.close(); }` so a throwing assertion still closes its page and later checks keep their diagnostics. The reference code blocks below predate this note — apply the pattern when writing each file. Task 3 additionally retrofits it into `tests/checks/10-baseline.mjs`.
 
 ## File structure
 
