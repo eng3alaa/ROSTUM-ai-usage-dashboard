@@ -924,10 +924,24 @@ function parseChatGPTExport(convs) {
   let msgs = 0;
   for (const conv of convs) {
     if (!conv || typeof conv !== 'object' || !conv.mapping) continue;
-    const nodes = Object.values(conv.mapping)
-      .map(n => n && n.message).filter(Boolean)
-      .filter(m => m.author && (m.author.role === 'user' || m.author.role === 'assistant'))
-      .sort((a, b) => (a.create_time || 0) - (b.create_time || 0));
+    // Follow only the ACTIVE branch: walk the parent chain up from current_node.
+    // Regenerated/edited siblings live in mapping too and must not be counted.
+    const mapping = conv.mapping;
+    let leafId = conv.current_node && mapping[conv.current_node] ? conv.current_node : null;
+    if (!leafId) {   // fallback: leaf = node holding the latest message timestamp
+      let bestT = -1;
+      for (const [id, n] of Object.entries(mapping)) {
+        const t = (n && n.message && n.message.create_time) || 0;
+        if (t > bestT) { bestT = t; leafId = id; }
+      }
+    }
+    const chain = [];
+    let guard = 0;
+    for (let id = leafId; id && mapping[id] && guard++ < 100000; id = mapping[id].parent) {
+      const msg = mapping[id].message;
+      if (msg && msg.author && (msg.author.role === 'user' || msg.author.role === 'assistant')) chain.push(msg);
+    }
+    const nodes = chain.reverse();
     let cum = 0;
     for (const m of nodes) {
       const text = textOfChatGPTMessage(m);
