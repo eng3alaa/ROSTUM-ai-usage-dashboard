@@ -1213,9 +1213,11 @@ Write-Host "Saved to Desktop\\openai-usage.json"`;
 /* ---------- import router (drop zone) ---------- */
 function sniffJSON(obj, fileName) {
   if (obj && Array.isArray(obj.data) && obj.data.length) {
-    const b = obj.data[0];
-    const r = (b.results && b.results[0]) || {};
-    const isUnixBucket = typeof b.start_time === 'number';
+    // find the first bucket that actually has results — providers emit empty buckets for zero-usage days
+    const withResult = obj.data.find(b => b && Array.isArray(b.results) && b.results.length);
+    const isUnixBucket = obj.data.some(b => b && typeof b.start_time === 'number');
+    if (!withResult) return 'empty-report';
+    const r = withResult.results[0];
     if ('amount' in r) return isUnixBucket ? 'openai-cost' : 'anthropic-cost';
     if ('input_cached_tokens' in r || isUnixBucket) return 'openai-usage';
     if ('uncached_input_tokens' in r || 'cache_read_input_tokens' in r || 'output_tokens' in r) return 'anthropic-usage';
@@ -2082,6 +2084,8 @@ const App = {
         } else if (kind === 'openai-cost') {
           Store.billed.openai = parseOpenAICost(obj); Store.persist();
           notes.push(`${f.name}: OpenAI billed costs imported`);
+        } else if (kind === 'empty-report') {
+          notes.push(`${f.name}: recognized usage/cost report, but every day in it is empty — nothing to import`);
         } else {
           notes.push(`${f.name}: format not recognized`);
         }
