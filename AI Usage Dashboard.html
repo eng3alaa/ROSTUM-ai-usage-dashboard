@@ -614,6 +614,23 @@ const dayKeyUTC = (dateish) => {
 const RE_DATEONLY = /^\d{4}-\d{2}-\d{2}$/;
 const addDays = (key, n) => { const d = new Date(key + 'T12:00:00'); d.setDate(d.getDate() + n); return dayKey(d); };
 const dayRange = (from, to) => { const out = []; let k = from; let guard = 0; while (k <= to && guard++ < 4000) { out.push(k); k = addDays(k, 1); } return out; };
+/* Fold a day list into week/month buckets when it exceeds what the pixel width can show */
+function bucketDays(days, maxCols = 160) {
+  if (days.length <= maxCols) return { buckets: days.map(d => ({ key: d, days: [d] })), unit: 'day' };
+  const unit = Math.ceil(days.length / 7) <= maxCols ? 'week' : 'month';
+  const map = new Map();
+  for (const d of days) {
+    let k;
+    if (unit === 'week') {
+      const dt = new Date(d + 'T12:00:00');
+      k = addDays(d, -((dt.getDay() + 6) % 7));         // Monday-start week
+    } else k = d.slice(0, 7) + '-01';
+    let b = map.get(k);
+    if (!b) { b = { key: k, days: [] }; map.set(k, b); }
+    b.days.push(d);
+  }
+  return { buckets: [...map.values()], unit };
+}
 const fmtDayShort = (key) => { const d = new Date(key + 'T12:00:00'); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
 
 /* ---------- persistent settings ---------- */
@@ -1333,6 +1350,12 @@ function roundedRightRect(x, y, w, h, r) {
 
 /* ---------- stacked daily columns with crosshair ---------- */
 function renderStackedColumns(container, { days, series, metric }) {
+  const { buckets, unit } = bucketDays(days);
+  if (unit !== 'day') {
+    const idx = new Map(days.map((d, i) => [d, i]));
+    series = series.map(s => ({ ...s, values: buckets.map(b => b.days.reduce((a, d) => a + (s.values[idx.get(d)] || 0), 0)) }));
+    days = buckets.map(b => b.key);
+  }
   clear(container);
   const W = Math.max(320, container.clientWidth || 700);
   const plotH = 230, axisB = 24, padT = 8, padR = 10;
@@ -1402,7 +1425,10 @@ function renderStackedColumns(container, { days, series, metric }) {
       .sort((a, b) => b.v - a.v)
       .map(r => ({ color: r.color, name: r.name, value: fmtMetric(r.v, metric) }));
     const total = totals[i] || 0;
-    Tooltip.show(clientX, clientY, new Date(days[i] + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }),
+    const ttTitle = unit === 'week' ? 'Week of ' + fmtDayShort(days[i])
+      : unit === 'month' ? new Date(days[i] + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+      : new Date(days[i] + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    Tooltip.show(clientX, clientY, ttTitle,
       rows.length ? rows : [{ color: 'transparent', name: 'no usage', value: '—' }],
       rows.length > 1 ? { name: 'total', value: fmtMetric(total, metric) } : null);
   };
@@ -1410,7 +1436,7 @@ function renderStackedColumns(container, { days, series, metric }) {
     const bx = padL + band * i;
     const hit = el('rect', {
       class: 'colband', x: bx, y: padT, width: band, height: plotH, tabindex: 0, role: 'img',
-      'aria-label': `${d}: ${fmtMetric(totals[i] || 0, metric)} total`
+      'aria-label': `${unit === 'day' ? d : (unit === 'week' ? 'week of ' + d : d.slice(0, 7))}: ${fmtMetric(totals[i] || 0, metric)} total`
     });
     hit.addEventListener('pointermove', (e) => showDay(i, e.clientX, e.clientY));
     hit.addEventListener('pointerleave', () => { Tooltip.hide(); cross.setAttribute('x1', -9); cross.setAttribute('x2', -9); });
