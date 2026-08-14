@@ -589,6 +589,12 @@ const fmtUSD = (n) => {
   return '$' + n.toFixed(3);
 };
 const fmtMetric = (n, metric) => metric === 'cost' ? fmtUSD(n) : fmtCompact(n);
+/* CSV cell: neutralize spreadsheet formula prefixes, then apply CSV quoting */
+const csvCell = (s) => {
+  let v = String(s);
+  if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
+  return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+};
 const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /* ---------- dates (local timezone) ---------- */
@@ -2084,8 +2090,7 @@ const App = {
     const head = 'date,platform,model,input_tokens,cache_write_tokens,cache_read_tokens,output_tokens,messages,estimated,cost_usd_api_equiv';
     const lines = [head];
     for (const r of rows) {
-      const cell = (s) => /[",\n]/.test(String(s)) ? '"' + String(s).replace(/"/g, '""') + '"' : String(s);
-      lines.push([r.d, cell(r.platform), cell(r.model), r.in || 0, r.cw || 0, r.cr || 0, r.out || 0, r.msgs || 0, r.est ? 1 : 0, Pricing.cost(r.model, r).toFixed(4)].join(','));
+      lines.push([r.d, csvCell(r.platform), csvCell(r.model), r.in || 0, r.cw || 0, r.cr || 0, r.out || 0, r.msgs || 0, r.est ? 1 : 0, Pricing.cost(r.model, r).toFixed(4)].join(','));
     }
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
     const a = el('a', { href: URL.createObjectURL(blob), download: `ai-usage-${win.from}-to-${win.to}.csv` });
