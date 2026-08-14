@@ -305,9 +305,11 @@ export async function run({ browser, ok }) {
     csvCell('\tx'), csvCell('normal'), csvCell('has,comma'), csvCell('has"quote'),
   ]);
   ok('csv: formula prefixes neutralized',
-    cells[0] === `'=HYPERLINK("http://evil")` && cells[1] === "'+1" && cells[2] === "'-2" &&
+    cells[0] === '"\'=HYPERLINK(""http://evil"")"' && cells[1] === "'+1" && cells[2] === "'-2" &&
     cells[3] === "'@x" && cells[4] === "'\tx",
     JSON.stringify(cells));
+  // cells[0]: the payload contains quotes, so after apostrophe-prefixing, RFC-4180
+  // quoting wraps it and doubles the quotes — that IS the correct safe output.
   ok('csv: normal quoting intact',
     cells[5] === 'normal' && cells[6] === '"has,comma"' && cells[7] === '"has""quote"',
     JSON.stringify(cells));
