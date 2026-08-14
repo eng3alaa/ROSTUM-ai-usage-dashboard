@@ -20,6 +20,12 @@ export async function generate() {
          message: { id: 'm2', model: 'claude-fable-5', usage: { input_tokens: 10, output_tokens: 20 } } }),
   ].join('\n');
   fs.writeFileSync(path.join(OUT, 'claude-logs', 'projects', '-D--proj1', 'sess-aaa.jsonl'), sess);
+
+  fs.writeFileSync(path.join(OUT, 'generic-badnums.csv'),
+    'date,platform,model,input_tokens,output_tokens,cost\n' +
+    '2026-08-10,Gemini,gemini-3.5-flash,100,1e309,0.5\n' +      // Infinity output
+    '2026-08-10,Gemini,gemini-3.5-flash,12junk,50,abc\n' +      // garbage number, garbage cost
+    '2026-08-11,Gemini,gemini-3.5-flash,-40,60,-0.25\n');       // negative tokens (reject), negative cost (allow: credit)
 }
 
 if (process.argv[1] === import.meta.filename) await generate();

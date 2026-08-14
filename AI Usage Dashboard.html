@@ -987,9 +987,18 @@ function parseGenericCSV(text) {
     const model = iModel >= 0 && c[iModel] ? c[iModel].trim() : 'unknown';
     let platform = iPlat >= 0 && c[iPlat] ? c[iPlat].trim() : '';
     if (!platform) platform = /gemini/i.test(model) ? 'Gemini' : 'Other';
-    const num = (i) => i >= 0 ? (parseFloat(String(c[i]).replace(/[,$]/g, '')) || 0) : 0;
+    const num = (i) => {                       // counts: finite and non-negative only
+      if (i < 0) return 0;
+      const v = Number(String(c[i]).replace(/[,$\s]/g, ''));
+      return Number.isFinite(v) && v >= 0 ? v : 0;
+    };
+    const numSigned = (i) => {                 // money: finite, negatives allowed (credits)
+      if (i < 0) return 0;
+      const v = Number(String(c[i]).replace(/[,$\s]/g, ''));
+      return Number.isFinite(v) ? v : 0;
+    };
     agg.add(d, platform, model, { in: num(iIn), out: num(iOut), cr: num(iCr), cw: num(iCw), msgs: iMsgs >= 0 ? num(iMsgs) : 1 });
-    if (iCost >= 0 && c[iCost] !== '') billed.set(d, (billed.get(d) || 0) + num(iCost));
+    if (iCost >= 0 && c[iCost] !== '') billed.set(d, (billed.get(d) || 0) + numSigned(iCost));
   }
   return { rows: agg.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })), meta: { rows: rows.length - 1 } };
 }
