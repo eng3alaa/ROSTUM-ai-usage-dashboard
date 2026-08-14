@@ -410,7 +410,7 @@ git add -A && git commit -m "fix: neutralize spreadsheet formula prefixes in CSV
     JSON.stringify(parsed));
 ```
 
-- [ ] **Step 3: Run to verify the new checks fail** (`1e309` currently becomes `Infinity`; `-40` is accepted):
+- [ ] **Step 3: Run to verify the token check fails** (`1e309` currently becomes `Infinity`; `-40` is accepted → expect 8/9, only the first new check red). The second new check (cost) passes even before the fix — it is a deliberate stays-green guard proving the fix must NOT route the cost column through the non-negative validator (credits stay negative):
 
 ```bash
 node tests/run.mjs
