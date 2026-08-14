@@ -2061,6 +2061,7 @@ const App = {
       status.appendChild(document.createTextNode(`${usage.rows.length} usage rows${cost && cost.length ? ' + billed costs' : ''} · updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`));
       this.render();
     } catch (e) {
+      if (gen !== this._gen.anthropic) return;   // superseded by a newer fetch
       status.textContent = '';
       status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
       status.appendChild(document.createTextNode((e.message || String(e)) + ' — if this is a CORS/network block, use the PowerShell fallback below.'));
@@ -2086,6 +2087,7 @@ const App = {
       status.appendChild(document.createTextNode(`${usage.rows.length} usage rows${cost && cost.length ? ' + billed costs' : ''} · updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`));
       this.render();
     } catch (e) {
+      if (gen !== this._gen.openai) return;   // superseded by a newer fetch
       status.textContent = '';
       status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
       status.appendChild(document.createTextNode((e.message || String(e)) + ' — if this is a CORS/network block, use the PowerShell fallback below.'));
