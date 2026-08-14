@@ -605,6 +605,13 @@ const dayKey = (dateish) => {
   return `${y}-${m}-${dd}`;
 };
 const todayKey = () => dayKey(new Date());
+/* UTC variant — for provider day-buckets (which are UTC days), never for local timestamps */
+const dayKeyUTC = (dateish) => {
+  const d = dateish instanceof Date ? dateish : new Date(dateish);
+  if (isNaN(d)) return null;
+  return d.toISOString().slice(0, 10);
+};
+const RE_DATEONLY = /^\d{4}-\d{2}-\d{2}$/;
 const addDays = (key, n) => { const d = new Date(key + 'T12:00:00'); d.setDate(d.getDate() + n); return dayKey(d); };
 const dayRange = (from, to) => { const out = []; let k = from; let guard = 0; while (k <= to && guard++ < 4000) { out.push(k); k = addDays(k, 1); } return out; };
 const fmtDayShort = (key) => { const d = new Date(key + 'T12:00:00'); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
@@ -982,7 +989,8 @@ function parseGenericCSV(text) {
   const billed = new Map();
   for (let r = 1; r < rows.length; r++) {
     const c = rows[r];
-    const d = dayKey(c[iDate]);
+    const rawDate = String(c[iDate] || '').trim();
+    const d = RE_DATEONLY.test(rawDate) ? rawDate : dayKey(rawDate);
     if (!d) continue;
     const model = iModel >= 0 && c[iModel] ? c[iModel].trim() : 'unknown';
     let platform = iPlat >= 0 && c[iPlat] ? c[iPlat].trim() : '';
@@ -1011,7 +1019,7 @@ function parseAnthropicUsage(payload) {
   const data = payload && payload.data;
   if (!Array.isArray(data)) throw new Error('Not an Anthropic usage report');
   for (const bucket of data) {
-    const d = dayKey(bucket.starting_at || bucket.ending_at);
+    const d = dayKeyUTC(bucket.starting_at || bucket.ending_at);
     for (const r of bucket.results || []) {
       const model = r.model || 'claude (all models)';
       let cw = 0;
@@ -1034,7 +1042,7 @@ function parseAnthropicCost(payload) {
   const data = payload && payload.data;
   if (!Array.isArray(data)) throw new Error('Not an Anthropic cost report');
   for (const bucket of data) {
-    const d = dayKey(bucket.starting_at || bucket.ending_at);
+    const d = dayKeyUTC(bucket.starting_at || bucket.ending_at);
     for (const r of bucket.results || []) {
       let amt = 0;
       if (r.amount && typeof r.amount === 'object') amt = parseFloat(r.amount.value) || 0;
@@ -1050,7 +1058,7 @@ function parseOpenAIUsage(payload) {
   const data = payload && payload.data;
   if (!Array.isArray(data)) throw new Error('Not an OpenAI usage report');
   for (const bucket of data) {
-    const d = dayKey((bucket.start_time || bucket.end_time) * 1000);
+    const d = dayKeyUTC((bucket.start_time || bucket.end_time) * 1000);
     for (const r of bucket.results || []) {
       const model = r.model || 'openai (all models)';
       const cached = r.input_cached_tokens || 0;
@@ -1072,7 +1080,7 @@ function parseOpenAICost(payload) {
   const data = payload && payload.data;
   if (!Array.isArray(data)) throw new Error('Not an OpenAI costs report');
   for (const bucket of data) {
-    const d = dayKey((bucket.start_time || bucket.end_time) * 1000);
+    const d = dayKeyUTC((bucket.start_time || bucket.end_time) * 1000);
     for (const r of bucket.results || []) {
       const amt = r.amount ? (parseFloat(r.amount.value) || 0) : 0;
       billed.set(d, (billed.get(d) || 0) + amt);
