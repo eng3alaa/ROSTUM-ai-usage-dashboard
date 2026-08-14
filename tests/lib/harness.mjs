@@ -1,0 +1,42 @@
+import puppeteer from 'puppeteer-core';
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
+import fs from 'node:fs';
+
+const ROOT = path.resolve(import.meta.dirname, '..', '..');
+export const DASH = path.join(ROOT, 'AI Usage Dashboard.html');
+export const OUT = path.join(import.meta.dirname, '..', 'fixtures', 'out');
+
+export function findBrowser() {
+  const cands = [
+    process.env.CHROME_PATH,
+    'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  ].filter(Boolean);
+  for (const c of cands) if (fs.existsSync(c)) return c;
+  throw new Error('No Chrome/Edge found - set CHROME_PATH');
+}
+
+export async function launch() {
+  return puppeteer.launch({ executablePath: findBrowser(), headless: 'new' });
+}
+
+/** Open the dashboard in a fresh page. opts: {tz, seedData} */
+export async function openDashboard(browser, opts = {}) {
+  const page = await browser.newPage();
+  if (opts.tz) await page.emulateTimezone(opts.tz);
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  const url = pathToFileURL(DASH).href;
+  await page.goto(url, { waitUntil: 'load' });
+  if (opts.seedData) {
+    await page.evaluate((data) => localStorage.setItem('aiusage:data', JSON.stringify(data)), opts.seedData);
+    await page.reload({ waitUntil: 'load' });
+  }
+  return { page, errors };
+}
+
+export function readFixture(name) {
+  return fs.readFileSync(path.join(OUT, name), 'utf8');
+}
