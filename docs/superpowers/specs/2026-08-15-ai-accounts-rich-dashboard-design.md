@@ -182,7 +182,16 @@ Non-blocking findings from the final whole-branch review of v1.1, accepted as Pl
 7. **scanHandle catch gen-guard**: fetch error paths are gen-guarded; the folder-scan catch is not (low risk, same category). — DONE (Plan 2)
 8. **Soft-fail race check**: the import-vs-fetch gen guard is covered by a hard-reject check; add a usage-OK-cost-null variant to pin the soft-fail path explicitly (mechanism verified manually in the final review). — DONE (Plan 2 T10 pin)
 9. **Superseded-fetch status text**: when an import supersedes an in-flight fetch, the fetch bails before updating its status line, leaving "Fetching usage…" stuck (cosmetic; data correct). Reset or annotate the status on bail; the accounts-hub card states in v2 subsume this. — DONE (Plan 2 T10), with one residual cosmetic case for Plan 3: two overlapping fetches on the SAME connector — the older bail can blank the newer's in-flight placeholder (self-heals on resolve).
-10. **Drill-down persistence** (Plan 2 T9 review): drill-down mutates hiddenPlatforms without persisting to LS, unlike chip toggles — decide in Plan 3 whether ephemeral is intended (likely yes: document it) or persist for consistency.
+10. **Drill-down persistence** (Plan 2 T9 review): drill-down mutates hiddenPlatforms without persisting to LS, unlike chip toggles — decide in Plan 3 whether ephemeral is intended (likely yes: document it) or persist for consistency. Known leak path: a chip click AFTER a drill persists the drill-derived hide set.
+
+Recorded scope notes and deferred minors from the Plan 2 final integration review (all Plan 3 work):
+
+11. **Platform detail panel**: the spec's drill-down section promises a detail panel; Plan 2 shipped filter-drill only. The panel belongs with Plan 3's insights work.
+12. **Fallback auto-expand on CORS failure** (spec Connect modal section): not yet wired for the new connectors (all three are browser-callable; revisit only if real-world blocks appear). The registry also simplified the spec's function-valued `validate/fetch/capabilities` fields into a data table + `fetchMethod` string — record as the accepted design.
+13. **Color slots**: 9 platforms now exceed the 8 accessible series slots — an `Other`-bucket collision can render two gray "Other" legend entries. Plan 3's chart work should widen the palette or fold overflow honestly.
+14. **Hidden source cards**: connected Gemini/Copilot/OpenRouter cards stay hidden in the Data sources section (reachable only via hub Manage) — decide whether to reveal on connect or remove the legacy section once the hub fully replaces it.
+15. **Scan meta diagnostics**: `parseClaudeLogsCached` drops `lines`/`badLines` from meta — restore malformed-line reporting through the cached path.
+16. **ScanCache eviction**: `scan:` IDB entries are never pruned; edited files orphan old signatures. Add pruning on rescan or clear-data.
 
 ## Acceptance criteria
 
