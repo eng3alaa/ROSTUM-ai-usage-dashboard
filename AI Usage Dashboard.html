@@ -141,6 +141,27 @@ input[type="date"], input[type="text"], input[type="password"], select {
 .chip[aria-pressed="true"] { color: var(--ink); border-color: var(--baseline); box-shadow: inset 0 0 0 1px var(--baseline); }
 .chip[aria-pressed="false"] { opacity: .45; }
 
+/* ============ Accounts hub ============ */
+#accounts-hub { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.acct { background: var(--surface-1); border: 1px solid var(--border); border-left: 3px solid var(--acct-brand, var(--border));
+        border-radius: 8px; padding: 10px 12px; cursor: pointer; }
+.acct:hover { border-color: var(--baseline); border-left-color: var(--acct-brand, var(--baseline)); }
+.acct-head { display: flex; align-items: center; gap: 8px; }
+.acct .mark { width: 26px; height: 26px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center;
+              font-size: 11px; font-weight: 700; color: #fff; background: var(--acct-brand, var(--other)); flex: none; }
+.acct-name { font-weight: 650; font-size: 13px; margin-right: auto; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--other); flex: none; }
+.dot.ok { background: var(--good-text); } .dot.warn { background: var(--serious); } .dot.off { background: var(--other); }
+.acct-label, .acct-sync { color: var(--ink-2); font-size: 11.5px; margin-top: 4px; min-height: 14px; }
+.acct-stats { font-size: 12px; margin-top: 4px; }
+.acct-actions { display: flex; gap: 6px; margin-top: 8px; }
+#connector-modal { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); color: var(--ink);
+                   max-width: 560px; width: calc(100vw - 48px); padding: 16px; }
+#connector-modal::backdrop { background: rgba(0,0,0,0.45); }
+#connector-modal .modal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+#connector-modal .modal-close { margin-left: auto; }
+#connector-modal .card.src { border: 0; padding: 0; background: transparent; }
+
 /* ============ KPI row ============ */
 .kpis {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
@@ -324,6 +345,17 @@ progress { width: 160px; height: 8px; }
     </div>
   </div>
 
+  <!-- ================= Accounts hub ================= -->
+  <div id="accounts-hub" aria-label="AI accounts"></div>
+  <dialog id="connector-modal">
+    <div class="modal-head">
+      <span class="mark" id="modal-mark"></span>
+      <h2 id="modal-title"></h2>
+      <button class="btn small modal-close">Close</button>
+    </div>
+    <div id="modal-body"></div>
+  </dialog>
+
   <!-- ================= KPI row ================= -->
   <div class="kpis" id="kpis">
     <div class="tile hero">
@@ -431,7 +463,7 @@ progress { width: 160px; height: 8px; }
     <h2>Data sources</h2>
     <span class="hint">everything is parsed and stored in your browser only — nothing is uploaded anywhere</span>
   </div>
-  <div class="sources">
+  <div class="sources" id="sources">
 
     <div class="card src" id="src-local">
       <div class="card-head"><h2>Claude Code / Desktop (local logs)</h2><span class="badge">exact</span></div>
@@ -783,13 +815,24 @@ const Store = {
   sources: {},       // srcId -> { rows: [], meta: {} }
   billed: {},        // srcId -> {rows: [{d, amount}], at, stale} envelope (v1 arrays migrate on load)
   projects: [],      // [{name, msgs, in, cw, cr, out, cost}] from local logs
+  connectors: {},    // connectorId -> { label, lastSync, err }
   load() {
     const saved = LS.get('data', null);
-    if (saved) { this.sources = saved.sources || {}; this.billed = saved.billed || {}; this.projects = saved.projects || []; }
+    if (saved) { this.sources = saved.sources || {}; this.billed = saved.billed || {}; this.projects = saved.projects || []; this.connectors = saved.connectors || {}; }
     // migrate v1 billed arrays to {rows, at, stale} envelopes
     for (const [k, v] of Object.entries(this.billed)) {
       if (Array.isArray(v)) this.billed[k] = { rows: v, at: null, stale: false };
     }
+  },
+  setConnector(id, patch) { this.connectors[id] = { ...(this.connectors[id] || {}), ...patch }; this.persist(); },
+  connectorStatus(c) {
+    const st = this.connectors[c.id] || {};
+    const hasData = c.srcIds.some(id => this.sources[id]);
+    if (st.err) return 'warn';
+    if (!hasData && !st.lastSync) return 'off';
+    const ref = st.lastSync || Math.max(0, ...c.srcIds.map(id => (this.sources[id]?.meta?.updated) || 0));
+    if (ref && Date.now() - ref > 7 * 864e5) return 'warn';
+    return 'ok';
   },
   billedRows(id) {
     const v = this.billed[id];
@@ -802,7 +845,7 @@ const Store = {
     this.persist();
   },
   persist() {
-    try { LS.set('data', { sources: this.sources, billed: this.billed, projects: this.projects }); }
+    try { LS.set('data', { sources: this.sources, billed: this.billed, projects: this.projects, connectors: this.connectors }); }
     catch (e) { console.warn('persist failed', e); }
   },
   compactRows(rows) {
@@ -819,7 +862,7 @@ const Store = {
     return keep.concat([...merge.values()]);
   },
   setSource(id, rows, meta) { this.sources[id] = { rows: this.compactRows(rows), meta: { ...meta, updated: Date.now() } }; this.persist(); },
-  clearAll() { this.sources = {}; this.billed = {}; this.projects = []; LS.del('data'); },
+  clearAll() { this.sources = {}; this.billed = {}; this.projects = []; this.connectors = {}; LS.del('data'); },
   allRows() {
     const localSids = new Set(((this.sources.local || {}).rows || []).map(r => r.sid).filter(Boolean));
     return Object.entries(this.sources).flatMap(([id, s]) => {
@@ -1738,6 +1781,7 @@ const App = {
 
     this.renderChips();
     this.renderKPIs(win, rows, days);
+    this.renderHub();
     this.renderDaily(days, rows, metric, hasEst);
     this.renderModels(rows, metric);
     this.renderShare(rows, metric);
@@ -1756,6 +1800,74 @@ const App = {
       ? `Data ${span.min || '—'} → ${span.max || '—'} · sources: ${srcNames.join(', ')} · rendered ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
       : 'No data yet — connect a source below.';
   },
+
+  /* ---------- accounts hub ---------- */
+  renderHub() {
+    const hub = $('accounts-hub');
+    clear(hub);
+    const win30 = { from: addDays(todayKey(), -29), to: this.window().to };
+    for (const c of CONNECTORS) {
+      const st = Store.connectors[c.id] || {};
+      const status = Store.connectorStatus(c);
+      const rows = Store.allRows().filter(r => c.srcIds.includes('csv') || !c.platform ? c.srcIds.some(sid => (Store.sources[sid]?.rows || []).includes(r)) : r.platform === c.platform)
+        .filter(r => r.d >= win30.from && r.d <= win30.to);
+      let tok = 0, cost = 0;
+      for (const r of rows) { tok += (r.in||0)+(r.cw||0)+(r.cr||0)+(r.out||0); cost += Pricing.cost(r.model, r); }
+      const card = el('div', { class: 'acct', 'data-connector': c.id, style: { '--acct-brand': c.brand }, tabindex: 0, role: 'button',
+        'aria-label': `${c.name}: ${status === 'ok' ? 'connected' : status === 'warn' ? 'needs attention' : 'not connected'}` },
+        el('div', { class: 'acct-head' },
+          el('span', { class: 'mark', text: c.mark }),
+          el('span', { class: 'acct-name', text: c.name }),
+          el('span', { class: 'dot ' + status })),
+        el('div', { class: 'acct-label', text: st.err ? ('⚠ ' + st.err) : (st.label || (status === 'off' ? 'Not connected' : '')) }),
+        el('div', { class: 'acct-sync', text: st.lastSync ? ('Synced ' + new Date(st.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : '' }),
+        el('div', { class: 'acct-stats', text: rows.length ? `${fmtCompact(tok)} tokens · ${fmtUSD(cost)} (30d)` : '' }),
+        el('div', { class: 'acct-actions' },
+          el('button', { class: 'btn small acct-manage', text: status === 'off' ? 'Connect' : 'Manage', onclick: (e) => { e.stopPropagation(); this.openConnectorModal(c.id); } }),
+          status !== 'off' && c.id !== 'imports' ? el('button', { class: 'btn small acct-sync-btn', text: 'Sync', onclick: (e) => { e.stopPropagation(); this.syncConnector(c.id); } }) : null,
+          status !== 'off' ? el('button', { class: 'btn small', text: 'Disconnect', onclick: (e) => { e.stopPropagation(); this.disconnectConnector(c.id); } }) : null));
+      card.addEventListener('click', () => this.drillDown(c));
+      card.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.drillDown(c); });
+      hub.appendChild(card);
+    }
+  },
+
+  openConnectorModal(id) {
+    const c = connectorById(id);
+    const dlg = $('connector-modal');
+    $('modal-title').textContent = c.name;
+    $('modal-mark').textContent = c.mark;
+    $('modal-mark').style.background = c.brand;
+    const src = document.getElementById('src-' + (id === 'imports' ? 'import' : id));
+    if (src) { this._modalHome = src.parentNode; src.hidden = false; $('modal-body').appendChild(src); }
+    dlg.showModal();
+  },
+  closeConnectorModal() {
+    const dlg = $('connector-modal');
+    const src = $('modal-body').firstElementChild;
+    if (src && this._modalHome) { this._modalHome.appendChild(src); if (/^src-(gemini|copilot|openrouter)$/.test(src.id) && !Store.connectors[src.id.slice(4)]) src.hidden = true; }
+    dlg.close();
+  },
+  syncConnector(id) {
+    if (id === 'local') return this.rescan();
+    const c = connectorById(id);
+    const fn = c && c.fetchMethod && this[c.fetchMethod];
+    if (typeof fn === 'function') return fn.call(this);
+  },
+  disconnectConnector(id) {
+    const c = connectorById(id);
+    if (c.keyLS) LS.del(c.keyLS);
+    const keyInput = document.getElementById(id + '-key'); if (keyInput) keyInput.value = '';
+    delete Store.connectors[id];
+    if (confirm(`Also delete ${c.name}'s stored usage data? OK = delete, Cancel = keep the data.`)) {
+      for (const sid of c.srcIds) delete Store.sources[sid];
+      for (const sid of c.srcIds) delete Store.billed[sid];
+    }
+    Store.persist();
+    this.render();
+  },
+
+  drillDown() {}, // Task 9 fills this in
 
   /* ---------- platform chips ---------- */
   renderChips() {
@@ -2113,6 +2225,7 @@ const App = {
       if (gen !== this._gen.local) return;   // superseded by a newer scan
       Store.projects = res.projects;
       Store.setSource('local', res.rows, res.meta);
+      Store.setConnector('local', { label: res.meta.files + ' log files', lastSync: Date.now(), err: null });
       $('rescan-local').hidden = false;
       status.textContent = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
@@ -2181,12 +2294,14 @@ const App = {
       if (gen !== this._gen.anthropic) return;   // superseded by a newer fetch
       Store.setSource('anthropic', usage.rows, { days });
       Store.setBilled('anthropic', cost);
+      Store.setConnector('anthropic', { label: 'Admin key ·  last 4: ' + key.slice(-4), lastSync: Date.now(), err: null });
       status.textContent = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
       status.appendChild(document.createTextNode(`${usage.rows.length} usage rows${cost && cost.length ? ' + billed costs' : ''} · updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`));
       this.render();
     } catch (e) {
       if (gen !== this._gen.anthropic) return;   // superseded by a newer fetch
+      Store.setConnector('anthropic', { err: (e.message || String(e)).slice(0, 80) });
       status.textContent = '';
       status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
       status.appendChild(document.createTextNode((e.message || String(e)) + ' — if this is a CORS/network block, use the PowerShell fallback below.'));
@@ -2207,12 +2322,14 @@ const App = {
       if (gen !== this._gen.openai) return;   // superseded by a newer fetch
       Store.setSource('openai', usage.rows, { days });
       Store.setBilled('openai', cost);
+      Store.setConnector('openai', { label: 'Admin key ·  last 4: ' + key.slice(-4), lastSync: Date.now(), err: null });
       status.textContent = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
       status.appendChild(document.createTextNode(`${usage.rows.length} usage rows${cost && cost.length ? ' + billed costs' : ''} · updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`));
       this.render();
     } catch (e) {
       if (gen !== this._gen.openai) return;   // superseded by a newer fetch
+      Store.setConnector('openai', { err: (e.message || String(e)).slice(0, 80) });
       status.textContent = '';
       status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
       status.appendChild(document.createTextNode((e.message || String(e)) + ' — if this is a CORS/network block, use the PowerShell fallback below.'));
@@ -2294,6 +2411,7 @@ const App = {
     }
     clear(status);
     for (const n of notes) status.appendChild(el('div', { text: n }));
+    Store.setConnector('imports', { label: notes.length + ' file(s) imported', lastSync: Date.now() });
     this.render();
   },
 
@@ -2471,6 +2589,8 @@ const App = {
     for (const ev of ['dragover', 'dragenter']) dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('drag'); });
     for (const ev of ['dragleave', 'drop']) dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove('drag'); });
     dz.addEventListener('drop', (e) => { if (e.dataTransfer.files.length) this.handleImportFiles([...e.dataTransfer.files]); });
+
+    $('connector-modal').querySelector('.modal-close').addEventListener('click', () => this.closeConnectorModal());
 
     $('clear-data').addEventListener('click', () => {
       if (confirm('Clear all stored usage data from this browser? (Price edits and keys are kept.)')) {
