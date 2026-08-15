@@ -34,7 +34,10 @@ export async function run({ browser, ok }) {
       const orig = Storage.prototype.setItem;
       Storage.prototype.setItem = () => { throw new DOMException('quota', 'QuotaExceededError'); };
       try { LS.set('probe', { x: 1 }); } finally { Storage.prototype.setItem = orig; }
-      return document.body.textContent.includes('storage is full');
+      const banner = document.getElementById('storage-warning');
+      const textOk = document.body.textContent.includes('storage is full');
+      const styledOk = !!banner && getComputedStyle(banner).color !== getComputedStyle(document.body).color;
+      return textOk && styledOk;
     });
     ok('storage: quota failure surfaces in the UI', quotaSurfaced, '');
 
