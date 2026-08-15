@@ -979,6 +979,38 @@ async function parseClaudeLogs(files, onProgress) {
   return { rows: agg.rows(), projects, meta: { files: jsonl.length, msgs, lines, badLines } };
 }
 
+/** Incremental wrapper: per-file aggregates cached by (path, size, lastModified).
+ *  cache: Map (tests) or the IDB-backed ScanCache (app). Reuses parseClaudeLogs per file. */
+async function parseClaudeLogsCached(files, onProgress, cache) {
+  const rows = [], projects = [];
+  let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0;
+  for (const f of files) {
+    const sig = f.path + '\u0001' + f.file.size + '\u0001' + f.file.lastModified;
+    let entry = cache ? await cache.get(sig) : null;
+    if (!entry) {
+      const res = await parseClaudeLogs([f], null);
+      entry = { rows: res.rows, projects: res.projects, msgs: res.meta.msgs };
+      if (cache) await cache.set(sig, entry);
+      parsedFiles++;
+    } else cachedFiles++;
+    rows.push(...entry.rows); projects.push(...entry.projects); msgs += entry.msgs;
+    done++; if (onProgress) onProgress(done, files.length);
+  }
+  // merge project rows across files (same shape as parseClaudeLogs' projMap)
+  const pm = new Map();
+  for (const p of projects) {
+    const k = p.project + '\u0001' + p.model;
+    let b = pm.get(k);
+    if (!b) { b = { ...p }; pm.set(k, b); } else { b.in += p.in; b.cw += p.cw; b.cr += p.cr; b.out += p.out; b.msgs += p.msgs; }
+  }
+  return { rows, projects: [...pm.values()], meta: { files: files.length, msgs, parsedFiles, cachedFiles } };
+}
+
+const ScanCache = {
+  async get(sig) { try { return await IDB.get('scan:' + sig); } catch { return null; } },
+  async set(sig, entry) { try { await IDB.set('scan:' + sig, entry); } catch {} },
+};
+
 /* =================================================================
  * 2) Chat exports (ChatGPT / Claude.ai conversations.json)
  *    Token estimate: chars/4; input = full prior context re-sent per
@@ -2076,7 +2108,7 @@ const App = {
       prog.hidden = false; prog.value = 0; prog.max = files.length;
       document.querySelectorAll('.card').forEach(c => c.classList.add('stale'));
       const gen = ++this._gen.local;
-      const res = await parseClaudeLogs(files, (done) => { prog.value = done; });
+      const res = await parseClaudeLogsCached(files, (done) => { prog.value = done; }, ScanCache);
       if (gen !== this._gen.local) return;   // superseded by a newer scan
       Store.projects = res.projects;
       Store.setSource('local', res.rows, res.meta);
@@ -2408,7 +2440,7 @@ const App = {
       prog.hidden = false; prog.value = 0; prog.max = 1;
       status.textContent = 'Scanning…';
       try {
-        const res = await parseClaudeLogs(files, (d, t) => { prog.max = t; prog.value = d; });
+        const res = await parseClaudeLogsCached(files, (d, t) => { prog.max = t; prog.value = d; }, ScanCache);
         Store.projects = res.projects;
         Store.setSource('local', res.rows, res.meta);
         status.textContent = '';
