@@ -546,7 +546,18 @@ progress { width: 160px; height: 8px; }
       <div class="status" id="copilot-status">Not connected.</div>
     </div>
 
-    <div class="card src" id="src-openrouter" hidden><div class="status" id="openrouter-status"></div></div>
+    <div class="card src" id="src-openrouter" hidden>
+      <div class="card-head"><h2>OpenRouter</h2><span class="badge">credits + activity</span></div>
+      <div class="desc">One key covers every model you route through OpenRouter (DeepSeek, Grok, Mistral…). Pulls your key label, credit balance, and daily per-model activity. Get a key at <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai/settings/keys</a>.</div>
+      <div class="row">
+        <input type="password" id="openrouter-key" placeholder="sk-or-…" autocomplete="off">
+        <button class="btn primary" id="fetch-openrouter">Validate &amp; connect</button>
+      </div>
+      <div class="row">
+        <label class="inline"><input type="checkbox" id="remember-openrouter"> Remember key on this computer</label>
+      </div>
+      <div class="status" id="openrouter-status">Not connected.</div>
+    </div>
 
     <div class="card src" id="src-import">
       <div class="card-head"><h2>Imports</h2><span class="badge">ChatGPT · Claude.ai · Gemini · CSV</span></div>
@@ -1342,6 +1353,26 @@ async function fetchCopilotAll(token) {
   }
   return { login: user.login, hadUsage: items !== null,
     rows: agg2.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })) };
+}
+
+async function fetchOpenRouterAll(key) {
+  const h = { 'Authorization': 'Bearer ' + key };
+  const info = await fetchJSON('https://openrouter.ai/api/v1/key', h);
+  let credits = null;
+  try { credits = (await fetchJSON('https://openrouter.ai/api/v1/credits', h)).data || null; } catch (e) { console.warn('openrouter credits unavailable', e); }
+  let rows = [], billed = [], hadActivity = false;
+  try {
+    const act = await fetchJSON('https://openrouter.ai/api/v1/activity', h);
+    hadActivity = true;
+    const agg2 = makeAgg(); const bm = new Map();
+    for (const a of act.data || []) {
+      const d = String(a.date || '').slice(0, 10);
+      agg2.add(d, 'OpenRouter', a.model || 'openrouter', { in: finTok(a.prompt_tokens), out: finTok(a.completion_tokens), msgs: finTok(a.requests) });
+      bm.set(d, (bm.get(d) || 0) + finAmt(a.usage || 0));
+    }
+    rows = agg2.rows(); billed = [...bm.entries()].map(([d, amount]) => ({ d, amount }));
+  } catch (e) { console.warn('openrouter activity unavailable', e); }
+  return { label: (info.data && info.data.label) || 'OpenRouter key', credits, rows, billed, hadActivity };
 }
 
 async function fetchAnthropicAll(key, days) {
@@ -2442,6 +2473,35 @@ const App = {
     }
   },
 
+  async fetchOpenrouter() {
+    const gen = ++this._gen.openrouter;
+    const key = $('openrouter-key').value.trim();
+    const status = $('openrouter-status');
+    if (!key) { status.textContent = 'Paste an OpenRouter API key first (sk-or-…).'; return; }
+    if ($('remember-openrouter') && $('remember-openrouter').checked) LS.set('key:openrouter', key);
+    status.textContent = 'Fetching…';
+    try {
+      const res = await fetchOpenRouterAll(key);
+      if (gen !== this._gen.openrouter) return;
+      Store.setConnector('openrouter', { label: res.label, lastSync: Date.now(), err: null });
+      if (res.rows.length) { Store.setSource('openrouter', res.rows, {}); Store.setBilled('openrouter', res.billed); }
+      const creditsNote = res.credits ? ` · ${fmtUSD((res.credits.total_credits || 0) - (res.credits.total_usage || 0))} credits left` : '';
+      status.textContent = '';
+      status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
+      status.appendChild(document.createTextNode(res.rows.length
+        ? `${res.rows.length} daily activity rows${creditsNote}`
+        : `validated${creditsNote} — daily activity not available for this key type`));
+      this.render();
+    } catch (e) {
+      if (gen !== this._gen.openrouter) return;
+      Store.setConnector('openrouter', { err: (e.message || String(e)).slice(0, 80) });
+      status.textContent = '';
+      status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
+      status.appendChild(document.createTextNode(e.message || String(e)));
+      this.render();
+    }
+  },
+
   async handleImportFiles(files) {
     const status = $('import-status');
     clear(status);
@@ -2693,6 +2753,10 @@ const App = {
     $('fetch-copilot').addEventListener('click', () => this.fetchCopilot());
     const cpk = LS.get('key:copilot', null); if (cpk) { $('copilot-key').value = cpk; $('remember-copilot').checked = true; }
     $('remember-copilot').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:copilot'); else if ($('copilot-key').value) LS.set('key:copilot', $('copilot-key').value.trim()); });
+
+    $('fetch-openrouter').addEventListener('click', () => this.fetchOpenrouter());
+    const ork = LS.get('key:openrouter', null); if (ork) { $('openrouter-key').value = ork; $('remember-openrouter').checked = true; }
+    $('remember-openrouter').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:openrouter'); else if ($('openrouter-key').value) LS.set('key:openrouter', $('openrouter-key').value.trim()); });
     this.updatePSCommands();
 
     // imports

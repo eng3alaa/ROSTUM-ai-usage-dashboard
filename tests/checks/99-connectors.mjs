@@ -59,6 +59,46 @@ export async function run({ browser, ok }) {
     ok('copilot: usage endpoint missing degrades to validated-only, no error state',
       cpNoUsage.label === 'alaa-dev' && cpNoUsage.err === null && /no usage data|validated/i.test(cpNoUsage.statusText),
       JSON.stringify(cpNoUsage));
+
+    const or = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      window.fetchJSON = async (url) => {
+        const u = String(url);
+        if (u.endsWith('/api/v1/key')) return { data: { label: 'rostum-key', usage: 12.5, limit: null } };
+        if (u.endsWith('/api/v1/credits')) return { data: { total_credits: 50, total_usage: 12.5 } };
+        if (u.endsWith('/api/v1/activity')) return { data: [
+          { date: '2026-08-10', model: 'deepseek/deepseek-v4', usage: 0.42, requests: 12, prompt_tokens: 90000, completion_tokens: 12000 },
+          { date: '2026-08-11', model: 'x-ai/grok-5', usage: 1.1, requests: 4, prompt_tokens: 30000, completion_tokens: 9000 },
+        ] };
+        throw new Error('unexpected ' + u);
+      };
+      document.getElementById('openrouter-key').value = 'sk-or-test';
+      await App.fetchOpenrouter();
+      const rows = Store.sources.openrouter.rows;
+      return { label: Store.connectors.openrouter.label, n: rows.length,
+        in: rows.reduce((a, r) => a + r.in, 0), out: rows.reduce((a, r) => a + r.out, 0),
+        billed: Store.billedRows('openrouter').reduce((a, b) => a + b.amount, 0),
+        statusText: document.getElementById('openrouter-status').textContent };
+    });
+    ok('openrouter: key label + daily activity rows + billed per day + credits note',
+      or.label === 'rostum-key' && or.n === 2 && or.in === 120000 && or.out === 21000 &&
+      Math.abs(or.billed - 1.52) < 1e-9 && /37\.50|credits/i.test(or.statusText), JSON.stringify(or));
+
+    const orNoActivity = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      window.fetchJSON = async (url) => {
+        const u = String(url);
+        if (u.endsWith('/api/v1/key')) return { data: { label: 'rostum-key' } };
+        if (u.endsWith('/api/v1/credits')) return { data: { total_credits: 50, total_usage: 12.5 } };
+        throw new Error('HTTP 403 — activity requires provisioning key');
+      };
+      await App.fetchOpenrouter();
+      return { err: Store.connectors.openrouter.err || null, hasSrc: !!Store.sources.openrouter,
+        statusText: document.getElementById('openrouter-status').textContent };
+    });
+    ok('openrouter: activity denied degrades to credits-only, no error state',
+      orNoActivity.err === null && !orNoActivity.hasSrc && /credits/i.test(orNoActivity.statusText),
+      JSON.stringify(orNoActivity));
   } finally {
     await page.close();
   }
