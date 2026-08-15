@@ -22,10 +22,22 @@ export async function launch() {
   return puppeteer.launch({ executablePath: findBrowser(), headless: true });
 }
 
-/** Open the dashboard in a fresh page. opts: {tz, seedData} */
+/** Open the dashboard in a fresh page. opts: {tz, seedData, clockAt} */
 export async function openDashboard(browser, opts = {}) {
   const page = await browser.newPage();
   if (opts.tz) await page.emulateTimezone(opts.tz);
+  if (opts.clockAt) {
+    await page.evaluateOnNewDocument((iso) => {
+      const RealDate = Date;
+      const offset = new RealDate(iso).getTime() - RealDate.now();
+      class ShimDate extends RealDate {
+        constructor(...args) { if (args.length === 0) super(RealDate.now() + offset); else super(...args); }
+        static now() { return RealDate.now() + offset; }
+      }
+      ShimDate.parse = RealDate.parse; ShimDate.UTC = RealDate.UTC;
+      window.Date = ShimDate;
+    }, opts.clockAt);
+  }
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });

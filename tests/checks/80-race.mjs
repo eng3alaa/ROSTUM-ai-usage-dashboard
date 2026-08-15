@@ -49,6 +49,30 @@ export async function run({ browser, ok }) {
     ok('race: stale failed fetch cannot overwrite newer status',
       !staleFail.status.includes('Fetch failed') && staleFail.model === 'NEW2',
       JSON.stringify(staleFail));
+
+    const importRace = await page.evaluate(async () => {
+      localStorage.removeItem('aiusage:data');
+      Store.sources = {}; Store.billed = {}; Store.projects = [];
+      window.fetchAnthropicAll = () => new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('simulated slow network failure')), 200));
+      document.getElementById('anthropic-key').value = 'sk-ant-admin-test';
+      const p = App.fetchAnthropic();
+      await new Promise((r) => setTimeout(r, 10));
+      await App.handleImportFiles([new File([JSON.stringify({
+        data: [{ starting_at: '2026-08-02T00:00:00Z', results: [{ amount: { value: '42', currency: 'USD' } }] }]
+      })], 'cost.json')]);
+      await Promise.allSettled([p]);
+      await new Promise((r) => setTimeout(r, 300));   // let the late in-flight fetch settle
+      const env = Store.billed.anthropic;
+      return {
+        stale: env ? env.stale : null,
+        amount: (Store.billedRows('anthropic')[0] || {}).amount,
+        status: document.getElementById('anthropic-status').textContent,
+      };
+    });
+    ok('race: import during in-flight fetch stays fresh',
+      importRace.stale === false && importRace.amount === 42 && !importRace.status.includes('Fetch failed'),
+      JSON.stringify(importRace));
   } finally {
     await page.close();
   }

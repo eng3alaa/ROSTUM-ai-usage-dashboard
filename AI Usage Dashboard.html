@@ -612,6 +612,9 @@ const dayKeyUTC = (dateish) => {
   if (isNaN(d)) return null;
   return d.toISOString().slice(0, 10);
 };
+/* Provider payload numbers are untrusted — reject Infinity/NaN/garbage before they reach totals */
+const finTok = (v) => Number.isFinite(v) && v >= 0 ? v : 0;   // counts: finite and non-negative only
+const finAmt = (v) => Number.isFinite(v) ? v : 0;              // money: finite, negatives allowed (credits)
 const RE_DATEONLY = /^\d{4}-\d{2}-\d{2}$/;
 const addDays = (key, n) => { const d = new Date(key + 'T12:00:00'); d.setDate(d.getDate() + n); return dayKey(d); };
 const dayRange = (from, to) => { const out = []; let k = from; let guard = 0; while (k <= to && guard++ < 4000) { out.push(k); k = addDays(k, 1); } return out; };
@@ -1055,6 +1058,7 @@ function parseGenericCSV(text) {
   if (iDate < 0 || (iIn < 0 && iOut < 0 && iCost < 0)) throw new Error('CSV needs at least: date + input_tokens/output_tokens (or cost_usd)');
   const agg = makeAgg();
   const billed = new Map();
+  let rejected = 0;   // non-empty cells coerced to 0 because they were non-finite/garbage/negative
   for (let r = 1; r < rows.length; r++) {
     const c = rows[r];
     const rawDate = String(c[iDate] || '').trim();
@@ -1065,18 +1069,26 @@ function parseGenericCSV(text) {
     if (!platform) platform = /gemini/i.test(model) ? 'Gemini' : 'Other';
     const num = (i) => {                       // counts: finite and non-negative only
       if (i < 0) return 0;
-      const v = Number(String(c[i]).replace(/[,$\s]/g, ''));
-      return Number.isFinite(v) && v >= 0 ? v : 0;
+      const raw = String(c[i]);
+      if (raw.trim() === '') return 0;
+      const v = Number(raw.replace(/[,$\s]/g, ''));
+      if (Number.isFinite(v) && v >= 0) return v;
+      rejected++;
+      return 0;
     };
     const numSigned = (i) => {                 // money: finite, negatives allowed (credits)
       if (i < 0) return 0;
-      const v = Number(String(c[i]).replace(/[,$\s]/g, ''));
-      return Number.isFinite(v) ? v : 0;
+      const raw = String(c[i]);
+      if (raw.trim() === '') return 0;
+      const v = Number(raw.replace(/[,$\s]/g, ''));
+      if (Number.isFinite(v)) return v;
+      rejected++;
+      return 0;
     };
     agg.add(d, platform, model, { in: num(iIn), out: num(iOut), cr: num(iCr), cw: num(iCw), msgs: iMsgs >= 0 ? num(iMsgs) : 1 });
     if (iCost >= 0 && c[iCost] !== '') billed.set(d, (billed.get(d) || 0) + numSigned(iCost));
   }
-  return { rows: agg.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })), meta: { rows: rows.length - 1 } };
+  return { rows: agg.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })), meta: { rows: rows.length - 1, rejected } };
 }
 
 /* =================================================================
@@ -1095,10 +1107,10 @@ function parseAnthropicUsage(payload) {
         cw = Object.values(r.cache_creation).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
       } else cw = r.cache_creation_input_tokens || 0;
       agg.add(d, 'Anthropic API', model, {
-        in: r.uncached_input_tokens ?? r.input_tokens ?? 0,
-        cw, cr: r.cache_read_input_tokens || 0,
-        out: r.output_tokens || 0,
-        msgs: r.num_requests || r.request_count || 0
+        in: finTok(r.uncached_input_tokens ?? r.input_tokens ?? 0),
+        cw: finTok(cw), cr: finTok(r.cache_read_input_tokens || 0),
+        out: finTok(r.output_tokens || 0),
+        msgs: finTok(r.num_requests || r.request_count || 0)
       });
     }
   }
@@ -1115,7 +1127,7 @@ function parseAnthropicCost(payload) {
       let amt = 0;
       if (r.amount && typeof r.amount === 'object') amt = parseFloat(r.amount.value) || 0;
       else amt = parseFloat(r.amount) || 0;
-      billed.set(d, (billed.get(d) || 0) + amt);
+      billed.set(d, (billed.get(d) || 0) + finAmt(amt));
     }
   }
   return [...billed.entries()].map(([d, amount]) => ({ d, amount })).sort((a, b) => a.d < b.d ? -1 : 1);
@@ -1129,14 +1141,14 @@ function parseOpenAIUsage(payload) {
     const d = dayKeyUTC((bucket.start_time || bucket.end_time) * 1000);
     for (const r of bucket.results || []) {
       const model = r.model || 'openai (all models)';
-      const cached = r.input_cached_tokens || 0;
-      const cw = r.input_cache_write_tokens || 0;
-      const inTotal = r.input_tokens || 0;
+      const cached = finTok(r.input_cached_tokens || 0);
+      const cw = finTok(r.input_cache_write_tokens || 0);
+      const inTotal = finTok(r.input_tokens || 0);
       agg.add(d, 'OpenAI API', model, {
         in: Math.max(0, inTotal - cached - cw),
         cr: cached, cw,
-        out: r.output_tokens || 0,
-        msgs: r.num_model_requests || 0
+        out: finTok(r.output_tokens || 0),
+        msgs: finTok(r.num_model_requests || 0)
       });
     }
   }
@@ -1150,7 +1162,7 @@ function parseOpenAICost(payload) {
   for (const bucket of data) {
     const d = dayKeyUTC((bucket.start_time || bucket.end_time) * 1000);
     for (const r of bucket.results || []) {
-      const amt = r.amount ? (parseFloat(r.amount.value) || 0) : 0;
+      const amt = finAmt(r.amount ? (parseFloat(r.amount.value) || 0) : 0);
       billed.set(d, (billed.get(d) || 0) + amt);
     }
   }
@@ -1615,13 +1627,17 @@ const App = {
 
   window() {
     const t = todayKey();
+    // provider rows are keyed by UTC calendar day; in UTC-negative zones during the local
+    // evening, "today" in UTC can already be one day ahead of local "today" — the upper
+    // bound must cover whichever calendar is further along, or freshest data disappears.
+    const tMax = (() => { const u = dayKeyUTC(new Date()); return u > t ? u : t; })();
     const span = Store.dateSpan();
     const f = this.filters;
     if (f.range === 'custom' && f.from && f.to) return { from: f.from, to: f.to };
-    if (f.range === 'mtd') return { from: t.slice(0, 8) + '01', to: t };
-    if (f.range === 'all') return { from: span.min || addDays(t, -29), to: span.max && span.max > t ? span.max : t };
+    if (f.range === 'mtd') return { from: t.slice(0, 8) + '01', to: tMax };
+    if (f.range === 'all') return { from: span.min || addDays(t, -29), to: span.max && span.max > tMax ? span.max : tMax };
     const n = parseInt(f.range, 10) || 30;
-    return { from: addDays(t, -(n - 1)), to: t };
+    return { from: addDays(t, -(n - 1)), to: tMax };
   },
 
   rowsIn(win) {
@@ -2157,7 +2173,8 @@ const App = {
             for (const b of res.billed) bm.set(b.d, b);           // re-import replaces same-day amounts
             Store.setBilled('csv', [...bm.values()].sort((a, b2) => a.d < b2.d ? -1 : 1));
           }
-          notes.push(`${f.name}: imported ${res.meta.rows} CSV rows (merged by day/platform/model)`);
+          notes.push(`${f.name}: imported ${res.meta.rows} CSV rows (merged by day/platform/model)`
+            + (res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric or negative)` : ''));
           continue;
         }
         const obj = JSON.parse(await f.text());
@@ -2172,16 +2189,20 @@ const App = {
           notes.push(`${f.name}: Claude.ai export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens)`);
         } else if (kind === 'anthropic-usage') {
           const res = parseAnthropicUsage(obj);
+          this._gen.anthropic++;   // an import supersedes any in-flight fetch — it must not overwrite this
           Store.setSource('anthropic', res.rows, {});
           notes.push(`${f.name}: Anthropic usage report — ${res.rows.length} rows`);
         } else if (kind === 'anthropic-cost') {
+          this._gen.anthropic++;   // an import supersedes any in-flight fetch — it must not overwrite this
           Store.setBilled('anthropic', parseAnthropicCost(obj));
           notes.push(`${f.name}: Anthropic billed costs imported`);
         } else if (kind === 'openai-usage') {
           const res = parseOpenAIUsage(obj);
+          this._gen.openai++;   // an import supersedes any in-flight fetch — it must not overwrite this
           Store.setSource('openai', res.rows, {});
           notes.push(`${f.name}: OpenAI usage report — ${res.rows.length} rows`);
         } else if (kind === 'openai-cost') {
+          this._gen.openai++;   // an import supersedes any in-flight fetch — it must not overwrite this
           Store.setBilled('openai', parseOpenAICost(obj));
           notes.push(`${f.name}: OpenAI billed costs imported`);
         } else if (kind === 'empty-report') {

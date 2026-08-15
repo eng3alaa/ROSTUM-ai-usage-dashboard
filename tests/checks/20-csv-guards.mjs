@@ -29,6 +29,18 @@ export async function run({ browser, ok }) {
     ok('csv: cost column allows negative (credits), rejects garbage',
       Math.abs(parsed.billed - 0.25) < 1e-9,            // 0.5 + 0 (abc) + (-0.25)
       JSON.stringify(parsed));
+
+    const rejectedMeta = await page.evaluate((text) => parseGenericCSV(text).meta.rejected, csv);
+    ok('csv: meta.rejected counts the 4 bad values (1e309, 12junk, abc, -40) — -0.25 is a valid credit',
+      rejectedMeta === 4, rejectedMeta);
+
+    const importNote = await page.evaluate(async (text) => {
+      localStorage.removeItem('aiusage:data');
+      Store.sources = {}; Store.billed = {}; Store.projects = [];
+      await App.handleImportFiles([new File([text], 'badnums.csv', { type: 'text/csv' })]);
+      return document.getElementById('import-status').textContent;
+    }, csv);
+    ok('csv: import status surfaces rejected-value count', importNote.includes('rejected'), importNote);
   } finally {
     await page.close();
   }
