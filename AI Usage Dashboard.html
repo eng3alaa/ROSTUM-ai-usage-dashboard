@@ -982,6 +982,7 @@ async function parseClaudeLogs(files, onProgress) {
 /** Incremental wrapper: per-file aggregates cached by (path, size, lastModified).
  *  cache: Map (tests) or the IDB-backed ScanCache (app). Reuses parseClaudeLogs per file. */
 async function parseClaudeLogsCached(files, onProgress, cache) {
+  files = files.filter(f => f.path.endsWith('.jsonl') && !/\/(todos|statsig)\//.test('/' + f.path));
   const rows = [], projects = [];
   let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0;
   for (const f of files) {
