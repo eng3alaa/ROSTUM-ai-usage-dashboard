@@ -636,7 +636,21 @@ const fmtDayShort = (key) => { const d = new Date(key + 'T12:00:00'); return d.t
 /* ---------- persistent settings ---------- */
 const LS = {
   get(k, fallback) { try { const v = localStorage.getItem('aiusage:' + k); return v == null ? fallback : JSON.parse(v); } catch { return fallback; } },
-  set(k, v) { try { localStorage.setItem('aiusage:' + k, JSON.stringify(v)); } catch (e) { console.warn('localStorage full?', e); } },
+  set(k, v) {
+    try { localStorage.setItem('aiusage:' + k, JSON.stringify(v)); }
+    catch (e) {
+      console.warn('localStorage full?', e);
+      // Dedicated banner — NOT #import-status, which handleImportFiles clears at the
+      // end of every import (Task 13), which would wipe a mid-import quota warning.
+      let s = document.getElementById('storage-warning');
+      if (!s) {
+        const wrap = document.querySelector('.wrap') || document.body;
+        s = el('div', { id: 'storage-warning', class: 'err', role: 'alert' });
+        wrap.insertBefore(s, wrap.firstChild);
+      }
+      s.textContent = 'Warning: browser storage is full — new data may not persist. Export a CSV backup, or Clear stored data.';
+    }
+  },
   del(k) { try { localStorage.removeItem('aiusage:' + k); } catch {} }
 };
 

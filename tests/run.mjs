@@ -16,6 +16,7 @@ try {
     const mod = await import(pathToFileURL(path.join(dir, f)).href);
     try {
       await mod.run({ browser, ok });
+      if (mod.postRun) await mod.postRun({ ok });
     } catch (err) {
       ok(f + ': threw', false, err && err.message || String(err));
     }

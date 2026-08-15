@@ -29,7 +29,38 @@ export async function run({ browser, ok }) {
              document.getElementById('anthropic-cmd').textContent.includes('SECRETSECRET');
     });
     ok('security: typed key never appears in DOM text', keyLeak === false, '');
+
+    const quotaSurfaced = await page.evaluate(() => {
+      const orig = Storage.prototype.setItem;
+      Storage.prototype.setItem = () => { throw new DOMException('quota', 'QuotaExceededError'); };
+      try { LS.set('probe', { x: 1 }); } finally { Storage.prototype.setItem = orig; }
+      return document.body.textContent.includes('storage is full');
+    });
+    ok('storage: quota failure surfaces in the UI', quotaSurfaced, '');
+
+    // Interplay guard (from Task 13 review): a quota failure DURING an import fires before
+    // handleImportFiles' clear(status) — the warning must survive because it lives in a
+    // dedicated #storage-warning banner, not in #import-status.
+    const quotaSurvivesImport = await page.evaluate(async () => {
+      document.getElementById('storage-warning')?.remove();
+      const orig = Storage.prototype.setItem;
+      Storage.prototype.setItem = () => { throw new DOMException('quota', 'QuotaExceededError'); };
+      try {
+        const csv = 'date,platform,model,input_tokens\n2026-08-10,Gemini,gemini-3,5\n';
+        await App.handleImportFiles([new File([csv], 'quota-probe.csv', { type: 'text/csv' })]);
+      } finally { Storage.prototype.setItem = orig; }
+      const banner = document.getElementById('storage-warning');
+      return !!banner && banner.textContent.includes('storage is full');
+    });
+    ok('storage: mid-import quota warning survives the status clear', quotaSurvivesImport, '');
   } finally {
     await page.close();
   }
+}
+
+export async function postRun({ ok }) {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const html = fs.readFileSync(path.join(import.meta.dirname, '..', '..', 'AI Usage Dashboard.html'));
+  ok('hygiene: no NUL bytes remain in the HTML file', !html.includes(0), '');
 }
