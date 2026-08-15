@@ -65,5 +65,6 @@ export async function postRun({ ok }) {
   const fs = await import('node:fs');
   const path = await import('node:path');
   const html = fs.readFileSync(path.join(import.meta.dirname, '..', '..', 'AI Usage Dashboard.html'));
-  ok('hygiene: no NUL bytes remain in the HTML file', !html.includes(0), '');
+  const bad = [...html].filter(b => b <= 8).length;
+  ok('hygiene: no raw control bytes (<0x09) in the HTML file', bad === 0, 'found ' + bad);
 }

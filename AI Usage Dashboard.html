@@ -810,7 +810,7 @@ const Store = {
     const keep = [], merge = new Map();
     for (const r of rows) {
       if (!r.sid || r.d >= cutoff) { keep.push(r); continue; }
-      const k = r.d + '' + r.platform + '' + r.model;
+      const k = r.d + '\u0001' + r.platform + '\u0001' + r.model;
       let b = merge.get(k);
       if (!b) { b = { d: r.d, platform: r.platform, model: r.model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0 }; if (r.est) b.est = 1; merge.set(k, b); }
       b.in += r.in || 0; b.cw += r.cw || 0; b.cr += r.cr || 0; b.out += r.out || 0; b.msgs += r.msgs || 0;
