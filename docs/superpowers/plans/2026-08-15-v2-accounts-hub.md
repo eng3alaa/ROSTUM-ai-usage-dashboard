@@ -95,15 +95,15 @@ const CONNECTORS = [
   { id: 'local',      platform: 'Claude Code/Desktop', name: 'Claude Code / Desktop', kind: 'folder',
     statusEl: 'local-status',    brand: '#d97748', mark: 'CC', srcIds: ['local', 'local-import'] },
   { id: 'anthropic',  platform: 'Anthropic API',       name: 'Anthropic API',         kind: 'admin-key',
-    statusEl: 'anthropic-status', brand: '#d4a27f', mark: 'An', srcIds: ['anthropic'], keyLS: 'key:anthropic' },
+    statusEl: 'anthropic-status', brand: '#d4a27f', mark: 'An', srcIds: ['anthropic'], keyLS: 'key:anthropic', fetchMethod: 'fetchAnthropic' },
   { id: 'openai',     platform: 'OpenAI API',          name: 'OpenAI API',            kind: 'admin-key',
-    statusEl: 'openai-status',   brand: '#10a37f', mark: 'Oa', srcIds: ['openai'], keyLS: 'key:openai' },
+    statusEl: 'openai-status',   brand: '#10a37f', mark: 'Oa', srcIds: ['openai'], keyLS: 'key:openai', fetchMethod: 'fetchOpenAI' },
   { id: 'gemini',     platform: 'Gemini',              name: 'Gemini (Google AI)',    kind: 'api-key',
-    statusEl: 'gemini-status',   brand: '#4285f4', mark: 'Ge', srcIds: ['gemini'], keyLS: 'key:gemini' },
+    statusEl: 'gemini-status',   brand: '#4285f4', mark: 'Ge', srcIds: ['gemini'], keyLS: 'key:gemini', fetchMethod: 'fetchGemini' },
   { id: 'copilot',    platform: 'GitHub Copilot',      name: 'GitHub Copilot',        kind: 'token',
-    statusEl: 'copilot-status',  brand: '#8957e5', mark: 'Cp', srcIds: ['copilot'], keyLS: 'key:copilot' },
+    statusEl: 'copilot-status',  brand: '#8957e5', mark: 'Cp', srcIds: ['copilot'], keyLS: 'key:copilot', fetchMethod: 'fetchCopilot' },
   { id: 'openrouter', platform: 'OpenRouter',          name: 'OpenRouter',            kind: 'api-key',
-    statusEl: 'openrouter-status', brand: '#6467f2', mark: 'Or', srcIds: ['openrouter'], keyLS: 'key:openrouter' },
+    statusEl: 'openrouter-status', brand: '#6467f2', mark: 'Or', srcIds: ['openrouter'], keyLS: 'key:openrouter', fetchMethod: 'fetchOpenrouter' },
   { id: 'imports',    platform: null,                  name: 'Imports',               kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv'] },
 ];
@@ -137,7 +137,7 @@ const PLATFORM_ORDER = CONNECTORS.map(c => c.platform).filter(Boolean)
       if (!c.keyLS) continue;
       const el2 = document.getElementById(c.id + '-key');
       if (LS.get(c.keyLS, null) && el2 && el2.value) {
-        const fn = this['fetch' + c.id.charAt(0).toUpperCase() + c.id.slice(1)];
+        const fn = c.fetchMethod && this[c.fetchMethod];   // explicit — ids can't derive mixed-case names like fetchOpenAI
         if (typeof fn === 'function') jobs.push(fn.call(this));
       }
     }
@@ -498,7 +498,8 @@ RED: `#accounts-hub` empty / `Store.setConnector is not a function` (thrown).
   },
   syncConnector(id) {
     if (id === 'local') return this.rescan();
-    const fn = this['fetch' + id.charAt(0).toUpperCase() + id.slice(1)];
+    const c = connectorById(id);
+    const fn = c && c.fetchMethod && this[c.fetchMethod];
     if (typeof fn === 'function') return fn.call(this);
   },
   disconnectConnector(id) {
@@ -926,7 +927,7 @@ Run: the first may already be GREEN (mechanism verified in Plan 1's final review
 1. **Spec coverage:** registry (spec Architecture) → T1; incremental cache → T4; accounts hub UI + connector state + modal → T5; Gemini/Copilot/OpenRouter connectors with honest capability notes → T6–T8; drill-down → T9; backlog items 1/5/6/7/8/9 → T2/T3/T10. NOT in this plan (Plan 3): insights pack, narrative/reports, budgets/alerts, monogram *SVG* artwork upgrade (text monograms ship now), backlog 2/3/4, PS fallbacks for the three new connectors (all three APIs are browser-callable; revisit only if real-world CORS bites).
 2. **Type consistency:** `Store.setConnector(id, patch)` / `Store.connectors[id] = {label, lastSync, err}` / `Store.connectorStatus(c)` used identically in T5, T6–T8, T10 checks. `finTok`/`finAmt` (Plan 1 round) reused by T7/T8 fetchers. `makeAgg` handles missing token fields via `|| 0`.
 3. **Stubbing contract:** connectors call global `fetchJSON` (function declaration) — checks override `window.fetchJSON`. Do NOT convert fetchJSON to a const.
-4. **`syncConnector` name contract:** method names must be `fetchGemini`/`fetchCopilot`/`fetchOpenrouter` (single capital) to match `'fetch' + id[0].toUpperCase() + id.slice(1)`.
+4. **`syncConnector`/`refreshAll` method contract:** the registry carries an explicit `fetchMethod` per key-bearing connector (`'fetchAnthropic'`, `'fetchOpenAI'`, `'fetchGemini'`, `'fetchCopilot'`, `'fetchOpenrouter'`) — never derive method names from ids (T1 review caught `fetchOpenai` ≠ `fetchOpenAI`). T6–T8 must name their App methods to match these exact strings and MUST also add their `fetchMethod` field usage nothing further — the field is already consumed generically.
 5. **renderHub's 30d row filter** for the `imports` connector uses source membership, not platform — the `.includes(r)` identity test works because `allRows()` returns the same row objects held in `Store.sources[*].rows` (local-import overlap rows are filtered out before the identity test can see them).
 6. **Counts:** never gate on exact totals; per-task RED/GREEN named checks + "all pass ×2" is the gate (Plan 1 lesson).
 
