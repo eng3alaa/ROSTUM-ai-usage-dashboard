@@ -865,12 +865,13 @@ const Store = {
   },
   setConnector(id, patch) { this.connectors[id] = { ...(this.connectors[id] || {}), ...patch }; this.persist(); },
   connectorStatus(c) {
-    const st = this.connectors[c.id] || {};
-    const hasData = c.srcIds.some(id => this.sources[id]);
+    // status is driven by the connector's own state entry, not data presence — every
+    // connect path (fetch, folder scan, import) writes this entry, so a connector with
+    // leftover data but no state (e.g. a keep-data disconnect) reads as truly 'off'.
+    const st = this.connectors[c.id];
+    if (!st || (!st.lastSync && !st.err && !st.label)) return 'off';
     if (st.err) return 'warn';
-    if (!hasData && !st.lastSync) return 'off';
-    const ref = st.lastSync || Math.max(0, ...c.srcIds.map(id => (this.sources[id]?.meta?.updated) || 0));
-    if (ref && Date.now() - ref > 7 * 864e5) return 'warn';
+    if (st.lastSync && Date.now() - st.lastSync > 7 * 864e5) return 'warn';
     return 'ok';
   },
   billedRows(id) {
@@ -1902,7 +1903,11 @@ const App = {
   renderHub() {
     const hub = $('accounts-hub');
     clear(hub);
-    const win30 = { from: addDays(todayKey(), -29), to: this.window().to };
+    // filter-independent bound — the card stats are always "last 30 real days", not
+    // whatever the global date filter (which may be a custom past range) happens to be.
+    const t2 = todayKey();
+    const u2 = dayKeyUTC(new Date());
+    const win30 = { from: addDays(t2, -29), to: u2 > t2 ? u2 : t2 };
     for (const c of CONNECTORS) {
       const st = Store.connectors[c.id] || {};
       const status = Store.connectorStatus(c);
@@ -1951,6 +1956,12 @@ const App = {
   syncConnector(id) {
     if (id === 'local') return this.rescan();
     const c = connectorById(id);
+    if (c && c.keyLS) {
+      const inp = document.getElementById(id + '-key');
+      const hasKey = (inp && inp.value.trim()) || LS.get(c.keyLS, null);
+      if (!hasKey) { this.openConnectorModal(id); return; }   // no key anywhere — surface the card, not a silent no-op/network call
+      if (inp && !inp.value.trim()) { const saved = LS.get(c.keyLS, null); if (saved) inp.value = saved; }
+    }
     const fn = c && c.fetchMethod && this[c.fetchMethod];
     if (typeof fn === 'function') return fn.call(this);
   },
@@ -1959,9 +1970,11 @@ const App = {
     if (c.keyLS) LS.del(c.keyLS);
     const keyInput = document.getElementById(id + '-key'); if (keyInput) keyInput.value = '';
     delete Store.connectors[id];
+    if (id === 'local') { IDB.del('claudeDir'); this.dirHandle = null; }
     if (confirm(`Also delete ${c.name}'s stored usage data? OK = delete, Cancel = keep the data.`)) {
       for (const sid of c.srcIds) delete Store.sources[sid];
       for (const sid of c.srcIds) delete Store.billed[sid];
+      if (id === 'local') Store.projects = [];
     }
     Store.persist();
     this.render();

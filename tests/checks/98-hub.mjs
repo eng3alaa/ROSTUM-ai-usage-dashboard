@@ -97,6 +97,90 @@ export async function run({ browser, ok }) {
       return App.rowsIn(App.window()).length;
     });
     ok('hub: second click restores all platforms', undrill === 2, undrill);
+
+    // I3(a): a connector with data but no state entry (e.g. state deleted by a
+    // keep-data disconnect) must read as truly 'off', not fall back to 'ok' via
+    // the data-freshness heuristic.
+    const disconnectKeep = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      Store.setConnector('openrouter', { label: 'my-key', lastSync: Date.now() });
+      Store.setSource('openrouter', [{ d: dayKey(new Date()), platform: 'OpenRouter', model: 'x', in: 500, cw: 0, cr: 0, out: 200, msgs: 3 }], {});
+      window.confirm = () => false;   // Cancel = keep the data
+      App.disconnectConnector('openrouter');   // its own render() is RAF-batched — wait for it to flush
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const card = document.querySelector('#accounts-hub .acct[data-connector="openrouter"]');
+      return {
+        dot: card.querySelector('.dot').className,
+        manageText: card.querySelector('.acct-manage').textContent,
+        stats: card.querySelector('.acct-stats').textContent,
+        hasSource: !!Store.sources.openrouter,
+      };
+    });
+    ok('hub: disconnect keep-data shows truly disconnected card',
+      /\boff\b/.test(disconnectKeep.dot) && disconnectKeep.manageText === 'Connect' &&
+      disconnectKeep.stats.length > 0 && disconnectKeep.hasSource,
+      JSON.stringify(disconnectKeep));
+
+    // I3(b): disconnecting 'local' with delete-data must clear Store.projects and
+    // release the folder handle (memory + IDB) so a later refreshAll() can't silently
+    // rescan the old folder and resurrect the deleted rows.
+    const disconnectLocalDelete = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {};
+      Store.projects = [{ project: 'proj1', model: 'claude-sonnet-5', msgs: 1, in: 1, cw: 0, cr: 0, out: 1 }];
+      Store.setConnector('local', { label: '1 session', lastSync: Date.now() });
+      Store.setSource('local', [{ d: dayKey(new Date()), platform: 'Claude Code/Desktop', model: 'claude-sonnet-5', in: 10, cw: 0, cr: 0, out: 10, msgs: 1, sid: 's1' }], {});
+      // simulate an actively-held folder handle whose rescan() would resurrect data
+      App.dirHandle = { queryPermission: async () => 'granted', requestPermission: async () => 'granted' };
+      const origScanHandle = App.scanHandle;
+      App.scanHandle = async () => {
+        Store.setSource('local', [{ d: dayKey(new Date()), platform: 'Claude Code/Desktop', model: 'claude-sonnet-5', in: 999, cw: 0, cr: 0, out: 999, msgs: 1, sid: 's-resurrected' }], {});
+      };
+      window.confirm = () => true;   // OK = delete
+      App.disconnectConnector('local');
+      const dirHandleAfter = App.dirHandle;
+      const projectsAfterDisconnect = Store.projects.length;
+      await App.refreshAll();
+      App.scanHandle = origScanHandle;
+      return { dirHandleAfter, projectsAfterDisconnect, sourcesLocalAfterRefresh: !!Store.sources.local };
+    });
+    ok('hub: local delete-data clears projects and cannot resurrect',
+      disconnectLocalDelete.dirHandleAfter === null && disconnectLocalDelete.projectsAfterDisconnect === 0 &&
+      !disconnectLocalDelete.sourcesLocalAfterRefresh,
+      JSON.stringify(disconnectLocalDelete));
+
+    // I4: syncing a key-bearing connector with no usable key anywhere (not in the
+    // input, not remembered in LS) must surface the connect modal instead of
+    // silently calling the fetch method (which would just no-op or hit the network).
+    const syncNoKey = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      LS.del('key:openrouter');
+      const inp = document.getElementById('openrouter-key'); if (inp) inp.value = '';
+      const dlg = document.getElementById('connector-modal');
+      App.syncConnector('openrouter');
+      const isOpen = dlg.open;
+      dlg.close();
+      return { isOpen };
+    });
+    ok('hub: sync without key opens the connect modal', syncNoKey.isOpen === true, JSON.stringify(syncNoKey));
+
+    // I5: the accounts-hub 30d card stats must be independent of the global date
+    // filter — a custom range in the past shouldn't blank out a card that has
+    // genuinely-recent data.
+    const filterIndep = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      Store.setConnector('openrouter', { label: 'my-key', lastSync: Date.now() });
+      Store.setSource('openrouter', [{ d: dayKey(new Date()), platform: 'OpenRouter', model: 'x', in: 500, cw: 0, cr: 0, out: 200, msgs: 3 }], {});
+      App.filters.range = 'custom';
+      App.filters.from = '2020-01-01';
+      App.filters.to = '2020-01-31';
+      App.renderHub();   // synchronous — App.render() is RAF-batched and would read a stale DOM
+      const card = document.querySelector('#accounts-hub .acct[data-connector="openrouter"]');
+      const stats = card.querySelector('.acct-stats').textContent;
+      App.filters.range = '30'; App.filters.from = null; App.filters.to = null;   // restore defaults
+      return { stats };
+    });
+    ok('hub: card stats independent of the global date filter',
+      /700|0\.0/.test(filterIndep.stats), JSON.stringify(filterIndep));
   } finally {
     await page.close();
   }
