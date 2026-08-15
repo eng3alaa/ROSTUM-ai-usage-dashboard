@@ -45,6 +45,23 @@ export async function run({ browser, ok }) {
     });
     ok('registry: refreshAll fires every key-bearing connector (incl. fetchOpenAI casing)',
       refresh.anthropicCalls === 1 && refresh.openaiCalls === 1, JSON.stringify(refresh));
+
+    const compacted = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = [];
+      const rows = [];
+      for (let i = 0; i < 12; i++) rows.push({ d: '2025-01-05', platform: 'Claude Code/Desktop', model: 'claude-sonnet-5', in: 10, cw: 0, cr: 0, out: 5, msgs: 1, sid: 'sess-' + i });
+      rows.push({ d: dayKey(new Date()), platform: 'Claude Code/Desktop', model: 'claude-sonnet-5', in: 1, cw: 0, cr: 0, out: 1, msgs: 1, sid: 'sess-new' });
+      Store.setSource('local', rows, {});
+      const local = Store.sources.local.rows;
+      const old = local.filter(r => r.d === '2025-01-05');
+      const recent = local.filter(r => r.sid === 'sess-new');
+      const t = old.reduce((a, r) => ({ in: a.in + r.in, msgs: a.msgs + r.msgs }), { in: 0, msgs: 0 });
+      return { oldCount: old.length, oldHasSid: old.some(r => r.sid), recentHasSid: recent.length === 1 && !!recent[0].sid, in: t.in, msgs: t.msgs };
+    });
+    ok('compaction: rows older than 90d merge across sessions, totals exact',
+      compacted.oldCount === 1 && !compacted.oldHasSid && compacted.in === 120 && compacted.msgs === 12,
+      JSON.stringify(compacted));
+    ok('compaction: recent rows keep their sid (dedupe still works)', compacted.recentHasSid, JSON.stringify(compacted));
   } finally {
     await page.close();
   }
