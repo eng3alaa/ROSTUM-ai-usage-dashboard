@@ -180,7 +180,8 @@ Non-blocking findings from the final whole-branch review of v1.1, accepted as Pl
 5. **Harness default storage isolation**: `openDashboard` should clear `aiusage:*` storage unless seeding, instead of relying on per-check discipline.
 6. **postRun coverage on throw**: `tests/run.mjs` skips a module's `postRun` if its `run` throws — move postRun into a finally or its own try.
 7. **scanHandle catch gen-guard**: fetch error paths are gen-guarded; the folder-scan catch is not (low risk, same category).
-8. **Soft-fail race check**: the import-vs-fetch gen guard is covered by a hard-reject check; add a usage-OK-cost-null variant to pin the soft-fail path explicitly.
+8. **Soft-fail race check**: the import-vs-fetch gen guard is covered by a hard-reject check; add a usage-OK-cost-null variant to pin the soft-fail path explicitly (mechanism verified manually in the final review).
+9. **Superseded-fetch status text**: when an import supersedes an in-flight fetch, the fetch bails before updating its status line, leaving "Fetching usage…" stuck (cosmetic; data correct). Reset or annotate the status on bail; the accounts-hub card states in v2 subsume this.
 
 ## Acceptance criteria
 
