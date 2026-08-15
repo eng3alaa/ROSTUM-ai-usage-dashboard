@@ -1232,9 +1232,8 @@ async function fetchOpenAIAll(key, days) {
 }
 
 /* ---------- PowerShell fallback commands ---------- */
-function anthropicPSCommand(key, days) {
-  const k = key || 'PASTE_YOUR_ADMIN_KEY';
-  return `$k = "${k}"
+function anthropicPSCommand(_key, days) {
+  return `$k = Read-Host "Paste your Anthropic Admin key"
 $h = @{ "x-api-key" = $k; "anthropic-version" = "2023-06-01" }
 $s = (Get-Date).AddDays(-${days}).ToUniversalTime().ToString("yyyy-MM-ddT00:00:00Z")
 $all = @(); $page = $null
@@ -1247,9 +1246,8 @@ do {
 @{ data = $all } | ConvertTo-Json -Depth 12 | Out-File "$env:USERPROFILE\\Desktop\\anthropic-usage.json" -Encoding utf8
 Write-Host "Saved to Desktop\\anthropic-usage.json"`;
 }
-function openaiPSCommand(key, days) {
-  const k = key || 'PASTE_YOUR_ADMIN_KEY';
-  return `$k = "${k}"
+function openaiPSCommand(_key, days) {
+  return `$k = Read-Host "Paste your OpenAI Admin key"
 $h = @{ "Authorization" = "Bearer $k" }
 $s = [DateTimeOffset]::UtcNow.AddDays(-${days}).ToUnixTimeSeconds()
 $all = @(); $page = $null
@@ -2234,8 +2232,8 @@ const App = {
 
   /* =================== wiring =================== */
   updatePSCommands() {
-    $('anthropic-cmd').textContent = anthropicPSCommand($('anthropic-key').value.trim(), parseInt($('anthropic-days').value, 10));
-    $('openai-cmd').textContent = openaiPSCommand($('openai-key').value.trim(), parseInt($('openai-days').value, 10));
+    $('anthropic-cmd').textContent = anthropicPSCommand(null, parseInt($('anthropic-days').value, 10));
+    $('openai-cmd').textContent = openaiPSCommand(null, parseInt($('openai-days').value, 10));
   },
 
   async refreshAll() {
@@ -2350,7 +2348,7 @@ const App = {
     const ok = LS.get('key:openai', null); if (ok) { $('openai-key').value = ok; $('remember-openai').checked = true; }
     $('remember-anthropic').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:anthropic'); else if ($('anthropic-key').value) LS.set('key:anthropic', $('anthropic-key').value.trim()); });
     $('remember-openai').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:openai'); else if ($('openai-key').value) LS.set('key:openai', $('openai-key').value.trim()); });
-    for (const id of ['anthropic-key', 'anthropic-days', 'openai-key', 'openai-days']) $(id).addEventListener('input', () => this.updatePSCommands());
+    for (const id of ['anthropic-days', 'openai-days']) $(id).addEventListener('input', () => this.updatePSCommands());
     this.updatePSCommands();
 
     // imports

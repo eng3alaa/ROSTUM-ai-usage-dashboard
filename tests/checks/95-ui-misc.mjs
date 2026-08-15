@@ -18,6 +18,17 @@ export async function run({ browser, ok }) {
       return texts.some(t => /Parsing tiny\.csv/.test(t));
     });
     ok('import: shows per-file Parsing status before work', sawParsing, '');
+
+    const keyLeak = await page.evaluate(() => {
+      const SECRET = 'sk-ant-admin-SECRETSECRET';
+      const inp = document.getElementById('anthropic-key');
+      inp.value = SECRET;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.dispatchEvent(new Event('keyup', { bubbles: true }));
+      return document.documentElement.outerHTML.includes('SECRETSECRET') ||
+             document.getElementById('anthropic-cmd').textContent.includes('SECRETSECRET');
+    });
+    ok('security: typed key never appears in DOM text', keyLeak === false, '');
   } finally {
     await page.close();
   }
