@@ -762,15 +762,15 @@ const CONNECTORS = [
   { id: 'local',      platform: 'Claude Code/Desktop', name: 'Claude Code / Desktop', kind: 'folder',
     statusEl: 'local-status',    brand: '#d97748', mark: 'CC', srcIds: ['local', 'local-import'] },
   { id: 'anthropic',  platform: 'Anthropic API',       name: 'Anthropic API',         kind: 'admin-key',
-    statusEl: 'anthropic-status', brand: '#d4a27f', mark: 'An', srcIds: ['anthropic'], keyLS: 'key:anthropic' },
+    statusEl: 'anthropic-status', brand: '#d4a27f', mark: 'An', srcIds: ['anthropic'], keyLS: 'key:anthropic', fetchMethod: 'fetchAnthropic' },
   { id: 'openai',     platform: 'OpenAI API',          name: 'OpenAI API',            kind: 'admin-key',
-    statusEl: 'openai-status',   brand: '#10a37f', mark: 'Oa', srcIds: ['openai'], keyLS: 'key:openai' },
+    statusEl: 'openai-status',   brand: '#10a37f', mark: 'Oa', srcIds: ['openai'], keyLS: 'key:openai', fetchMethod: 'fetchOpenAI' },
   { id: 'gemini',     platform: 'Gemini',              name: 'Gemini (Google AI)',    kind: 'api-key',
-    statusEl: 'gemini-status',   brand: '#4285f4', mark: 'Ge', srcIds: ['gemini'], keyLS: 'key:gemini' },
+    statusEl: 'gemini-status',   brand: '#4285f4', mark: 'Ge', srcIds: ['gemini'], keyLS: 'key:gemini', fetchMethod: 'fetchGemini' },
   { id: 'copilot',    platform: 'GitHub Copilot',      name: 'GitHub Copilot',        kind: 'token',
-    statusEl: 'copilot-status',  brand: '#8957e5', mark: 'Cp', srcIds: ['copilot'], keyLS: 'key:copilot' },
+    statusEl: 'copilot-status',  brand: '#8957e5', mark: 'Cp', srcIds: ['copilot'], keyLS: 'key:copilot', fetchMethod: 'fetchCopilot' },
   { id: 'openrouter', platform: 'OpenRouter',          name: 'OpenRouter',            kind: 'api-key',
-    statusEl: 'openrouter-status', brand: '#6467f2', mark: 'Or', srcIds: ['openrouter'], keyLS: 'key:openrouter' },
+    statusEl: 'openrouter-status', brand: '#6467f2', mark: 'Or', srcIds: ['openrouter'], keyLS: 'key:openrouter', fetchMethod: 'fetchOpenrouter' },
   { id: 'imports',    platform: null,                  name: 'Imports',               kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv'] },
 ];
@@ -2303,7 +2303,7 @@ const App = {
       if (!c.keyLS) continue;
       const el2 = document.getElementById(c.id + '-key');
       if (LS.get(c.keyLS, null) && el2 && el2.value) {
-        const fn = this['fetch' + c.id.charAt(0).toUpperCase() + c.id.slice(1)];
+        const fn = c.fetchMethod && this[c.fetchMethod];
         if (typeof fn === 'function') jobs.push(fn.call(this));
       }
     }

@@ -28,6 +28,23 @@ export async function run({ browser, ok }) {
       return { sub };
     });
     ok('registry: subtitle names a NEW platform without hand-edits', /OpenRouter/.test(wiring.sub), wiring.sub);
+
+    // refreshAll must fire every key-bearing connector's real fetch method, including
+    // the fetchOpenAI (capital AI) casing that name-derivation from the id would miss.
+    const refresh = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = [];
+      let anthropicCalls = 0, openaiCalls = 0;
+      window.fetchAnthropicAll = async () => { anthropicCalls++; return { usage: { rows: [] }, cost: [] }; };
+      window.fetchOpenAIAll = async () => { openaiCalls++; return { usage: { rows: [] }, cost: [] }; };
+      LS.set('key:anthropic', 'k');
+      LS.set('key:openai', 'k');
+      document.getElementById('anthropic-key').value = 'k';
+      document.getElementById('openai-key').value = 'k';
+      await App.refreshAll();
+      return { anthropicCalls, openaiCalls };
+    });
+    ok('registry: refreshAll fires every key-bearing connector (incl. fetchOpenAI casing)',
+      refresh.anthropicCalls === 1 && refresh.openaiCalls === 1, JSON.stringify(refresh));
   } finally {
     await page.close();
   }
