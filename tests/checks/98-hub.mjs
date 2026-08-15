@@ -80,6 +80,23 @@ export async function run({ browser, ok }) {
     });
     ok('hub: Escape-close returns the card home (no orphan)',
       escapeClose.afterFirst && escapeClose.afterSecond, JSON.stringify(escapeClose));
+
+    const drill = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      Store.setSource('openrouter', [{ d: dayKey(new Date()), platform: 'OpenRouter', model: 'x', in: 5, cw: 0, cr: 0, out: 5, msgs: 1 }], {});
+      Store.setSource('csv', [{ d: dayKey(new Date()), platform: 'Gemini', model: 'y', in: 7, cw: 0, cr: 0, out: 7, msgs: 1 }], {});
+      App.render();
+      document.querySelector('#accounts-hub .acct[data-connector="openrouter"]').click();
+      const rows = App.rowsIn(App.window());
+      return { n: rows.length, all: rows.every(r => r.platform === 'OpenRouter') };
+    });
+    ok('hub: card click drills down to that platform only', drill.n === 1 && drill.all, JSON.stringify(drill));
+
+    const undrill = await page.evaluate(() => {
+      document.querySelector('#accounts-hub .acct[data-connector="openrouter"]').click();   // second click = undo
+      return App.rowsIn(App.window()).length;
+    });
+    ok('hub: second click restores all platforms', undrill === 2, undrill);
   } finally {
     await page.close();
   }

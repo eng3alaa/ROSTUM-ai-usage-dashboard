@@ -1949,7 +1949,14 @@ const App = {
     this.render();
   },
 
-  drillDown() {}, // Task 9 fills this in
+  drillDown(c) {
+    if (!c.platform) { this.filters.hiddenPlatforms = new Set(); this.render(); return; }   // imports → show everything
+    const others = Store.platforms().filter(p => p !== c.platform);
+    const already = others.length && others.every(p => this.filters.hiddenPlatforms.has(p)) && !this.filters.hiddenPlatforms.has(c.platform);
+    this.filters.hiddenPlatforms = already ? new Set() : new Set(others);
+    this.render();
+    $('card-daily').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
 
   /* ---------- platform chips ---------- */
   renderChips() {
