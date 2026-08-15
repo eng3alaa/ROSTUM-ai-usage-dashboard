@@ -43,6 +43,10 @@ export async function openDashboard(browser, opts = {}) {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   const url = pathToFileURL(DASH).href;
   await page.goto(url, { waitUntil: 'load' });
+  if (!opts.seedData && !opts.keepStorage) {
+    await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('aiusage:')) localStorage.removeItem(k); });
+    await page.reload({ waitUntil: 'load' });
+  }
   if (opts.seedData) {
     await page.evaluate((data) => localStorage.setItem('aiusage:data', JSON.stringify(data)), opts.seedData);
     await page.reload({ waitUntil: 'load' });
