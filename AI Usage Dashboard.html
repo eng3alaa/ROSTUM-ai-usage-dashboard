@@ -594,7 +594,11 @@ const el = (tag, attrs = {}, ...children) => {
   for (const [k, v] of Object.entries(attrs)) {
     if (v == null) continue;
     if (k === 'class') { n.setAttribute('class', v); }
-    else if (k === 'style' && typeof v === 'object') { Object.assign(n.style, v); }
+    else if (k === 'style' && typeof v === 'object') {
+      for (const [sk, sv] of Object.entries(v)) {
+        if (sk.startsWith('--')) n.style.setProperty(sk, sv); else n.style[sk] = sv;
+      }
+    }
     else if (k.startsWith('on') && typeof v === 'function') { n.addEventListener(k.slice(2), v); }
     else if (k === 'text') { n.textContent = v; }
     else n.setAttribute(k, v);
@@ -1839,14 +1843,17 @@ const App = {
     $('modal-mark').textContent = c.mark;
     $('modal-mark').style.background = c.brand;
     const src = document.getElementById('src-' + (id === 'imports' ? 'import' : id));
-    if (src) { this._modalHome = src.parentNode; src.hidden = false; $('modal-body').appendChild(src); }
+    if (src) {
+      if (src.parentNode !== $('modal-body')) this._modalHome = src.parentNode;   // guard against a corrupted home
+      src.hidden = false;
+      $('modal-body').appendChild(src);
+    }
     dlg.showModal();
   },
-  closeConnectorModal() {
-    const dlg = $('connector-modal');
+  closeConnectorModal() { $('connector-modal').close(); },   // 'close' event (fires for Close-button AND Escape) does the restore
+  _restoreModalCard() {
     const src = $('modal-body').firstElementChild;
     if (src && this._modalHome) { this._modalHome.appendChild(src); if (/^src-(gemini|copilot|openrouter)$/.test(src.id) && !Store.connectors[src.id.slice(4)]) src.hidden = true; }
-    dlg.close();
   },
   syncConnector(id) {
     if (id === 'local') return this.rescan();
@@ -2562,6 +2569,7 @@ const App = {
         const res = await parseClaudeLogsCached(files, (d, t) => { prog.max = t; prog.value = d; }, ScanCache);
         Store.projects = res.projects;
         Store.setSource('local', res.rows, res.meta);
+        Store.setConnector('local', { label: res.meta.files + ' log files', lastSync: Date.now(), err: null });
         status.textContent = '';
         status.appendChild(el('span', { class: 'ok', text: '● Loaded. ' }));
         status.appendChild(document.createTextNode(`${res.meta.files} log files · ${fmtInt(res.meta.msgs)} messages (one-time load — pick again to refresh)`));
@@ -2591,6 +2599,7 @@ const App = {
     dz.addEventListener('drop', (e) => { if (e.dataTransfer.files.length) this.handleImportFiles([...e.dataTransfer.files]); });
 
     $('connector-modal').querySelector('.modal-close').addEventListener('click', () => this.closeConnectorModal());
+    $('connector-modal').addEventListener('close', () => this._restoreModalCard());
 
     $('clear-data').addEventListener('click', () => {
       if (confirm('Clear all stored usage data from this browser? (Price edits and keys are kept.)')) {

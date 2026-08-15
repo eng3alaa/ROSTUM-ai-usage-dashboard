@@ -41,17 +41,45 @@ export async function run({ browser, ok }) {
     });
     ok('hub: data older than 7 days turns the dot amber', /\bwarn\b/.test(stale), stale);
 
-    const modal = await page.evaluate(() => {
+    const modal = await page.evaluate(async () => {
       document.querySelector('#accounts-hub .acct[data-connector="anthropic"] .acct-manage').click();
       const dlg = document.getElementById('connector-modal');
       const containsCard = !!dlg.querySelector('#src-anthropic');
       const isOpen = dlg.open;
+      // dialog's 'close' event is fired via a QUEUED task (not synchronous with .close()) —
+      // wait for the real event rather than guessing at a delay.
+      const closed = new Promise(r => dlg.addEventListener('close', r, { once: true }));
       dlg.querySelector('.modal-close').click();
+      await closed;
       const restored = !dlg.querySelector('#src-anthropic') && !!document.querySelector('#sources #src-anthropic');
       return { isOpen, containsCard, restored };
     });
     ok('hub: Manage opens the modal hosting the real source card, close restores it',
       modal.isOpen && modal.containsCard && modal.restored, JSON.stringify(modal));
+
+    const brand = await page.evaluate(() => {
+      const mark = document.querySelector('#accounts-hub .acct[data-connector="anthropic"] .mark');
+      return { markBg: getComputedStyle(mark).backgroundColor };
+    });
+    ok('hub: brand accent custom property actually applies', brand.markBg === 'rgb(212, 162, 127)', JSON.stringify(brand));
+
+    const escapeClose = await page.evaluate(async () => {
+      // real repro: native dialog close() (the path Escape takes), NOT closeConnectorModal()
+      const dlg = document.getElementById('connector-modal');
+      App.openConnectorModal('anthropic');
+      let closed = new Promise(r => dlg.addEventListener('close', r, { once: true }));
+      dlg.close();
+      await closed;
+      const afterFirst = !!document.querySelector('#sources #src-anthropic');
+      App.openConnectorModal('anthropic');
+      closed = new Promise(r => dlg.addEventListener('close', r, { once: true }));
+      dlg.close();
+      await closed;
+      const afterSecond = !!document.querySelector('#sources #src-anthropic');
+      return { afterFirst, afterSecond };
+    });
+    ok('hub: Escape-close returns the card home (no orphan)',
+      escapeClose.afterFirst && escapeClose.afterSecond, JSON.stringify(escapeClose));
   } finally {
     await page.close();
   }
