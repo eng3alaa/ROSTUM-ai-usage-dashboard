@@ -192,6 +192,8 @@ Recorded scope notes and deferred minors from the Plan 2 final integration revie
 14. **Hidden source cards**: connected Gemini/Copilot/OpenRouter cards stay hidden in the Data sources section (reachable only via hub Manage) — decide whether to reveal on connect or remove the legacy section once the hub fully replaces it.
 15. **Scan meta diagnostics**: `parseClaudeLogsCached` drops `lines`/`badLines` from meta — restore malformed-line reporting through the cached path.
 16. **ScanCache eviction**: `scan:` IDB entries are never pruned; edited files orphan old signatures. Add pruning on rescan or clear-data.
+17. **Scan cache stores post-dedup subsets** (Plan 2 fix-round residual): when cross-file duplicate messages exist, the losing file's cache entry omits the shared messages; if the winning file later vanishes, scans under-count until the loser's signature changes. Plan 3: cache full per-file rows+ids and dedupe at merge time.
+18. **v1.1 → v2 hub migration**: persisted v1.1 data has no `connectors` entries, so existing users see all-gray "Not connected" cards (with their data still charted) until the first re-sync. Plan 3: one-time `load()` migration synthesizing `{label: 'stored data', lastSync: meta.updated}` for sources present without a connector entry; also give kept-but-disconnected cards a data-removal affordance.
 
 ## Acceptance criteria
 
