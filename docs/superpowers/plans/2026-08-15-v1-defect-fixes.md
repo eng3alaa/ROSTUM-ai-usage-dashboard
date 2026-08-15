@@ -1,6 +1,6 @@
 # v1.1 Defect Fixes + Permanent Test Rig — Implementation Plan (Plan 1 of 3)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fix 11 of the 13 verified defects from the 2026-08-15 code reviews in `AI Usage Dashboard.html` (plus the carried-in unverified-note fixes), each proven by a permanent headless test rig. The remaining two — #5 connector registry and #7 incremental scan cache — are architectural and open Plan 2, where they are built once as part of the connector rework instead of twice.
 
@@ -47,13 +47,13 @@ Edits to the HTML are expressed as exact old/new code (never line numbers — th
 
 **Files:** Create: `.gitignore`
 
-- [ ] **Step 1: Initialize the repo** (skip `git init` if `.git/` already exists)
+- [x] **Step 1: Initialize the repo** (skip `git init` if `.git/` already exists)
 
 ```bash
 cd "D:/Code/rostum" && git init -b main
 ```
 
-- [ ] **Step 2: Create `.gitignore`** with exactly:
+- [x] **Step 2: Create `.gitignore`** with exactly:
 
 ```gitignore
 node_modules/
@@ -61,7 +61,7 @@ tests/fixtures/out/
 tests/artifacts/
 ```
 
-- [ ] **Step 3: Commit the current state**
+- [x] **Step 3: Commit the current state**
 
 ```bash
 git add -A && git commit -m "chore: import v1 dashboard, specs, reviews"
@@ -75,7 +75,7 @@ Expected: one commit containing `AI Usage Dashboard.html`, `docs/**`, `.gitignor
 
 **Files:** Create: `tests/package.json`, `tests/lib/harness.mjs`, `tests/run.mjs`, `tests/fixtures/gen.mjs`
 
-- [ ] **Step 1: Write `tests/package.json`**
+- [x] **Step 1: Write `tests/package.json`**
 
 ```json
 {
@@ -86,7 +86,7 @@ Expected: one commit containing `AI Usage Dashboard.html`, `docs/**`, `.gitignor
 }
 ```
 
-- [ ] **Step 2: Write `tests/lib/harness.mjs`**
+- [x] **Step 2: Write `tests/lib/harness.mjs`**
 
 ```js
 import puppeteer from 'puppeteer-core';
@@ -134,7 +134,7 @@ export function readFixture(name) {
 }
 ```
 
-- [ ] **Step 3: Write `tests/fixtures/gen.mjs`** (fixture bodies are added by later tasks; start with the Claude-log fixtures used by the baseline)
+- [x] **Step 3: Write `tests/fixtures/gen.mjs`** (fixture bodies are added by later tasks; start with the Claude-log fixtures used by the baseline)
 
 ```js
 import fs from 'node:fs';
@@ -164,7 +164,7 @@ export async function generate() {
 if (process.argv[1] === import.meta.filename) await generate();
 ```
 
-- [ ] **Step 4: Write `tests/run.mjs`**
+- [x] **Step 4: Write `tests/run.mjs`**
 
 ```js
 import fs from 'node:fs';
@@ -202,7 +202,7 @@ console.log(`\n${results.length - fails}/${results.length} checks passed`);
 process.exit(fails ? 1 : 0);
 ```
 
-- [ ] **Step 5: Install and run (expect 0 checks, exit 0)**
+- [x] **Step 5: Install and run (expect 0 checks, exit 0)**
 
 ```bash
 cd "D:/Code/rostum" && npm install --prefix tests && node tests/run.mjs
@@ -210,7 +210,7 @@ cd "D:/Code/rostum" && npm install --prefix tests && node tests/run.mjs
 
 Expected output ends with: `0/0 checks passed`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests .gitignore && git commit -m "test: add headless puppeteer-core rig skeleton"
@@ -222,7 +222,7 @@ git add tests .gitignore && git commit -m "test: add headless puppeteer-core rig
 
 **Files:** Create: `tests/checks/10-baseline.mjs`
 
-- [ ] **Step 1: Write the baseline checks**
+- [x] **Step 1: Write the baseline checks**
 
 ```js
 import fs from 'node:fs';
@@ -272,7 +272,7 @@ export async function run({ browser, ok }) {
 }
 ```
 
-- [ ] **Step 2: Run — all 5 must pass**
+- [x] **Step 2: Run — all 5 must pass**
 
 ```bash
 node tests/run.mjs
@@ -280,7 +280,7 @@ node tests/run.mjs
 
 Expected: `5/5 checks passed`, exit 0.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/checks/10-baseline.mjs && git commit -m "test: baseline coverage (load, parsers, dedupe, pricing, sniff)"
@@ -292,7 +292,7 @@ git add tests/checks/10-baseline.mjs && git commit -m "test: baseline coverage (
 
 **Files:** Modify: `AI Usage Dashboard.html`, Create: `tests/checks/20-csv-guards.mjs`
 
-- [ ] **Step 1: Write the failing check** — create `tests/checks/20-csv-guards.mjs`:
+- [x] **Step 1: Write the failing check** — create `tests/checks/20-csv-guards.mjs`:
 
 ```js
 import { openDashboard } from '../lib/harness.mjs';
@@ -318,7 +318,7 @@ export async function run({ browser, ok }) {
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 node tests/run.mjs
@@ -326,7 +326,7 @@ node tests/run.mjs
 
 Expected: the two new checks FAIL (`csvCell is not defined`); baseline still passes.
 
-- [ ] **Step 3: Implement.** In `AI Usage Dashboard.html`, add a top-level `csvCell` helper. Find this exact code:
+- [x] **Step 3: Implement.** In `AI Usage Dashboard.html`, add a top-level `csvCell` helper. Find this exact code:
 
 ```js
 const fmtMetric = (n, metric) => metric === 'cost' ? fmtUSD(n) : fmtCompact(n);
@@ -361,7 +361,7 @@ Replace with:
     }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 ```bash
 node tests/run.mjs
@@ -369,7 +369,7 @@ node tests/run.mjs
 
 Expected: `7/7 checks passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "fix: neutralize spreadsheet formula prefixes in CSV export (review #6)"
@@ -381,7 +381,7 @@ git add -A && git commit -m "fix: neutralize spreadsheet formula prefixes in CSV
 
 **Files:** Modify: `AI Usage Dashboard.html`, Modify: `tests/checks/20-csv-guards.mjs`, Modify: `tests/fixtures/gen.mjs`
 
-- [ ] **Step 1: Add the bad-numbers fixture.** In `tests/fixtures/gen.mjs`, add at the end of `generate()` (before the closing brace):
+- [x] **Step 1: Add the bad-numbers fixture.** In `tests/fixtures/gen.mjs`, add at the end of `generate()` (before the closing brace):
 
 ```js
   fs.writeFileSync(path.join(OUT, 'generic-badnums.csv'),
@@ -391,7 +391,7 @@ git add -A && git commit -m "fix: neutralize spreadsheet formula prefixes in CSV
     '2026-08-11,Gemini,gemini-3.5-flash,-40,60,-0.25\n');       // negative tokens (reject), negative cost (allow: credit)
 ```
 
-- [ ] **Step 2: Write the failing check.** Append to the `run` function in `tests/checks/20-csv-guards.mjs` (before `await page.close();`):
+- [x] **Step 2: Write the failing check.** Append to the `run` function in `tests/checks/20-csv-guards.mjs` (before `await page.close();`):
 
 ```js
   const { readFixture } = await import('../lib/harness.mjs');
@@ -410,13 +410,13 @@ git add -A && git commit -m "fix: neutralize spreadsheet formula prefixes in CSV
     JSON.stringify(parsed));
 ```
 
-- [ ] **Step 3: Run to verify the token check fails** (`1e309` currently becomes `Infinity`; `-40` is accepted → expect 8/9, only the first new check red). The second new check (cost) passes even before the fix — it is a deliberate stays-green guard proving the fix must NOT route the cost column through the non-negative validator (credits stay negative):
+- [x] **Step 3: Run to verify the token check fails** (`1e309` currently becomes `Infinity`; `-40` is accepted → expect 8/9, only the first new check red). The second new check (cost) passes even before the fix — it is a deliberate stays-green guard proving the fix must NOT route the cost column through the non-negative validator (credits stay negative):
 
 ```bash
 node tests/run.mjs
 ```
 
-- [ ] **Step 4: Implement.** In `parseGenericCSV`, find:
+- [x] **Step 4: Implement.** In `parseGenericCSV`, find:
 
 ```js
     const num = (i) => i >= 0 ? (parseFloat(String(c[i]).replace(/[,$]/g, '')) || 0) : 0;
@@ -441,9 +441,9 @@ Replace with:
     if (iCost >= 0 && c[iCost] !== '') billed.set(d, (billed.get(d) || 0) + numSigned(iCost));
 ```
 
-- [ ] **Step 5: Run to verify all pass** — `node tests/run.mjs` → `9/9 checks passed`.
+- [x] **Step 5: Run to verify all pass** — `node tests/run.mjs` → `9/9 checks passed`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A && git commit -m "fix: validate CSV numbers - reject non-finite/garbage/negative counts (review #13)"
@@ -455,7 +455,7 @@ git add -A && git commit -m "fix: validate CSV numbers - reject non-finite/garba
 
 **Files:** Modify: `AI Usage Dashboard.html`, Create: `tests/checks/30-utc-days.mjs`
 
-- [ ] **Step 1: Write the failing check** — create `tests/checks/30-utc-days.mjs`. It opens the page with a UTC-negative timezone so the bug manifests deterministically:
+- [x] **Step 1: Write the failing check** — create `tests/checks/30-utc-days.mjs`. It opens the page with a UTC-negative timezone so the bug manifests deterministically:
 
 ```js
 import { openDashboard } from '../lib/harness.mjs';
@@ -479,9 +479,9 @@ export async function run({ browser, ok }) {
 }
 ```
 
-- [ ] **Step 2: Run to verify all three fail** (each returns `2026-08-13` in New York time): `node tests/run.mjs`
+- [x] **Step 2: Run to verify all three fail** (each returns `2026-08-13` in New York time): `node tests/run.mjs`
 
-- [ ] **Step 3: Implement.** (a) Add a UTC helper. Find:
+- [x] **Step 3: Implement.** (a) Add a UTC helper. Find:
 
 ```js
 const todayKey = () => dayKey(new Date());
@@ -523,9 +523,9 @@ Replace with:
     const d = RE_DATEONLY.test(rawDate) ? rawDate : dayKey(rawDate);
 ```
 
-- [ ] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `12/12 checks passed`.
+- [x] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `12/12 checks passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "fix: UTC day extraction for provider buckets and date-only CSV strings (review #9)"
@@ -537,7 +537,7 @@ git add -A && git commit -m "fix: UTC day extraction for provider buckets and da
 
 **Files:** Modify: `AI Usage Dashboard.html`, Create: `tests/checks/40-sniff.mjs`
 
-- [ ] **Step 1: Write the failing check** — create `tests/checks/40-sniff.mjs`:
+- [x] **Step 1: Write the failing check** — create `tests/checks/40-sniff.mjs`:
 
 ```js
 import { openDashboard } from '../lib/harness.mjs';
@@ -578,9 +578,9 @@ export async function run({ browser, ok }) {
 }
 ```
 
-- [ ] **Step 2: Run to verify the 4 new checks fail**: `node tests/run.mjs`
+- [x] **Step 2: Run to verify the 4 new checks fail**: `node tests/run.mjs`
 
-- [ ] **Step 3: Implement.** Replace the whole `sniffJSON` function. Find:
+- [x] **Step 3: Implement.** Replace the whole `sniffJSON` function. Find:
 
 ```js
 function sniffJSON(obj, fileName) {
@@ -628,9 +628,9 @@ Replace with:
         }
 ```
 
-- [ ] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `16/16 checks passed`.
+- [x] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `16/16 checks passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "fix: sniff imports on first non-empty bucket; empty reports get own case (review #2)"
@@ -644,7 +644,7 @@ git add -A && git commit -m "fix: sniff imports on first non-empty bucket; empty
 
 Billed data changes shape from `Store.billed[src] = [{d, amount}]` to an **envelope** `{ rows: [{d, amount}], at: epochMs|null, stale: bool }`. Old persisted arrays are migrated on load.
 
-- [ ] **Step 1: Write the failing check** — create `tests/checks/50-billed-staleness.mjs`:
+- [x] **Step 1: Write the failing check** — create `tests/checks/50-billed-staleness.mjs`:
 
 ```js
 import { openDashboard } from '../lib/harness.mjs';
@@ -683,9 +683,9 @@ export async function run({ browser, ok }) {
 }
 ```
 
-- [ ] **Step 2: Run to verify the new checks fail** (`Store.billedRows is not a function`): `node tests/run.mjs`
+- [x] **Step 2: Run to verify the new checks fail** (`Store.billedRows is not a function`): `node tests/run.mjs`
 
-- [ ] **Step 3: Implement.** (a) In `Store`, find:
+- [x] **Step 3: Implement.** (a) In `Store`, find:
 
 ```js
   load() {
@@ -793,9 +793,9 @@ Replace with:
 
 (Note: this also pre-fixes the billed half of Task 8's CSV merge — Task 8 handles the usage rows half.)
 
-- [ ] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `19/19 checks passed`.
+- [x] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `19/19 checks passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "fix: billed-data envelope with staleness - failed cost fetch no longer masquerades as current (Codex #2)"
@@ -807,7 +807,7 @@ git add -A && git commit -m "fix: billed-data envelope with staleness - failed c
 
 **Files:** Modify: `AI Usage Dashboard.html`, Create: `tests/checks/60-merge-dedupe.mjs`
 
-- [ ] **Step 1: Write the failing check** — create `tests/checks/60-merge-dedupe.mjs`:
+- [x] **Step 1: Write the failing check** — create `tests/checks/60-merge-dedupe.mjs`:
 
 ```js
 import { openDashboard } from '../lib/harness.mjs';
@@ -837,9 +837,9 @@ export async function run({ browser, ok }) {
 }
 ```
 
-- [ ] **Step 2: Run to verify both fail** (v1 concats: 4 rows, in=600, billed=6): `node tests/run.mjs`
+- [x] **Step 2: Run to verify both fail** (v1 concats: 4 rows, in=600, billed=6): `node tests/run.mjs`
 
-- [ ] **Step 3: Implement.** In `handleImportFiles`, find:
+- [x] **Step 3: Implement.** In `handleImportFiles`, find:
 
 ```js
         if (f.name.endsWith('.csv')) {
@@ -861,9 +861,9 @@ Replace with:
 
 (The billed half was already converted to day-keyed replacement in Task 7 step 3f.) Also update the note line just below from `imported ${res.meta.rows} CSV rows` to `imported ${res.meta.rows} CSV rows (merged by day/platform/model)`.
 
-- [ ] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `21/21 checks passed`.
+- [x] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `21/21 checks passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "fix: CSV re-imports merge by day/platform/model instead of double-counting (review #1)"
@@ -877,7 +877,7 @@ git add -A && git commit -m "fix: CSV re-imports merge by day/platform/model ins
 
 Approach: every row parsed from a `.jsonl` gets a `sid` (session id = file basename, which is the session UUID). `Store.allRows()` drops `local-import` rows whose `sid` also exists in the folder-scanned `local` source. This also replaces the literal NUL (0x00) separator bytes in `makeAgg`/`parseClaudeLogs` with `'\u0001'` escapes (part of the NUL cleanup; the rest is Task 15).
 
-- [ ] **Step 1: Write the failing check.** Append inside `run` in `tests/checks/60-merge-dedupe.mjs` (before `await page.close();`):
+- [x] **Step 1: Write the failing check.** Append inside `run` in `tests/checks/60-merge-dedupe.mjs` (before `await page.close();`):
 
 ```js
   const fs2 = await import('node:fs');
@@ -902,9 +902,9 @@ Approach: every row parsed from a `.jsonl` gets a `sid` (session id = file basen
   ok('dedupe: projects persisted to localStorage', dd.persistedProjects > 0, dd.persistedProjects);
 ```
 
-- [ ] **Step 2: Run — first new check fails** (v1 double-counts: in=220, msgs=4): `node tests/run.mjs`
+- [x] **Step 2: Run — first new check fails** (v1 double-counts: in=220, msgs=4): `node tests/run.mjs`
 
-- [ ] **Step 3: Implement.** (a) Replace the ENTIRE `makeAgg` function. Locate it by its unique first line `function makeAgg() {` — do not try to exact-match its body: the current body contains literal NUL (0x00) separator bytes that render invisibly. The new function (note the visible \u0001 escapes and the new optional `sid` parameter):
+- [x] **Step 3: Implement.** (a) Replace the ENTIRE `makeAgg` function. Locate it by its unique first line `function makeAgg() {` — do not try to exact-match its body: the current body contains literal NUL (0x00) separator bytes that render invisibly. The new function (note the visible \u0001 escapes and the new optional `sid` parameter):
 
 ```js
 function makeAgg() {
@@ -983,9 +983,9 @@ Replace with:
         Store.setSource('local-import', res.rows, res.meta);
 ```
 
-- [ ] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `23/23 checks passed`. Baseline totals check must STILL pass (rows now carry `sid`, totals unchanged).
+- [x] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `23/23 checks passed`. Baseline totals check must STILL pass (rows now carry `sid`, totals unchanged).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "fix: session-id dedupe across local sources; persist imported projects; NUL->U+0001 separators (reviews #3, #10)"
@@ -997,7 +997,7 @@ git add -A && git commit -m "fix: session-id dedupe across local sources; persis
 
 **Files:** Modify: `AI Usage Dashboard.html`, Create: `tests/checks/70-chatgpt-branches.mjs`
 
-- [ ] **Step 1: Write the failing check** — create `tests/checks/70-chatgpt-branches.mjs`:
+- [x] **Step 1: Write the failing check** — create `tests/checks/70-chatgpt-branches.mjs`:
 
 ```js
 import { openDashboard } from '../lib/harness.mjs';
@@ -1032,9 +1032,9 @@ export async function run({ browser, ok }) {
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails** (v1 counts both A and B: msgs=2, out=1100): `node tests/run.mjs`
+- [x] **Step 2: Run to verify it fails** (v1 counts both A and B: msgs=2, out=1100): `node tests/run.mjs`
 
-- [ ] **Step 3: Implement.** In `parseChatGPTExport`, find:
+- [x] **Step 3: Implement.** In `parseChatGPTExport`, find:
 
 ```js
     const nodes = Object.values(conv.mapping)
@@ -1066,9 +1066,9 @@ Replace with:
     const nodes = chain.reverse();
 ```
 
-- [ ] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `24/24 checks passed`.
+- [x] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `24/24 checks passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "fix: count only the active ChatGPT conversation branch (Codex #4)"
@@ -1080,7 +1080,7 @@ git add -A && git commit -m "fix: count only the active ChatGPT conversation bra
 
 **Files:** Modify: `AI Usage Dashboard.html`, Create: `tests/checks/80-race.mjs`
 
-- [ ] **Step 1: Write the failing check** — create `tests/checks/80-race.mjs`:
+- [x] **Step 1: Write the failing check** — create `tests/checks/80-race.mjs`:
 
 ```js
 import { openDashboard } from '../lib/harness.mjs';
@@ -1107,9 +1107,9 @@ export async function run({ browser, ok }) {
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails** (v1: the slow OLD response lands last and wins): `node tests/run.mjs`
+- [x] **Step 2: Run to verify it fails** (v1: the slow OLD response lands last and wins): `node tests/run.mjs`
 
-- [ ] **Step 3: Implement.** (a) Add generation counters to `App`. Find:
+- [x] **Step 3: Implement.** (a) Add generation counters to `App`. Find:
 
 ```js
   async fetchAnthropic() {
@@ -1185,9 +1185,9 @@ Replace with:
   },
 ```
 
-- [ ] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `25/25 checks passed`.
+- [x] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `25/25 checks passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "fix: per-source generation counters - stale responses can no longer overwrite newer data (Codex #7)"
@@ -1199,7 +1199,7 @@ git add -A && git commit -m "fix: per-source generation counters - stale respons
 
 **Files:** Modify: `AI Usage Dashboard.html`, Create: `tests/checks/90-bucketing.mjs`
 
-- [ ] **Step 1: Write the failing check** — create `tests/checks/90-bucketing.mjs`:
+- [x] **Step 1: Write the failing check** — create `tests/checks/90-bucketing.mjs`:
 
 ```js
 import { openDashboard } from '../lib/harness.mjs';
@@ -1244,9 +1244,9 @@ export async function run({ browser, ok }) {
 *Note:* if the "All" preset button has no `data-days="all"` attribute, check the HTML — the presets are buttons inside `#range-presets`; click the one whose text is `All` instead:
 `[...document.querySelectorAll('#range-presets button')].find(b => b.textContent.trim() === 'All')?.click()`.
 
-- [ ] **Step 2: Run to verify the new checks fail** (`bucketDays is not defined`): `node tests/run.mjs`
+- [x] **Step 2: Run to verify the new checks fail** (`bucketDays is not defined`): `node tests/run.mjs`
 
-- [ ] **Step 3: Implement.** (a) Add `bucketDays` right after the `dayRange` helper. Find:
+- [x] **Step 3: Implement.** (a) Add `bucketDays` right after the `dayRange` helper. Find:
 
 ```js
 const dayRange = (from, to) => { const out = []; let k = from; let guard = 0; while (k <= to && guard++ < 4000) { out.push(k); k = addDays(k, 1); } return out; };
@@ -1322,9 +1322,9 @@ Replace with:
       'aria-label': `${unit === 'day' ? d : (unit === 'week' ? 'week of ' + d : d.slice(0, 7))}: ${fmtMetric(totals[i] || 0, metric)} total`
 ```
 
-- [ ] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `29/29 checks passed`.
+- [x] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `29/29 checks passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "fix: bucket wide date ranges into weeks/months - bounded DOM, readable bars (review #4)"
@@ -1336,7 +1336,7 @@ git add -A && git commit -m "fix: bucket wide date ranges into weeks/months - bo
 
 **Files:** Modify: `AI Usage Dashboard.html`, Create: `tests/checks/95-ui-misc.mjs`
 
-- [ ] **Step 1: Write the failing check** — create `tests/checks/95-ui-misc.mjs`:
+- [x] **Step 1: Write the failing check** — create `tests/checks/95-ui-misc.mjs`:
 
 ```js
 import { openDashboard } from '../lib/harness.mjs';
@@ -1362,9 +1362,9 @@ export async function run({ browser, ok }) {
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**: `node tests/run.mjs`
+- [x] **Step 2: Run to verify it fails**: `node tests/run.mjs`
 
-- [ ] **Step 3: Implement.** In `handleImportFiles`, find:
+- [x] **Step 3: Implement.** In `handleImportFiles`, find:
 
 ```js
     for (const f of files) {
@@ -1398,9 +1398,9 @@ Replace with:
     this.render();
 ```
 
-- [ ] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `30/30 checks passed`.
+- [x] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `30/30 checks passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "fix: per-file parsing status + large-import warning before blocking parse (review #8)"
@@ -1414,7 +1414,7 @@ git add -A && git commit -m "fix: per-file parsing status + large-import warning
 
 The PowerShell fallback commands currently interpolate the typed key into on-page `<pre>` text. Replace with `Read-Host` so the command prompts for the key when run — the key never appears in the DOM or shell history.
 
-- [ ] **Step 1: Write the failing check.** Append inside `run` in `tests/checks/95-ui-misc.mjs` (before `await page.close();`):
+- [x] **Step 1: Write the failing check.** Append inside `run` in `tests/checks/95-ui-misc.mjs` (before `await page.close();`):
 
 ```js
   const keyLeak = await page.evaluate(() => {
@@ -1429,11 +1429,11 @@ The PowerShell fallback commands currently interpolate the typed key into on-pag
   ok('security: typed key never appears in DOM text', keyLeak === false, '');
 ```
 
-- [ ] **Step 2: Run to verify it fails** (v1 mirrors the key into `#anthropic-cmd`): `node tests/run.mjs`
+- [x] **Step 2: Run to verify it fails** (v1 mirrors the key into `#anthropic-cmd`): `node tests/run.mjs`
 
 *(If it unexpectedly passes, search the file for the code that updates `anthropic-cmd`/`openai-cmd` on input — the wiring may only fire on specific events; adapt the dispatched event to match, then confirm it fails before fixing.)*
 
-- [ ] **Step 3: Implement.** (a) In `anthropicPSCommand`, find:
+- [x] **Step 3: Implement.** (a) In `anthropicPSCommand`, find:
 
 ```js
 function anthropicPSCommand(key, days) {
@@ -1493,9 +1493,9 @@ Replace with:
     for (const id of ['anthropic-days', 'openai-days']) $(id).addEventListener('input', () => this.updatePSCommands());
 ```
 
-- [ ] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `31/31 checks passed`.
+- [x] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `31/31 checks passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "security: PowerShell fallback prompts for key via Read-Host - key never rendered into DOM"
@@ -1507,7 +1507,7 @@ git add -A && git commit -m "security: PowerShell fallback prompts for key via R
 
 **Files:** Modify: `AI Usage Dashboard.html`, Modify: `tests/checks/95-ui-misc.mjs`
 
-- [ ] **Step 1: Write the failing checks.** Append inside `run` in `tests/checks/95-ui-misc.mjs` (before `await page.close();`):
+- [x] **Step 1: Write the failing checks.** Append inside `run` in `tests/checks/95-ui-misc.mjs` (before `await page.close();`):
 
 ```js
   const quotaSurfaced = await page.evaluate(() => {
@@ -1553,11 +1553,11 @@ Then wire `postRun` into `tests/run.mjs`: find `await mod.run({ browser, ok });`
   if (mod.postRun) await mod.postRun({ ok });
 ```
 
-- [ ] **Step 2: Run to verify both fail** (no quota banner; NUL bytes still present in the pricing/other sections if any remain): `node tests/run.mjs`
+- [x] **Step 2: Run to verify both fail** (no quota banner; NUL bytes still present in the pricing/other sections if any remain): `node tests/run.mjs`
 
 *(If the NUL check passes already — Task 9 removed them all — that is fine; keep the check as a regression guard and continue.)*
 
-- [ ] **Step 3: Implement quota surfacing.** Find:
+- [x] **Step 3: Implement quota surfacing.** Find:
 
 ```js
   set(k, v) { try { localStorage.setItem('aiusage:' + k, JSON.stringify(v)); } catch (e) { console.warn('localStorage full?', e); } },
@@ -1585,9 +1585,9 @@ Replace with:
 
 Then sweep any remaining literal NUL bytes: run `node -e "const fs=require('fs');const b=fs.readFileSync('AI Usage Dashboard.html');console.log([...b].map((v,i)=>v===0?i:null).filter(v=>v!==null))"` — for each offset found, Read that region and replace the byte with the appropriate visible escape (`\u0001` separator or remove it). After Task 9 the expected remaining count is 0–2 (a comment near `makeAgg` was already rewritten; check the `renderShareBar`/`seriesFor` key-join sites).
 
-- [ ] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `33/33 checks passed`.
+- [x] **Step 4: Run to verify all pass** — `node tests/run.mjs` → `33/33 checks passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "fix: surface storage-quota failures in UI; remove remaining NUL bytes"
@@ -1599,7 +1599,7 @@ git add -A && git commit -m "fix: surface storage-quota failures in UI; remove r
 
 **Files:** Modify: `docs/superpowers/reviews/2026-08-15-v1-code-review.md` (status column only)
 
-- [ ] **Step 1: Full suite, twice** (second run proves fixture regeneration is deterministic)
+- [x] **Step 1: Full suite, twice** (second run proves fixture regeneration is deterministic)
 
 ```bash
 node tests/run.mjs && node tests/run.mjs
@@ -1607,7 +1607,7 @@ node tests/run.mjs && node tests/run.mjs
 
 Expected: `33/33 checks passed` both times, exit 0.
 
-- [ ] **Step 2: Theme smoke screenshots.** Run this one-off script (do not commit it):
+- [x] **Step 2: Theme smoke screenshots.** Run this one-off script (do not commit it):
 
 ```bash
 node -e "
@@ -1631,7 +1631,7 @@ import('./tests/lib/harness.mjs').then(async ({ launch, openDashboard }) => {
 
 Expected: `screenshots ok`; visually inspect `tests/artifacts/light.png` and `dark.png` — cards, chart, KPIs render in both themes with no unstyled regions.
 
-- [ ] **Step 3: Verify the file is still self-contained and reasonably sized**
+- [x] **Step 3: Verify the file is still self-contained and reasonably sized**
 
 ```bash
 node -e "const s=require('fs').statSync('AI Usage Dashboard.html');console.log(s.size,'bytes');process.exit(s.size>300*1024?1:0)"
@@ -1639,7 +1639,7 @@ node -e "const s=require('fs').statSync('AI Usage Dashboard.html');console.log(s
 
 Expected: ~112–125 KB, exit 0.
 
-- [ ] **Step 4: Mark defects fixed in the review doc.** In `docs/superpowers/reviews/2026-08-15-v1-code-review.md`, append at the very end:
+- [x] **Step 4: Mark defects fixed in the review doc.** In `docs/superpowers/reviews/2026-08-15-v1-code-review.md`, append at the very end:
 
 ```markdown
 
@@ -1648,7 +1648,7 @@ Expected: ~112–125 KB, exit 0.
 All 13 verified defects fixed in v1.1 (commits in this repo, one per fix), each with a regression check in `tests/checks/`. Suite: 33 checks green.
 ```
 
-- [ ] **Step 5: Final commit**
+- [x] **Step 5: Final commit**
 
 ```bash
 git add -A && git commit -m "docs: mark review defects fixed; theme smoke artifacts ignored"

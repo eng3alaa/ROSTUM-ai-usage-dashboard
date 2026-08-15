@@ -25,7 +25,7 @@ Method: 4 dimension reviewers (security / performance / correctness / maintainab
 
 - Admin API key is embedded (unescaped) in the PowerShell fallback command rendered into the DOM on load, even before the fallback is opened.
 - localStorage quota failures on persist are swallowed twice — data loss would be invisible.
-- Literal NUL (U+0000) bytes are used as map-key separators in JS string literals — harmless at runtime but makes the file read as binary to grep/rg and some editors; use `\0`/`` escapes.
+- Literal NUL (U+0000) bytes are used as map-key separators in JS string literals — harmless at runtime but makes the file read as binary to grep/rg and some editors; use `\0`/`\u0001` escapes.
 - Projects parsed from *dropped* .jsonl files are assigned after persist and never saved.
 - Refresh/auto-refresh silently skips API re-fetch unless the key was persisted ("remember" checked).
 - Each render makes ~9–10 full passes over the event store; hidden table twins are rebuilt even when the chart view is active; pagination loop duplicated 4× with magic constants; color-slot count hardcoded in two places; Store internals mutated from 8 call sites.
