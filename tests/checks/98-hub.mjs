@@ -181,6 +181,24 @@ export async function run({ browser, ok }) {
     });
     ok('hub: card stats independent of the global date filter',
       /700|0\.0/.test(filterIndep.stats), JSON.stringify(filterIndep));
+
+    // M8: an import batch that never actually lands anything (every file unparseable /
+    // unrecognized / errored) must not fake a connected imports card.
+    const failedImport = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      App.renderHub();
+      const badFile = new File(['not valid json {{{'], 'bad.json', { type: 'application/json' });
+      await App.handleImportFiles([badFile]);
+      App.renderHub();
+      const card = document.querySelector('#accounts-hub .acct[data-connector="imports"]');
+      return {
+        connectorsImports: Store.connectors.imports,
+        dot: card.querySelector('.dot').className,
+      };
+    });
+    ok('hub: failed import does not fake a connected imports card',
+      failedImport.connectorsImports === undefined && /\boff\b/.test(failedImport.dot),
+      JSON.stringify(failedImport));
   } finally {
     await page.close();
   }

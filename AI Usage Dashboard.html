@@ -1908,11 +1908,19 @@ const App = {
     const t2 = todayKey();
     const u2 = dayKeyUTC(new Date());
     const win30 = { from: addDays(t2, -29), to: u2 > t2 ? u2 : t2 };
+    const allRows = Store.allRows();   // computed once — avoid O(connectors × N) rebuilds
     for (const c of CONNECTORS) {
       const st = Store.connectors[c.id] || {};
       const status = Store.connectorStatus(c);
-      const rows = Store.allRows().filter(r => c.srcIds.includes('csv') || !c.platform ? c.srcIds.some(sid => (Store.sources[sid]?.rows || []).includes(r)) : r.platform === c.platform)
-        .filter(r => r.d >= win30.from && r.d <= win30.to);
+      let rows;
+      if (c.srcIds.includes('csv') || !c.platform) {
+        // imports (and any future null-platform connector): membership via a Set built
+        // once from its source rows, instead of an O(M) .includes scan per row.
+        const importRows = new Set(c.srcIds.flatMap(sid => (Store.sources[sid]?.rows) || []));
+        rows = allRows.filter(r => importRows.has(r) && r.d >= win30.from && r.d <= win30.to);
+      } else {
+        rows = allRows.filter(r => r.platform === c.platform && r.d >= win30.from && r.d <= win30.to);
+      }
       let tok = 0, cost = 0;
       for (const r of rows) { tok += (r.in||0)+(r.cw||0)+(r.cr||0)+(r.out||0); cost += Pricing.cost(r.model, r); }
       const card = el('div', { class: 'acct', 'data-connector': c.id, style: { '--acct-brand': c.brand }, tabindex: 0, role: 'button',
@@ -2546,6 +2554,7 @@ const App = {
     clear(status);
     const notes = [];
     const jsonlFiles = [];
+    let imported = 0;   // count of successful import branches — only these justify a connected 'imports' card
     for (const f of files) {
       try {
         status.appendChild(el('div', { text: `Parsing ${f.name}…` }));
@@ -2566,6 +2575,7 @@ const App = {
           }
           notes.push(`${f.name}: imported ${res.meta.rows} CSV rows (merged by day/platform/model)`
             + (res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric or negative)` : ''));
+          imported++;
           continue;
         }
         const obj = JSON.parse(await f.text());
@@ -2574,28 +2584,34 @@ const App = {
           const res = parseChatGPTExport(kind === 'chatgpt-export' ? obj : obj.conversations);
           Store.setSource('chatgpt', res.rows, res.meta);
           notes.push(`${f.name}: ChatGPT export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens)`);
+          imported++;
         } else if (kind === 'claudeai-export') {
           const res = parseClaudeAiExport(obj, $('assumed-claude-model').value);
           Store.setSource('claudeai', res.rows, res.meta);
           notes.push(`${f.name}: Claude.ai export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens)`);
+          imported++;
         } else if (kind === 'anthropic-usage') {
           const res = parseAnthropicUsage(obj);
           this._gen.anthropic++;   // an import supersedes any in-flight fetch — it must not overwrite this
           Store.setSource('anthropic', res.rows, {});
           notes.push(`${f.name}: Anthropic usage report — ${res.rows.length} rows`);
+          imported++;
         } else if (kind === 'anthropic-cost') {
           this._gen.anthropic++;   // an import supersedes any in-flight fetch — it must not overwrite this
           Store.setBilled('anthropic', parseAnthropicCost(obj));
           notes.push(`${f.name}: Anthropic billed costs imported`);
+          imported++;
         } else if (kind === 'openai-usage') {
           const res = parseOpenAIUsage(obj);
           this._gen.openai++;   // an import supersedes any in-flight fetch — it must not overwrite this
           Store.setSource('openai', res.rows, {});
           notes.push(`${f.name}: OpenAI usage report — ${res.rows.length} rows`);
+          imported++;
         } else if (kind === 'openai-cost') {
           this._gen.openai++;   // an import supersedes any in-flight fetch — it must not overwrite this
           Store.setBilled('openai', parseOpenAICost(obj));
           notes.push(`${f.name}: OpenAI billed costs imported`);
+          imported++;
         } else if (kind === 'empty-report') {
           notes.push(`${f.name}: recognized usage/cost report, but every day in it is empty — nothing to import`);
         } else {
@@ -2611,11 +2627,14 @@ const App = {
         if (res.projects.length && !Store.sources.local) Store.projects = res.projects;   // folder scan wins; assign BEFORE persist
         Store.setSource('local-import', res.rows, res.meta);
         notes.push(`${jsonlFiles.length} .jsonl files: ${fmtInt(res.meta.msgs)} messages imported`);
+        imported++;
       } catch (e) { notes.push(`.jsonl import failed — ${e.message || e}`); }
     }
     clear(status);
     for (const n of notes) status.appendChild(el('div', { text: n }));
-    Store.setConnector('imports', { label: notes.length + ' file(s) imported', lastSync: Date.now() });
+    // only a real success justifies showing the imports card as connected — a batch that
+    // was entirely unparseable/unrecognized/failed must not fake a connected state.
+    if (imported > 0) Store.setConnector('imports', { label: imported + ' file(s) imported', lastSync: Date.now() });
     this.render();
   },
 
