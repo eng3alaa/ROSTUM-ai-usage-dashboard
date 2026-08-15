@@ -520,7 +520,19 @@ progress { width: 160px; height: 8px; }
       </details>
     </div>
 
-    <div class="card src" id="src-gemini" hidden><div class="status" id="gemini-status"></div></div>
+    <div class="card src" id="src-gemini" hidden>
+      <div class="card-head"><h2>Gemini (Google AI)</h2><span class="badge">key validation</span></div>
+      <div class="desc">Validates your Google AI Studio key and lists available models. Google's API has no usage-history endpoint — import a Cloud Billing export CSV (Imports card) for historical usage. Get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.</div>
+      <div class="row">
+        <input type="password" id="gemini-key" placeholder="AIza…" autocomplete="off">
+        <button class="btn primary" id="fetch-gemini">Validate &amp; connect</button>
+      </div>
+      <div class="row">
+        <label class="inline"><input type="checkbox" id="remember-gemini"> Remember key on this computer</label>
+      </div>
+      <div class="status" id="gemini-status">Not connected.</div>
+    </div>
+
     <div class="card src" id="src-copilot" hidden><div class="status" id="copilot-status"></div></div>
     <div class="card src" id="src-openrouter" hidden><div class="status" id="openrouter-status"></div></div>
 
@@ -2286,7 +2298,7 @@ const App = {
     } catch (e) { console.warn(e); }
   },
 
-  _gen: { local: 0, anthropic: 0, openai: 0 },
+  _gen: { local: 0, anthropic: 0, openai: 0, gemini: 0, copilot: 0, openrouter: 0 },
 
   async fetchAnthropic() {
     const gen = ++this._gen.anthropic;
@@ -2341,6 +2353,32 @@ const App = {
       status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
       status.appendChild(document.createTextNode((e.message || String(e)) + ' — if this is a CORS/network block, use the PowerShell fallback below.'));
       document.querySelector('#src-openai details.fallback').open = true;
+    }
+  },
+
+  async fetchGemini() {
+    const gen = ++this._gen.gemini;
+    const key = $('gemini-key').value.trim();
+    const status = $('gemini-status');
+    if (!key) { status.textContent = 'Paste a Google AI Studio API key first (starts with AIza).'; return; }
+    if ($('remember-gemini') && $('remember-gemini').checked) LS.set('key:gemini', key);
+    status.textContent = 'Validating…';
+    try {
+      const j = await fetchJSON('https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(key), {});
+      if (gen !== this._gen.gemini) return;
+      const n = (j.models || []).length;
+      Store.setConnector('gemini', { label: n + ' models available', lastSync: Date.now(), err: null });
+      status.textContent = '';
+      status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
+      status.appendChild(document.createTextNode(`${n} models · usage history comes from billing CSV imports`));
+      this.render();
+    } catch (e) {
+      if (gen !== this._gen.gemini) return;
+      Store.setConnector('gemini', { err: (e.message || String(e)).slice(0, 80) });
+      status.textContent = '';
+      status.appendChild(el('span', { class: 'err', text: 'Validation failed: ' }));
+      status.appendChild(document.createTextNode(e.message || String(e)));
+      this.render();
     }
   },
 
@@ -2587,6 +2625,10 @@ const App = {
     $('remember-anthropic').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:anthropic'); else if ($('anthropic-key').value) LS.set('key:anthropic', $('anthropic-key').value.trim()); });
     $('remember-openai').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:openai'); else if ($('openai-key').value) LS.set('key:openai', $('openai-key').value.trim()); });
     for (const id of ['anthropic-days', 'openai-days']) $(id).addEventListener('input', () => this.updatePSCommands());
+
+    $('fetch-gemini').addEventListener('click', () => this.fetchGemini());
+    const gk = LS.get('key:gemini', null); if (gk) { $('gemini-key').value = gk; $('remember-gemini').checked = true; }
+    $('remember-gemini').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:gemini'); else if ($('gemini-key').value) LS.set('key:gemini', $('gemini-key').value.trim()); });
     this.updatePSCommands();
 
     // imports
