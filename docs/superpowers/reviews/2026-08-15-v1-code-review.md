@@ -55,3 +55,5 @@ All four new defects were added to the v2 spec as items 10–13 of "v1 defects f
 ## Status — 2026-08-15 (post Plan 1)
 
 v1.1 (branch `v1.1-defect-fixes`) fixes 11 of the 13 verified defects — #5 (connector registry) and #7 (incremental scan cache) are deferred by design to Plan 2, where they are built once as part of the connector rework. Also fixed: the carried-in unverified-note items (key never rendered into DOM, storage-quota banner, NUL bytes removed, imported projects persisted). Every fix has a regression check; suite: 35 checks green, one commit per fix.
+
+Plan 2 (branch v2-accounts-hub) closes #5 (CONNECTORS registry) and #7 (incremental scan cache).

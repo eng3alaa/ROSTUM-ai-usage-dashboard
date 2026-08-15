@@ -173,15 +173,16 @@ Also carried in from unverified-but-plausible review notes: fallback commands co
 
 Non-blocking findings from the final whole-branch review of v1.1, accepted as Plan 2 work items alongside deferred defects #5 (connector registry) and #7 (incremental scan cache):
 
-1. **sid row multiplication**: per-session aggregation rows multiply storage/render volume for heavy multi-session days — add a sid side-index or store sids as a list on merged rows, plus a retention policy for the localStorage blob.
+1. **sid row multiplication**: per-session aggregation rows multiply storage/render volume for heavy multi-session days — add a sid side-index or store sids as a list on merged rows, plus a retention policy for the localStorage blob. — DONE (Plan 2)
 2. **Week-bucket edge labels**: a range starting mid-week labels its first bucket "Week of <Monday before the range>" — clamp displayed labels to the range.
 3. **Delegated chart pointer handler**: defect #4's second clause (one pointermove handler on the SVG deriving day index from x) — bucketing bounds the cost today; finish the remedy in the chart rewrite.
 4. **Worker/chunked import parsing**: defect #8's second clause — the tab still freezes on very large exports, now with honest feedback; move parse to a Blob worker in v2.
-5. **Harness default storage isolation**: `openDashboard` should clear `aiusage:*` storage unless seeding, instead of relying on per-check discipline.
-6. **postRun coverage on throw**: `tests/run.mjs` skips a module's `postRun` if its `run` throws — move postRun into a finally or its own try.
-7. **scanHandle catch gen-guard**: fetch error paths are gen-guarded; the folder-scan catch is not (low risk, same category).
-8. **Soft-fail race check**: the import-vs-fetch gen guard is covered by a hard-reject check; add a usage-OK-cost-null variant to pin the soft-fail path explicitly (mechanism verified manually in the final review).
-9. **Superseded-fetch status text**: when an import supersedes an in-flight fetch, the fetch bails before updating its status line, leaving "Fetching usage…" stuck (cosmetic; data correct). Reset or annotate the status on bail; the accounts-hub card states in v2 subsume this.
+5. **Harness default storage isolation**: `openDashboard` should clear `aiusage:*` storage unless seeding, instead of relying on per-check discipline. — DONE (Plan 2)
+6. **postRun coverage on throw**: `tests/run.mjs` skips a module's `postRun` if its `run` throws — move postRun into a finally or its own try. — DONE (Plan 2)
+7. **scanHandle catch gen-guard**: fetch error paths are gen-guarded; the folder-scan catch is not (low risk, same category). — DONE (Plan 2)
+8. **Soft-fail race check**: the import-vs-fetch gen guard is covered by a hard-reject check; add a usage-OK-cost-null variant to pin the soft-fail path explicitly (mechanism verified manually in the final review). — DONE (Plan 2 T10 pin)
+9. **Superseded-fetch status text**: when an import supersedes an in-flight fetch, the fetch bails before updating its status line, leaving "Fetching usage…" stuck (cosmetic; data correct). Reset or annotate the status on bail; the accounts-hub card states in v2 subsume this. — DONE (Plan 2 T10), with one residual cosmetic case for Plan 3: two overlapping fetches on the SAME connector — the older bail can blank the newer's in-flight placeholder (self-heals on resolve).
+10. **Drill-down persistence** (Plan 2 T9 review): drill-down mutates hiddenPlatforms without persisting to LS, unlike chip toggles — decide in Plan 3 whether ephemeral is intended (likely yes: document it) or persist for consistency.
 
 ## Acceptance criteria
 
