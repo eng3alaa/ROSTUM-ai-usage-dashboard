@@ -73,6 +73,24 @@ export async function run({ browser, ok }) {
     ok('race: import during in-flight fetch stays fresh',
       importRace.stale === false && importRace.amount === 42 && !importRace.status.includes('Fetch failed'),
       JSON.stringify(importRace));
+
+    const softFail = await page.evaluate(async () => {
+      localStorage.removeItem('aiusage:data');
+      Store.sources = {}; Store.billed = {}; Store.projects = {} && []; Store.connectors = {};
+      // import writes fresh billed data...
+      await App.handleImportFiles([new File([JSON.stringify({ data: [{ starting_at: '2026-08-02T00:00:00Z', results: [{ amount: { value: '42', currency: 'USD' } }] }] })], 'cost.json')]);
+      // ...then an ALREADY-IN-FLIGHT fetch resolves with usage OK but cost=null (soft fail)
+      window.fetchAnthropicAll = async () => { await new Promise(r => setTimeout(r, 150)); return { usage: { rows: [{ d: '2026-08-11', platform: 'Anthropic API', model: 'claude-sonnet-5', in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }] }, cost: null }; };
+      document.getElementById('anthropic-key').value = 'sk-ant-admin-test';
+      const p = App.fetchAnthropic();
+      await new Promise(r => setTimeout(r, 10));
+      App._gen.anthropic++;                                   // simulate a superseding action (import path bumps this)
+      await Promise.allSettled([p]);
+      const env = Store.billed.anthropic;
+      return { stale: env.stale, amount: Store.billedRows('anthropic')[0].amount, statusText: document.getElementById('anthropic-status').textContent };
+    });
+    ok('race: soft-fail (cost=null) superseded fetch cannot stale-mark fresh import', softFail.stale === false && softFail.amount === 42, JSON.stringify(softFail));
+    ok('race: superseded fetch does not leave status stuck at Fetching', !/Fetching/.test(softFail.statusText), softFail.statusText);
   } finally {
     await page.close();
   }
