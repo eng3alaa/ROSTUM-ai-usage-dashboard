@@ -2128,6 +2128,9 @@ const App = {
     const jsonlFiles = [];
     for (const f of files) {
       try {
+        status.appendChild(el('div', { text: `Parsing ${f.name}…` }));
+        if (f.size > 200 * 1024 * 1024) status.appendChild(el('div', { text: `${f.name} is ${Math.round(f.size / 1048576)} MB — this may take a minute; the tab may briefly freeze.` }));
+        await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));   // paint before blocking parse
         if (f.name.endsWith('.jsonl')) { jsonlFiles.push({ path: f.name, file: f }); continue; }
         if (f.name.endsWith('.csv')) {
           const res = parseGenericCSV(await f.text());
@@ -2185,6 +2188,7 @@ const App = {
         notes.push(`${jsonlFiles.length} .jsonl files: ${fmtInt(res.meta.msgs)} messages imported`);
       } catch (e) { notes.push(`.jsonl import failed — ${e.message || e}`); }
     }
+    clear(status);
     for (const n of notes) status.appendChild(el('div', { text: n }));
     this.render();
   },
