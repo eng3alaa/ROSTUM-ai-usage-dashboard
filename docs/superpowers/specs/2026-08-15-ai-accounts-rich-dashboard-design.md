@@ -169,6 +169,19 @@ A second, independent review by OpenAI Codex (`docs/superpowers/reviews/2026-08-
 
 Also carried in from unverified-but-plausible review notes: fallback commands containing a key are only rendered into the DOM on user request; localStorage quota failures surface in the UI; literal NUL separators become escaped forms; projects from dropped .jsonl files persist correctly.
 
+## Plan 2 backlog (carried from the Plan 1 integration review, 2026-08-15)
+
+Non-blocking findings from the final whole-branch review of v1.1, accepted as Plan 2 work items alongside deferred defects #5 (connector registry) and #7 (incremental scan cache):
+
+1. **sid row multiplication**: per-session aggregation rows multiply storage/render volume for heavy multi-session days — add a sid side-index or store sids as a list on merged rows, plus a retention policy for the localStorage blob.
+2. **Week-bucket edge labels**: a range starting mid-week labels its first bucket "Week of <Monday before the range>" — clamp displayed labels to the range.
+3. **Delegated chart pointer handler**: defect #4's second clause (one pointermove handler on the SVG deriving day index from x) — bucketing bounds the cost today; finish the remedy in the chart rewrite.
+4. **Worker/chunked import parsing**: defect #8's second clause — the tab still freezes on very large exports, now with honest feedback; move parse to a Blob worker in v2.
+5. **Harness default storage isolation**: `openDashboard` should clear `aiusage:*` storage unless seeding, instead of relying on per-check discipline.
+6. **postRun coverage on throw**: `tests/run.mjs` skips a module's `postRun` if its `run` throws — move postRun into a finally or its own try.
+7. **scanHandle catch gen-guard**: fetch error paths are gen-guarded; the folder-scan catch is not (low risk, same category).
+8. **Soft-fail race check**: the import-vs-fetch gen guard is covered by a hard-reject check; add a usage-OK-cost-null variant to pin the soft-fail path explicitly.
+
 ## Acceptance criteria
 
 - Each of the 7 platforms has an account card with working connect → validate → sync → disconnect lifecycle and truthful capability notes.
