@@ -1517,6 +1517,22 @@ git add -A && git commit -m "security: PowerShell fallback prompts for key via R
     return document.body.textContent.includes('storage is full');
   });
   ok('storage: quota failure surfaces in the UI', quotaSurfaced, '');
+
+  // Interplay guard (from Task 13 review): a quota failure DURING an import fires before
+  // handleImportFiles' clear(status) — the warning must survive because it lives in a
+  // dedicated #storage-warning banner, not in #import-status.
+  const quotaSurvivesImport = await page.evaluate(async () => {
+    document.getElementById('storage-warning')?.remove();
+    const orig = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => { throw new DOMException('quota', 'QuotaExceededError'); };
+    try {
+      const csv = 'date,platform,model,input_tokens\n2026-08-10,Gemini,gemini-3,5\n';
+      await App.handleImportFiles([new File([csv], 'quota-probe.csv', { type: 'text/csv' })]);
+    } finally { Storage.prototype.setItem = orig; }
+    const banner = document.getElementById('storage-warning');
+    return !!banner && banner.textContent.includes('storage is full');
+  });
+  ok('storage: mid-import quota warning survives the status clear', quotaSurvivesImport, '');
 ```
 
 And add a Node-side byte scan at the very end of the file (after the closing brace of `run`):
@@ -1554,10 +1570,15 @@ Replace with:
     try { localStorage.setItem('aiusage:' + k, JSON.stringify(v)); }
     catch (e) {
       console.warn('localStorage full?', e);
-      const s = document.getElementById('import-status');
-      if (s && !s.textContent.includes('storage is full')) {
-        s.appendChild(el('div', { class: 'err', text: 'Warning: browser storage is full — new data may not persist. Export a CSV backup, or Clear stored data.' }));
+      // Dedicated banner — NOT #import-status, which handleImportFiles clears at the
+      // end of every import (Task 13), which would wipe a mid-import quota warning.
+      let s = document.getElementById('storage-warning');
+      if (!s) {
+        const wrap = document.querySelector('.wrap') || document.body;
+        s = el('div', { id: 'storage-warning', class: 'err', role: 'alert' });
+        wrap.insertBefore(s, wrap.firstChild);
       }
+      s.textContent = 'Warning: browser storage is full — new data may not persist. Export a CSV backup, or Clear stored data.';
     }
   },
 ```
