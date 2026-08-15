@@ -35,6 +35,42 @@ export async function run({ browser, ok }) {
     });
     ok('scan-cache: junk and excluded-dir files filtered before counting/caching',
       junk.files === 1 && junk.parsedFiles === 1 && junk.cacheSize === 1, JSON.stringify(junk));
+
+    // Claude Code replays messages across forked session files — the SAME message
+    // (id+requestId) can legitimately appear in two different .jsonl files. The
+    // top-level parseClaudeLogs dedupes via a Set spanning ALL files; the cached
+    // wrapper must preserve that cross-file span, not reset it per file.
+    const dup = await page.evaluate(async () => {
+      const mkFileA = () => ({ path: 'projects/-D--proj2/sess-a.jsonl', file: new File(
+        [JSON.stringify({ type: 'assistant', timestamp: '2026-08-12T09:00:00.000Z', cwd: 'D:\\proj2', requestId: 'rX',
+          message: { id: 'mX', model: 'claude-sonnet-5', usage: { input_tokens: 100, output_tokens: 200 } } })],
+        'sess-a.jsonl', { lastModified: 1754000001000 }) });
+      const mkFileB = () => ({ path: 'projects/-D--proj2/sess-b.jsonl', file: new File(
+        [[
+          JSON.stringify({ type: 'assistant', timestamp: '2026-08-12T09:00:05.000Z', cwd: 'D:\\proj2', requestId: 'rX',
+            message: { id: 'mX', model: 'claude-sonnet-5', usage: { input_tokens: 100, output_tokens: 200 } } }),
+          JSON.stringify({ type: 'assistant', timestamp: '2026-08-12T09:05:00.000Z', cwd: 'D:\\proj2', requestId: 'rY',
+            message: { id: 'mY', model: 'claude-sonnet-5', usage: { input_tokens: 10, output_tokens: 20 } } }),
+        ].join('\n')],
+        'sess-b.jsonl', { lastModified: 1754000002000 }) });
+      const sumOf = (rows) => rows.reduce((t, r) => ({ in: t.in + (r.in || 0), out: t.out + (r.out || 0), msgs: t.msgs + (r.msgs || 0) }),
+        { in: 0, out: 0, msgs: 0 });
+
+      const direct = await parseClaudeLogs([mkFileB(), mkFileA()], null);
+      const directTotals = sumOf(direct.rows);
+
+      const cache = new Map();
+      const c1 = await parseClaudeLogsCached([mkFileB(), mkFileA()], null, cache);
+      const c1Totals = sumOf(c1.rows);
+      const c2 = await parseClaudeLogsCached([mkFileB(), mkFileA()], null, cache);   // same cache, second pass
+      const c2Totals = sumOf(c2.rows);
+
+      return { directTotals, c1Totals, c2Totals };
+    });
+    ok('scan-cache: cross-file duplicate messages deduped through the cache',
+      dup.c1Totals.in === dup.directTotals.in && dup.c1Totals.out === dup.directTotals.out && dup.c1Totals.msgs === dup.directTotals.msgs &&
+      dup.c2Totals.in === dup.c1Totals.in && dup.c2Totals.out === dup.c1Totals.out && dup.c2Totals.msgs === dup.c1Totals.msgs,
+      JSON.stringify(dup));
   } finally {
     await page.close();
   }

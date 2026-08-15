@@ -45,6 +45,24 @@ export async function run({ browser, ok }) {
     }, sessText);
     ok('dedupe: same session via folder + dropzone counted once', dd.in === 110 && dd.msgs === 2, JSON.stringify(dd));
     ok('dedupe: projects persisted to localStorage', dd.persistedProjects > 0, dd.persistedProjects);
+
+    // Aged-date variant: compaction (rows older than 90d) strips the per-row sid and
+    // merges into a bundle — that bundle must carry a `sids` list so local/local-import
+    // dedupe still works after compaction, not just for recent uncompacted rows.
+    const aged = await page.evaluate(async () => {
+      localStorage.removeItem('aiusage:data');
+      Store.sources = {}; Store.billed = {}; Store.projects = [];
+      const agedDay = addDays(todayKey(), -200);
+      const row = { d: agedDay, platform: 'Claude Code/Desktop', model: 'claude-sonnet-5', in: 100, cw: 25, cr: 50, out: 200, msgs: 1, sid: 'sess-aged-xyz' };
+      Store.setSource('local', [row], {});
+      Store.setSource('local-import', [{ ...row }], {});
+      const all = Store.allRows();
+      const t = { in: 0, msgs: 0, n: all.length };
+      for (const r of all) { t.in += r.in; t.msgs += r.msgs; }
+      return t;
+    });
+    ok('dedupe: aged compacted rows still dedupe across local sources',
+      aged.n === 1 && aged.in === 100 && aged.msgs === 1, JSON.stringify(aged));
   } finally {
     await page.close();
   }

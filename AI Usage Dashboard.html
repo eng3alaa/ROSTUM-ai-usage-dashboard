@@ -894,19 +894,26 @@ const Store = {
       if (!r.sid || r.d >= cutoff) { keep.push(r); continue; }
       const k = r.d + '\u0001' + r.platform + '\u0001' + r.model;
       let b = merge.get(k);
-      if (!b) { b = { d: r.d, platform: r.platform, model: r.model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0 }; if (r.est) b.est = 1; merge.set(k, b); }
+      if (!b) { b = { d: r.d, platform: r.platform, model: r.model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0, sids: [] }; if (r.est) b.est = 1; merge.set(k, b); }
       b.in += r.in || 0; b.cw += r.cw || 0; b.cr += r.cr || 0; b.out += r.out || 0; b.msgs += r.msgs || 0;
       if (r.est) b.est = 1;
+      if (r.sid && !b.sids.includes(r.sid)) b.sids.push(r.sid);
     }
     return keep.concat([...merge.values()]);
   },
   setSource(id, rows, meta) { this.sources[id] = { rows: this.compactRows(rows), meta: { ...meta, updated: Date.now() } }; this.persist(); },
   clearAll() { this.sources = {}; this.billed = {}; this.projects = []; this.connectors = {}; LS.del('data'); },
   allRows() {
-    const localSids = new Set(((this.sources.local || {}).rows || []).map(r => r.sid).filter(Boolean));
+    const localSids = new Set();
+    for (const r of ((this.sources.local || {}).rows || [])) {
+      if (r.sid) localSids.add(r.sid);
+      if (Array.isArray(r.sids)) r.sids.forEach(s => localSids.add(s));
+    }
     return Object.entries(this.sources).flatMap(([id, s]) => {
       let rows = s.rows || [];
-      if (id === 'local-import' && localSids.size) rows = rows.filter(r => !r.sid || !localSids.has(r.sid));
+      if (id === 'local-import' && localSids.size) {
+        rows = rows.filter(r => !((r.sid && localSids.has(r.sid)) || (Array.isArray(r.sids) && r.sids.some(sd => localSids.has(sd)))));
+      }
       return rows;
     });
   },
@@ -1015,9 +1022,9 @@ function prettyProject(raw) {
 }
 
 /** files: [{path, file}] → aggregated usage */
-async function parseClaudeLogs(files, onProgress) {
+async function parseClaudeLogs(files, onProgress, seen = new Set()) {
   const agg = makeAgg();
-  const seen = new Set();
+  const addedIds = [];
   const projMap = new Map(); // project\0model -> bundle
   let msgs = 0, lines = 0, badLines = 0;
   const jsonl = files.filter(f => f.path.endsWith('.jsonl') && !/\/(todos|statsig)\//.test('/' + f.path));
@@ -1039,7 +1046,7 @@ async function parseClaudeLogs(files, onProgress) {
       if (model === '<synthetic>') continue;
       const id = (obj.message.id || '') + ':' + (obj.requestId || '');
       if (id !== ':' && seen.has(id)) continue;
-      if (id !== ':') seen.add(id);
+      if (id !== ':') { seen.add(id); addedIds.push(id); }
       let cw = u.cache_creation_input_tokens;
       if (cw == null && u.cache_creation && typeof u.cache_creation === 'object') {
         cw = Object.values(u.cache_creation).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
@@ -1058,24 +1065,35 @@ async function parseClaudeLogs(files, onProgress) {
   }
   // keep project×model rows raw — cost is computed at render time with live prices
   const projects = [...projMap.values()];
-  return { rows: agg.rows(), projects, meta: { files: jsonl.length, msgs, lines, badLines } };
+  return { rows: agg.rows(), projects, meta: { files: jsonl.length, msgs, lines, badLines, addedIds } };
 }
 
 /** Incremental wrapper: per-file aggregates cached by (path, size, lastModified).
- *  cache: Map (tests) or the IDB-backed ScanCache (app). Reuses parseClaudeLogs per file. */
+ *  cache: Map (tests) or the IDB-backed ScanCache (app). Reuses parseClaudeLogs per file.
+ *  Files are processed in sorted-path order (deterministic) with a `runningSeen` set that
+ *  spans the whole scan, so cross-file duplicate messages (Claude Code replays messages
+ *  across forked session files) stay deduped even though each file is parsed/cached separately. */
 async function parseClaudeLogsCached(files, onProgress, cache) {
   files = files.filter(f => f.path.endsWith('.jsonl') && !/\/(todos|statsig)\//.test('/' + f.path));
+  files = files.slice().sort((a, b) => a.path < b.path ? -1 : 1);
   const rows = [], projects = [];
   let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0;
+  const runningSeen = new Set();
   for (const f of files) {
     const sig = f.path + '\u0001' + f.file.size + '\u0001' + f.file.lastModified;
     let entry = cache ? await cache.get(sig) : null;
-    if (!entry) {
-      const res = await parseClaudeLogs([f], null);
-      entry = { rows: res.rows, projects: res.projects, msgs: res.meta.msgs };
+    // a cache entry from before this fix has no `ids`, and a cached entry whose ids collide
+    // with what's already been counted this scan are both treated as a miss (re-parse).
+    const isMiss = !entry || !entry.ids || entry.ids.some(id => runningSeen.has(id));
+    if (isMiss) {
+      const res = await parseClaudeLogs([f], null, runningSeen);
+      entry = { rows: res.rows, projects: res.projects, msgs: res.meta.msgs, ids: res.meta.addedIds };
       if (cache) await cache.set(sig, entry);
       parsedFiles++;
-    } else cachedFiles++;
+    } else {
+      entry.ids.forEach(id => runningSeen.add(id));
+      cachedFiles++;
+    }
     rows.push(...entry.rows); projects.push(...entry.projects); msgs += entry.msgs;
     done++; if (onProgress) onProgress(done, files.length);
   }
