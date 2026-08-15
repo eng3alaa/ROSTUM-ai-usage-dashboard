@@ -533,7 +533,19 @@ progress { width: 160px; height: 8px; }
       <div class="status" id="gemini-status">Not connected.</div>
     </div>
 
-    <div class="card src" id="src-copilot" hidden><div class="status" id="copilot-status"></div></div>
+    <div class="card src" id="src-copilot" hidden>
+      <div class="card-head"><h2>GitHub Copilot</h2><span class="badge">best-effort usage</span></div>
+      <div class="desc">Validates a fine-grained token (needs 'Plan: read'). Pulls Copilot premium-request usage where GitHub exposes it for your account; otherwise shows the connection only. Create one at <a href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noopener">github.com/settings/personal-access-tokens</a>.</div>
+      <div class="row">
+        <input type="password" id="copilot-key" placeholder="github_pat_…" autocomplete="off">
+        <button class="btn primary" id="fetch-copilot">Validate &amp; connect</button>
+      </div>
+      <div class="row">
+        <label class="inline"><input type="checkbox" id="remember-copilot"> Remember key on this computer</label>
+      </div>
+      <div class="status" id="copilot-status">Not connected.</div>
+    </div>
+
     <div class="card src" id="src-openrouter" hidden><div class="status" id="openrouter-status"></div></div>
 
     <div class="card src" id="src-import">
@@ -1310,6 +1322,26 @@ async function fetchJSON(url, headers) {
     throw new Error(`HTTP ${res.status}${detail ? ' — ' + detail : ''}`);
   }
   return res.json();
+}
+
+async function fetchCopilotAll(token) {
+  const h = { 'Authorization': 'Bearer ' + token, 'X-GitHub-Api-Version': '2022-11-28', 'Accept': 'application/vnd.github+json' };
+  const user = await fetchJSON('https://api.github.com/user', h);
+  let items = null;
+  try {
+    const y = new Date().getUTCFullYear();
+    const u = await fetchJSON('https://api.github.com/users/' + user.login + '/settings/billing/usage?year=' + y, h);
+    items = u.usageItems || u.usage_items || [];
+  } catch (e) { console.warn('copilot billing usage unavailable', e); }
+  const agg2 = makeAgg(); const billed = new Map();
+  for (const it of items || []) {
+    if (!String(it.product || '').toLowerCase().includes('copilot')) continue;
+    const d = String(it.date || '').slice(0, 10) || (it.year + '-' + String(it.month).padStart(2, '0') + '-01');
+    agg2.add(d, 'GitHub Copilot', it.sku || 'copilot', { msgs: finTok(it.quantity), est: 1 });
+    billed.set(d, (billed.get(d) || 0) + finAmt(it.netAmount ?? it.net_amount ?? 0));
+  }
+  return { login: user.login, hadUsage: items !== null,
+    rows: agg2.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })) };
 }
 
 async function fetchAnthropicAll(key, days) {
@@ -2382,6 +2414,34 @@ const App = {
     }
   },
 
+  async fetchCopilot() {
+    const gen = ++this._gen.copilot;
+    const key = $('copilot-key').value.trim();
+    const status = $('copilot-status');
+    if (!key) { status.textContent = 'Paste a fine-grained GitHub token first (github_pat_…).'; return; }
+    if ($('remember-copilot') && $('remember-copilot').checked) LS.set('key:copilot', key);
+    status.textContent = 'Validating…';
+    try {
+      const res = await fetchCopilotAll(key);
+      if (gen !== this._gen.copilot) return;
+      Store.setConnector('copilot', { label: res.login, lastSync: Date.now(), err: null });
+      if (res.rows.length) { Store.setSource('copilot', res.rows, {}); Store.setBilled('copilot', res.billed); }
+      status.textContent = '';
+      status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
+      status.appendChild(document.createTextNode(res.rows.length
+        ? `${res.rows.length} usage rows (premium requests) + billed costs`
+        : (res.hadUsage ? 'validated — no Copilot usage in the billing data' : 'validated — GitHub exposes no usage data for this account')));
+      this.render();
+    } catch (e) {
+      if (gen !== this._gen.copilot) return;
+      Store.setConnector('copilot', { err: (e.message || String(e)).slice(0, 80) });
+      status.textContent = '';
+      status.appendChild(el('span', { class: 'err', text: 'Validation failed: ' }));
+      status.appendChild(document.createTextNode(e.message || String(e)));
+      this.render();
+    }
+  },
+
   async handleImportFiles(files) {
     const status = $('import-status');
     clear(status);
@@ -2629,6 +2689,10 @@ const App = {
     $('fetch-gemini').addEventListener('click', () => this.fetchGemini());
     const gk = LS.get('key:gemini', null); if (gk) { $('gemini-key').value = gk; $('remember-gemini').checked = true; }
     $('remember-gemini').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:gemini'); else if ($('gemini-key').value) LS.set('key:gemini', $('gemini-key').value.trim()); });
+
+    $('fetch-copilot').addEventListener('click', () => this.fetchCopilot());
+    const cpk = LS.get('key:copilot', null); if (cpk) { $('copilot-key').value = cpk; $('remember-copilot').checked = true; }
+    $('remember-copilot').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:copilot'); else if ($('copilot-key').value) LS.set('key:copilot', $('copilot-key').value.trim()); });
     this.updatePSCommands();
 
     // imports
