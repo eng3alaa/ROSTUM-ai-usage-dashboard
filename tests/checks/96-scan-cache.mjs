@@ -71,6 +71,17 @@ export async function run({ browser, ok }) {
       dup.c1Totals.in === dup.directTotals.in && dup.c1Totals.out === dup.directTotals.out && dup.c1Totals.msgs === dup.directTotals.msgs &&
       dup.c2Totals.in === dup.c1Totals.in && dup.c2Totals.out === dup.c1Totals.out && dup.c2Totals.msgs === dup.c1Totals.msgs,
       JSON.stringify(dup));
+
+    // I6: ScanCache moved to a 'scan:v3:' key prefix. A pre-existing 'scan:'-prefixed entry
+    // from before the schema change (no per-hour cache-key granularity) must miss, not be
+    // served stale, under the new prefix.
+    const v3 = await page.evaluate(async () => {
+      await IDB.set('scan:legacy-sig', { rows: [], projects: [], msgs: 0, ids: [] });
+      const got = await ScanCache.get('legacy-sig');
+      await IDB.del('scan:legacy-sig');
+      return { got };
+    });
+    ok('scan-cache: v3 key prefix invalidates pre-hour entries', v3.got == null, JSON.stringify(v3));
   } finally {
     await page.close();
   }

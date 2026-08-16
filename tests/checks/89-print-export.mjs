@@ -16,6 +16,26 @@ export async function run({ browser, ok }) {
     const meta = await page.evaluate(() => { App.printReport(true); return document.getElementById('report-meta').textContent; });
     ok('print: report header carries range + generated date', /Generated/.test(meta) && /\d{4}/.test(meta), meta);
 
+    // I5: the report is generated from visibleRows(), which respects drill/hidden-platform
+    // scope — the printed header must say so, or a filtered report reads as if it covers
+    // every platform.
+    const scope = await page.evaluate(() => {
+      App._drill = 'Anthropic API'; App.filters.hiddenPlatforms = new Set();
+      App.printReport(true);
+      const drilled = document.getElementById('report-meta').textContent;
+      App._drill = null; App.filters.hiddenPlatforms = new Set();
+      App.printReport(true);
+      const cleared = document.getElementById('report-meta').textContent;
+      App.filters.hiddenPlatforms = new Set(['OpenRouter']);
+      App.printReport(true);
+      const hidden = document.getElementById('report-meta').textContent;
+      App.filters.hiddenPlatforms = new Set();
+      return { drilled, cleared, hidden };
+    });
+    ok('print: report header states filter scope',
+      /scope: Anthropic API/.test(scope.drilled) && /all platforms/.test(scope.cleared) && /hidden: OpenRouter/.test(scope.hidden),
+      JSON.stringify(scope));
+
     // F2: the daily chart svg carries a FIXED pixel `width` attribute, sized to the
     // container at the moment of the last JS render. Printing (Ctrl+P / window.print())
     // doesn't trigger a re-render — it just applies the print stylesheet to whatever is

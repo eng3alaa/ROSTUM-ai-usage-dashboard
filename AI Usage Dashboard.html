@@ -440,7 +440,7 @@ progress { width: 160px; height: 8px; }
   <div id="insights" aria-label="Insights">
     <div class="insight" data-insight="projection"><div class="label">Month-end projection <span class="badge" title="MTD + average of the last 7 full days × days left">projection</span></div><div class="value" id="ins-projection-value">—</div><div class="note" id="ins-projection-note"></div></div>
     <div class="insight span2" data-insight="heatmap"><div class="label">Activity — last 13 weeks</div><div id="ins-heatmap"></div></div>
-    <div class="insight" data-insight="wow"><div class="label">This week vs last</div><div id="ins-wow"></div></div>
+    <div class="insight" data-insight="wow"><div class="label">Week to date vs same days last week</div><div id="ins-wow"></div></div>
     <div class="insight" data-insight="cache"><div class="label">Cache savings</div><div class="value" id="ins-cache-value">—</div><div class="note" id="ins-cache-note"></div></div>
     <div class="insight" data-insight="hours"><div class="label">Busiest hours</div><div id="ins-hours"></div></div>
     <div class="insight span2" data-insight="efficiency"><div class="label">Model efficiency <span class="badge">≥20 msgs</span></div><div id="ins-efficiency"></div></div>
@@ -652,7 +652,7 @@ progress { width: 160px; height: 8px; }
 
   <!-- ================= Budgets ================= -->
   <div class="card" id="card-budgets">
-    <div class="card-head"><div><h2>Budgets</h2><div class="sub">Monthly USD limits — alerts at 80%, 100%, and projected overrun. Stored locally.</div></div></div>
+    <div class="card-head"><div><h2>Budgets</h2><div class="sub">Monthly USD limits on API-equivalent cost at list prices (not provider invoices) — alerts at 80%, 100%, and projected overrun. Stored locally.</div></div></div>
     <div id="budget-editor"></div>
   </div>
 
@@ -914,9 +914,12 @@ const Insights = {
     return { mtd, avgDaily: avg, daysLeft, projected: mtd + avg * daysLeft, dim, dd };
   },
   isoWeekStart(key) { const dt = new Date(key + 'T12:00:00'); return addDays(key, -((dt.getDay() + 6) % 7)); },
+  // Week-to-date vs the SAME elapsed days last week — comparing a partial "this week" to a
+  // FULL "last week" (thisStart..thisStart+6) makes early-week deltas look catastrophic.
   weekOverWeek(rows, costOf, today) {
     const thisStart = this.isoWeekStart(today), lastStart = addDays(thisStart, -7);
-    const thisEnd = addDays(thisStart, 6), lastEnd = addDays(thisStart, -1);
+    const dow = Math.round((new Date(today + 'T12:00:00') - new Date(thisStart + 'T12:00:00')) / 86400000);   // days elapsed this week (0..6)
+    const thisEnd = today, lastEnd = addDays(lastStart, dow);
     let a = 0, b = 0, aMsgs = 0, bMsgs = 0, aTok = 0, bTok = 0;
     const tok = (r) => (r.in || 0) + (r.cw || 0) + (r.cr || 0) + (r.out || 0);
     for (const r of rows) {
@@ -924,7 +927,7 @@ const Insights = {
       else if (r.d >= lastStart && r.d <= lastEnd) { b += costOf(r); bMsgs += r.msgs || 0; bTok += tok(r); }
     }
     const pct = b > 0 ? Math.round(((a - b) / b) * 100) : (a > 0 ? 100 : 0);
-    return { thisWeek: a, lastWeek: b, pct, thisMsgs: aMsgs, lastMsgs: bMsgs, thisTok: aTok, lastTok: bTok, thisStart, lastStart };
+    return { thisWeek: a, lastWeek: b, pct, thisMsgs: aMsgs, lastMsgs: bMsgs, thisTok: aTok, lastTok: bTok, thisStart, lastStart, daysElapsed: dow + 1 };
   },
   topMovers(curr, prev, n = 5) {
     const m = new Map();
@@ -998,9 +1001,10 @@ const Budgets = {
     const consider = (scope, s, label) => {
       if (!s) return;
       const kinds = [];
-      if (s.pct >= 100) kinds.push(['exceed', `${label}: ${fmtUSD(s.spent)} spent — over the ${fmtUSD(s.limit)} monthly budget (${s.pct}%).`]);
-      else if (s.pct >= 80) kinds.push(['approach', `${label}: ${s.pct}% of the ${fmtUSD(s.limit)} monthly budget used (${fmtUSD(s.spent)}).`]);
-      if (s.projected > s.limit && s.pct < 100) kinds.push(['overrun', `${label}: on pace to exceed the ${fmtUSD(s.limit)} budget by about ${fmtUSD(s.projected - s.limit)} this month.`]);
+      const pct = s.limit ? Math.floor(s.spent / s.limit * 100) : 0;   // display pct: floor, so 99.6% never reads as 100%
+      if (s.spent >= s.limit) kinds.push(['exceed', `${label}: ${fmtUSD(s.spent)} estimated — over the ${fmtUSD(s.limit)} monthly budget (${pct}%).`]);
+      else if (s.pct >= 80) kinds.push(['approach', `${label}: ${pct}% of the ${fmtUSD(s.limit)} monthly budget used (${fmtUSD(s.spent)}).`]);
+      if (s.projected > s.limit && s.spent < s.limit) kinds.push(['overrun', `${label}: on pace to exceed the ${fmtUSD(s.limit)} budget by about ${fmtUSD(s.projected - s.limit)} this month.`]);
       for (const [k, msg] of kinds) { const kind = `${k}:${scope}`; if (!dismissed[`${kind}:${ym}`]) list.push({ kind, msg, level: k === 'exceed' ? 'critical' : 'serious' }); }
     };
     consider('total', st.total, 'Total');
@@ -1341,13 +1345,19 @@ async function parseClaudeLogsCached(files, onProgress, cache) {
 }
 
 const ScanCache = {
-  async get(sig) { try { return await IDB.get('scan:' + sig); } catch { return null; } },
-  async set(sig, entry) { try { await IDB.set('scan:' + sig, entry); } catch {} },
-  // deletes any 'scan:'-prefixed IDB key whose signature isn't in `keep` (a Set of raw signatures)
+  // v3: bumped from 'scan:' — invalidates every pre-v3 entry outright (schema/granularity
+  // changed) rather than risk serving a stale shape back out.
+  async get(sig) { try { return await IDB.get('scan:v3:' + sig); } catch { return null; } },
+  async set(sig, entry) { try { await IDB.set('scan:v3:' + sig, entry); } catch {} },
+  // deletes any 'scan:'-prefixed IDB key that isn't a live v3 entry — this also sweeps up
+  // legacy pre-v3 keys (which never match the 'scan:v3:' shape), so they don't linger forever.
   async prune(keep) {
     try {
       const keys = await IDB.keys('scan:');
-      for (const k of keys) if (!keep.has(k.slice(5))) await IDB.del(k);
+      for (const k of keys) {
+        const sig = k.startsWith('scan:v3:') ? k.slice(8) : null;
+        if (sig === null || !keep.has(sig)) await IDB.del(k);
+      }
     } catch {}
   },
 };
@@ -2267,7 +2277,9 @@ const App = {
     const win = this.window();
     const m = $('report-meta');
     m.hidden = false;
-    m.textContent = `AI usage report · ${fmtDayShort(win.from)} – ${fmtDayShort(win.to)} · Generated ${new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })} · API-equivalent costs are estimates at list prices`;
+    const hidden = this.filters.hiddenPlatforms;
+    const scope = this._drill ? ' · scope: ' + this._drill : hidden.size ? ' · hidden: ' + [...hidden].join(', ') : ' · all platforms';
+    m.textContent = `AI usage report · ${fmtDayShort(win.from)} – ${fmtDayShort(win.to)} · Generated ${new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })} · API-equivalent costs are estimates at list prices${scope}`;
     if (!dryRun) { window.print(); }
   },
 
@@ -2344,10 +2356,16 @@ const App = {
     S.push(`You used ${fmtCompact(tok)} tokens across ${fmtCompact(msgs)} messages, worth about ${fmtUSD(cost)} at API list prices.`);
     if (tm && cost > 0) S.push(`${tm[0]} was the biggest line item at ${fmtUSD(tm[1])} (${Math.round(tm[1] / cost * 100)}% of spend)${tp ? `, and ${tp[0]} was the top platform` : ''}.`);
     if (td) S.push(`Your busiest day was ${fmtDayShort(td[0])} at ${fmtUSD(td[1])}.`);
-    if (w.lastWeek > 0 || w.thisWeek > 0) S.push(`This week is ${w.pct === 0 ? 'flat' : (w.pct > 0 ? 'up ' : 'down ') + Math.abs(w.pct) + '%'} versus last week.`);
+    if (w.lastWeek > 0 || w.thisWeek > 0) S.push(`This week to date is ${w.pct === 0 ? 'flat' : (w.pct > 0 ? 'up ' : 'down ') + Math.abs(w.pct) + '%'} versus the same days last week.`);
     S.push(`At the current pace this month projects to ${fmtUSD(p.projected)} (${fmtUSD(p.mtd)} so far, ${p.daysLeft} days left).`);
     const b = typeof Budgets !== 'undefined' && Budgets.status ? Budgets.status() : null;
-    if (b && b.total) S.push(b.total.pct >= 100 ? `You are over your ${fmtUSD(b.total.limit)} monthly budget.` : `You have used ${b.total.pct}% of your ${fmtUSD(b.total.limit)} monthly budget.`);
+    if (b && b.total) {
+      // Budgets.status() always totals ALL rows regardless of drill/chip scope — when the
+      // narrative itself is filtered, say so, or the sentence silently mixes an account-wide
+      // number into what reads as a platform-scoped summary.
+      const scope = (this._drill || this.filters.hiddenPlatforms.size) ? ' (across all platforms)' : '';
+      S.push(b.total.pct >= 100 ? `You are over your ${fmtUSD(b.total.limit)} monthly budget${scope}.` : `You have used ${b.total.pct}% of your ${fmtUSD(b.total.limit)} monthly budget${scope}.`);
+    }
     for (const s of S) box.appendChild(el('p', { text: s }));
   },
 

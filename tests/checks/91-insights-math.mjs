@@ -63,6 +63,21 @@ export async function run({ browser, ok }) {
     ok('insights: projection pace spans month boundary',
       Math.abs(r2.proj.mtd - 10) < 1e-9 && Math.abs(r2.proj.avgDaily - expAvg) < 1e-9 && Math.abs(r2.proj.projected - expProjected) < 1e-9 && r2.proj.daysLeft === 27,
       JSON.stringify(r2.proj));
+
+    // I1: WoW must compare week-to-date against the SAME elapsed days last week, not a
+    // partial "this week" vs a FULL "last week". Monday (today = start of ISO week, dow=0):
+    // this week-to-date = today alone ($2); last week's "same days" = last Monday alone ($2).
+    // Pre-fix, thisEnd was thisStart+6 and lastEnd was thisStart-1, so lastWeek pulled in
+    // the FULL previous week (7 × $2 = $14) against a 1-day "this week" → a bogus -86%.
+    const r3 = await page.evaluate(() => {
+      const mk = (d, cost) => ({ d, platform: 'Anthropic API', model: 'claude-sonnet-5', in: 0, cw: 0, cr: 0, out: 0, msgs: 1, _cost: cost });
+      const costOf = (r) => r._cost;
+      const rows = [];
+      for (let i = 3; i <= 17; i++) rows.push(mk('2026-08-' + String(i).padStart(2, '0'), 2));   // flat $2/day, Aug 3-17
+      return Insights.weekOverWeek(rows, costOf, '2026-08-17');   // Monday
+    });
+    ok('insights: WoW is week-to-date vs same days last week',
+      r3.thisWeek === 2 && r3.lastWeek === 2 && r3.pct === 0 && r3.daysElapsed === 1, JSON.stringify(r3));
   } finally {
     await page.close();
   }

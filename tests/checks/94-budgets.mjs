@@ -41,6 +41,24 @@ export async function run({ browser, ok }) {
     });
     ok('budgets: exceeded banner replaces approaching', ex.includes('exceed:total') && !ex.includes('approach:total'), JSON.stringify(ex));
 
+    // I2: exceed must gate on spent >= limit, not a rounded pct >= 100 — 99.6% of budget
+    // is NOT over. Monkeypatch Budgets.status so the boundary is exact, independent of
+    // the token/pricing pipeline that produces `spent`.
+    const gate = await page.evaluate(() => {
+      const origStatus = Budgets.status;
+      LS.set('dismissedAlerts', {});
+      Budgets.status = () => ({ total: { spent: 99.6, limit: 100, pct: Math.round(99.6 / 100 * 100), projected: 150 }, byPlatform: {} });
+      const under = Budgets.alerts().map(a => a.kind);
+      Budgets.status = () => ({ total: { spent: 100.0, limit: 100, pct: 100, projected: 100 }, byPlatform: {} });
+      const atLimit = Budgets.alerts().map(a => a.kind);
+      Budgets.status = origStatus;
+      return { under, atLimit };
+    });
+    ok('budgets: exceed only when spent >= limit (99.6% is not over)',
+      gate.under.includes('approach:total') && gate.under.includes('overrun:total') && !gate.under.includes('exceed:total') &&
+      gate.atLimit.includes('exceed:total'),
+      JSON.stringify(gate));
+
     const inf = await page.evaluate(() => {
       Budgets.set('total', '1e400');
       return Budgets.limits.total === undefined && !('total' in Budgets.limits);

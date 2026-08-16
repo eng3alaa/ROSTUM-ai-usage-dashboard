@@ -32,6 +32,25 @@ export async function run({ browser, ok }) {
       return { txt };
     });
     ok('narrative: zero-cost range never prints NaN', !/NaN/.test(zero.txt), zero.txt);
+
+    // I3: a total budget sentence is computed from ALL rows (Budgets.status ignores drill/
+    // chip scope), so when the narrative itself is scoped to one platform, the sentence
+    // must say so — otherwise it silently mixes a whole-account number into a filtered view.
+    const scoped = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      Store.setSource('anthropic', [{ d: '2026-08-10', platform: 'Anthropic API', model: 'claude-sonnet-5', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 1 }], {});
+      Budgets.set('total', 100);
+      App.filters.range = '30'; App._drill = null; App.filters.hiddenPlatforms = new Set();
+      App._render();
+      const undrilled = document.getElementById('narrative').textContent;
+      App._drill = 'Anthropic API'; App._render();
+      const drilled = document.getElementById('narrative').textContent;
+      App._drill = null; App._render();
+      Budgets.set('total', null);
+      return { undrilled, drilled };
+    });
+    ok('narrative: budget sentence qualifies scope when filtered',
+      /across all platforms/i.test(scoped.drilled) && !/across all platforms/i.test(scoped.undrilled), JSON.stringify(scoped));
   } finally {
     await page.close();
   }
