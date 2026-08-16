@@ -165,6 +165,40 @@ export async function run({ browser, ok }) {
       return { mid, final: document.getElementById('anthropic-status').textContent, model: Store.sources.anthropic.rows[0].model };
     });
     ok('backlog-9: stale bail does not blank a newer in-flight placeholder', /Fetching/.test(dbl.mid) && /Connected/.test(dbl.final) && dbl.model === 'm2', JSON.stringify(dbl));
+
+    // F1: a keep-data disconnect must not be undone by re-migration on the next load()
+    const keepReload = await page.evaluate(() => {
+      Store.sources = {}; Store.connectors = {};
+      Store.setSource('openai', [{ d: todayKey(), platform: 'OpenAI API', model: 'm', in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }], {});
+      Store.setConnector('openai', { label: 'k', lastSync: Date.now() });
+      const origConfirm = window.confirm;
+      window.confirm = () => false;   // keep data
+      App.disconnectConnector('openai');
+      window.confirm = origConfirm;
+      Store.load();   // simulate reload
+      return { st: Store.connectorStatus(connectorById('openai')), has: 'openai' in Store.connectors };
+    });
+    ok('backlog-18b: keep-data disconnect survives reload (no re-migration)', keepReload.st === 'off' && !keepReload.has, JSON.stringify(keepReload));
+
+    // F2: the reveal rule must not hide a src card while it's open inside the connector modal
+    const modalReveal = await page.evaluate(async () => {
+      delete Store.connectors.gemini;
+      App.openConnectorModal('gemini');
+      App._render();
+      const hiddenInModal = document.getElementById('src-gemini').hidden;
+      App.closeConnectorModal();
+      await new Promise(r => document.getElementById('connector-modal').addEventListener('close', r, { once: true }));
+      return { hiddenInModal };
+    });
+    ok('backlog-14b: reveal rule does not hide the card open in the modal', modalReveal.hiddenInModal === false, JSON.stringify(modalReveal));
+
+    // F3: blank/whitespace/CR-only lines (Windows CRLF logs) are not malformed
+    const crlf = await page.evaluate(async () => {
+      const text = '{"type":"assistant","message":{"usage":{"input_tokens":1,"output_tokens":1},"model":"m","id":"z1"},"requestId":"z1","timestamp":"2026-08-10T10:00:00Z"}\r\n\r\n   \n';
+      const res = await parseClaudeLogs([{ path: 'projects/-p/s.jsonl', file: new File([text], 's.jsonl') }], null);
+      return { lines: res.meta.lines, badLines: res.meta.badLines, msgs: res.meta.msgs };
+    });
+    ok('scan: blank/whitespace/CR-only lines are not malformed', crlf.badLines === 0 && crlf.lines === 1 && crlf.msgs === 1, JSON.stringify(crlf));
   } finally {
     await page.close();
   }

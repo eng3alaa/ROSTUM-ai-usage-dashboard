@@ -1053,7 +1053,10 @@ const Store = {
     for (const [k, v] of Object.entries(this.billed)) {
       if (Array.isArray(v)) this.billed[k] = { rows: v, at: null, stale: false };
     }
-    this.migrateConnectors();
+    // migrate ONLY a genuine pre-v2 blob (no `connectors` key at all — v2's persist() always
+    // writes the key, even as {}). Running this unconditionally on every load would resurrect
+    // a keep-data disconnect (connectors[id] deleted, sources kept) as 'stored data'/ok again.
+    if (saved && !('connectors' in saved)) this.migrateConnectors();
   },
   // v1.1-shaped stores (data present, no per-connector state entry) synthesize a labeled
   // connected card instead of reading as truly disconnected forever.
@@ -1255,9 +1258,9 @@ async function parseClaudeLogs(files, onProgress, seen = new Set()) {
     let projectCwd = null;
     const sid = (path.split('/').pop() || '').replace(/\.jsonl$/i, '');   // session UUID = file basename
     for await (const line of readLines(file)) {
+      if (!line.trim()) continue;   // blank, whitespace-only, or CR-only (Windows CRLF logs) — not malformed
       lines++;
-      if (!line) continue;
-      if (line[0] !== '{') { badLines++; continue; }   // not even a JSON-object-shaped line — malformed
+      if (line[0] !== '{') { badLines++; continue; }   // has content but isn't even JSON-object-shaped — malformed
       let obj; try { obj = JSON.parse(line); } catch { badLines++; continue; }
       if (!projectCwd && obj.cwd) projectCwd = obj.cwd;
       if (obj.type !== 'assistant' || !obj.message || !obj.message.usage) continue;
@@ -2392,10 +2395,12 @@ const App = {
       hub.appendChild(card);
     }
     // reveal Data-sources cards for newly-connected platforms that start hidden in the HTML
-    // (consistent with _restoreModalCard's re-hide-if-unconnected rule on modal close)
+    // (consistent with _restoreModalCard's re-hide-if-unconnected rule on modal close) — but
+    // never touch a card that's currently open INSIDE the connector modal: any render while
+    // the user is mid-edit (resize, timer, etc.) would otherwise blank it out from under them.
     for (const id of ['gemini', 'copilot', 'openrouter']) {
       const src = $('src-' + id);
-      if (src) src.hidden = !Store.connectors[id];
+      if (src && src.parentNode !== $('modal-body')) src.hidden = !Store.connectors[id];
     }
   },
 
