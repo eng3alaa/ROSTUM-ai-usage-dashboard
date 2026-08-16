@@ -102,7 +102,7 @@ New cards between KPIs and the daily chart:
 4. **Cache savings** — Anthropic cache reads × (input price − cache-read price), shown as "$ saved vs uncached".
 5. **Busiest hours** — 24-bin histogram from events that carry `hour`; hidden with an explanatory note if no timestamped events exist in range.
 6. **Week-over-week chips** — this ISO week vs last: tokens, cost, messages.
-7. **Top movers** — projects with the largest cost change vs the previous equal-length period.
+7. **Top movers** — projects with the largest cost change vs the previous equal-length period. *(Note: platform is the project surrogate for non-local rows; per-project movers await dated project rows.)*
 
 ### Narrative summary ("This period in AI")
 
@@ -124,6 +124,7 @@ A card that renders template sentences from the filtered aggregates: totals, top
 - Original monogram SVG marks (no copied trademark artwork) with brand-tinted chips per platform; used on cards, chips, legends, and detail panels.
 - Chart series keep the existing accessible dataviz palette — brand colors are identity, not data encoding.
 - All new UI honors both themes via the existing CSS custom properties; no hardcoded colors outside the token blocks.
+- **Note (Plan 3):** text monograms + brand tints shipped (Plans 2–3); original SVG monogram artwork deferred.
 
 ## Storage
 
@@ -193,7 +194,7 @@ Recorded scope notes and deferred minors from the Plan 2 final integration revie
 15. **Scan meta diagnostics**: `parseClaudeLogsCached` drops `lines`/`badLines` from meta — restore malformed-line reporting through the cached path. — DONE (Plan 3)
 16. **ScanCache eviction**: `scan:` IDB entries are never pruned; edited files orphan old signatures. Add pruning on rescan or clear-data. — DONE (Plan 3)
 17. **Scan cache stores post-dedup subsets** (Plan 2 fix-round residual): when cross-file duplicate messages exist, the losing file's cache entry omits the shared messages; if the winning file later vanishes, scans under-count until the loser's signature changes. Plan 3: cache full per-file rows+ids and dedupe at merge time. — accepted trade-off (documented: under-count self-heals on file change; full-rows caching deferred)
-18. **v1.1 → v2 hub migration**: persisted v1.1 data has no `connectors` entries, so existing users see all-gray "Not connected" cards (with their data still charted) until the first re-sync. Plan 3: one-time `load()` migration synthesizing `{label: 'stored data', lastSync: meta.updated}` for sources present without a connector entry; also give kept-but-disconnected cards a data-removal affordance. — DONE (Plan 3)
+18. **v1.1 → v2 hub migration**: persisted v1.1 data has no `connectors` entries, so existing users see all-gray "Not connected" cards (with their data still charted) until the first re-sync. Plan 3: one-time `load()` migration synthesizing `{label: 'stored data', lastSync: meta.updated}` for sources present without a connector entry; also give kept-but-disconnected cards a data-removal affordance. — DONE (Plan 3) — migration + affordance: kept-but-disconnected cards can remove data via Clear stored data; per-card removal deferred
 
 ## Acceptance criteria
 
