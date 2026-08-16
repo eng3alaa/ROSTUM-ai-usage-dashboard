@@ -155,11 +155,11 @@ export async function run({ browser, ok }) {
     });
     ok('insights: month-end projection = MTD + avg(last 7 full days) × remaining days',
       Math.abs(r.proj.mtd - 31) < 1e-9 && Math.abs(r.proj.projected - 61) < 1e-9 && r.proj.daysLeft === 15, JSON.stringify(r.proj));
-    ok('insights: week-over-week compares ISO weeks (this 14 vs last 14 → 0%)',
-      Math.abs(r.wow.thisWeek - 14) < 1e-9 && Math.abs(r.wow.lastWeek - 14) < 1e-9 && r.wow.pct === 0, JSON.stringify(r.wow));
-    ok('insights: top movers sorted by absolute change incl. new/vanished projects',
-      r.movers.length === 3 && r.movers[0].project === 'A' && r.movers[0].delta === 6 &&
-      r.movers.some(m => m.project === 'D' && m.delta === -2), JSON.stringify(r.movers));
+    ok('insights: week-over-week compares ISO weeks (this 13 incl. partial today vs last 14 → -7%)',
+      Math.abs(r.wow.thisWeek - 13) < 1e-9 && Math.abs(r.wow.lastWeek - 14) < 1e-9 && r.wow.pct === -7 && r.wow.thisStart === '2026-08-10', JSON.stringify(r.wow));
+    ok('insights: top movers sorted by absolute change; ties resolve deterministically',
+      r.movers.length === 3 && r.movers[0].project === 'A' && r.movers[0].delta === 6 && r.movers[1].project === 'C' && r.movers[1].delta === 5 &&
+      Math.abs(r.movers[2].delta) === 2, JSON.stringify(r.movers));
     ok('insights: efficiency filters models under the message floor',
       r.eff.length === 1 && r.eff[0].model === 'm-many' && Math.abs(r.eff[0].costPerMsg - 0.5) < 1e-9 && r.eff[0].tokPerMsg === 200,
       JSON.stringify(r.eff));
