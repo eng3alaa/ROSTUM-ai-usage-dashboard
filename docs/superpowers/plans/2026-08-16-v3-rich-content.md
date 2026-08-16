@@ -135,7 +135,7 @@ export async function run({ browser, ok }) {
       rows.push(mk('2026-08-16', 1));
       const proj = Insights.projection(rows, costOf, '2026-08-16');
       // last 7 FULL days = Aug 9..15 = $2/day → remaining days after today: 31-16 = 15 → 31 + 15*2 = 61
-      const wow = Insights.weekOverWeek(rows, costOf, '2026-08-16');   // ISO week: Aug 10-16 vs Aug 3-9
+      const wow = Insights.weekOverWeek(rows, costOf, '2026-08-16');   // ISO week Aug 10-16 (incl. today's $1) vs Aug 3-9
       const movers = Insights.topMovers([
         { project: 'A', cost: 10 }, { project: 'B', cost: 1 }, { project: 'C', cost: 5 },
       ], [
