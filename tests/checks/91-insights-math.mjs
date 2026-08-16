@@ -47,6 +47,22 @@ export async function run({ browser, ok }) {
     ok('insights: busiest hours histogram ignores rows without hour',
       r.hours.bins.length === 24 && r.hours.bins[9] === 5 && r.hours.bins[21] === 1 && r.hours.total === 6 && r.hours.peak === 9,
       JSON.stringify(r.hours));
+
+    const r2 = await page.evaluate(() => {
+      const mk = (d, cost) => ({ d, platform: 'Anthropic API', model: 'claude-sonnet-5', in: 0, cw: 0, cr: 0, out: 0, msgs: 1, _cost: cost });
+      const costOf = (r) => r._cost;
+      // $2/day Aug 25-31, $5/day Sep 1-2; today Sep 3 → avgDaily must use the last 7 FULL days across the month boundary.
+      const rows = [];
+      for (let i = 25; i <= 31; i++) rows.push(mk('2026-08-' + String(i).padStart(2, '0'), 2));
+      rows.push(mk('2026-09-01', 5));
+      rows.push(mk('2026-09-02', 5));
+      const proj = Insights.projection(rows, costOf, '2026-09-03');
+      return { proj };
+    });
+    const expAvg = 20 / 7, expProjected = 10 + expAvg * 27;
+    ok('insights: projection pace spans month boundary',
+      Math.abs(r2.proj.mtd - 10) < 1e-9 && Math.abs(r2.proj.avgDaily - expAvg) < 1e-9 && Math.abs(r2.proj.projected - expProjected) < 1e-9 && r2.proj.daysLeft === 27,
+      JSON.stringify(r2.proj));
   } finally {
     await page.close();
   }

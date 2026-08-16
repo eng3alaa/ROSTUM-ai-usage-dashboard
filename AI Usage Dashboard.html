@@ -162,6 +162,22 @@ input[type="date"], input[type="text"], input[type="password"], select {
 #connector-modal .modal-close { margin-left: auto; }
 #connector-modal .card.src { border: 0; padding: 0; background: transparent; }
 
+/* ============ Insights row ============ */
+#insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 0 0 16px; }
+.insight { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; min-height: 96px; }
+.insight .label { color: var(--ink-2); font-size: 12px; }
+.insight .value { font-size: 20px; font-weight: 650; margin-top: 2px; letter-spacing: -0.01em; }
+.insight .note { color: var(--muted); font-size: 11.5px; margin-top: 4px; }
+.insight.span2 { grid-column: span 2; }
+.insight svg { display: block; width: 100%; height: auto; margin-top: 6px; }
+.insight table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+.insight th { text-align: left; color: var(--ink-2); font-weight: 600; padding: 2px 6px 2px 0; }
+.insight td { padding: 2px 6px 2px 0; border-top: 1px solid var(--grid); }
+.insight td.num, .insight th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.wow-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin: 4px 6px 0 0; background: var(--wash); }
+.wow-chip.up { color: var(--critical); } .wow-chip.down { color: var(--good-text); }
+@media (max-width: 720px) { .insight.span2 { grid-column: span 1; } }
+
 /* ============ KPI row ============ */
 .kpis {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
@@ -387,6 +403,17 @@ progress { width: 160px; height: 8px; }
       <div class="value" id="kpi-billed">—</div>
       <div class="delta" id="kpi-billed-note">Connect Anthropic/OpenAI admin keys</div>
     </div>
+  </div>
+
+  <!-- ================= Insights row ================= -->
+  <div id="insights" aria-label="Insights">
+    <div class="insight" data-insight="projection"><div class="label">Month-end projection <span class="badge" title="MTD + average of the last 7 full days × days left">projection</span></div><div class="value" id="ins-projection-value">—</div><div class="note" id="ins-projection-note"></div></div>
+    <div class="insight span2" data-insight="heatmap"><div class="label">Activity — last 13 weeks</div><div id="ins-heatmap"></div></div>
+    <div class="insight" data-insight="wow"><div class="label">This week vs last</div><div id="ins-wow"></div></div>
+    <div class="insight" data-insight="cache"><div class="label">Cache savings</div><div class="value" id="ins-cache-value">—</div><div class="note" id="ins-cache-note"></div></div>
+    <div class="insight" data-insight="hours"><div class="label">Busiest hours</div><div id="ins-hours"></div></div>
+    <div class="insight span2" data-insight="efficiency"><div class="label">Model efficiency <span class="badge">≥20 msgs</span></div><div id="ins-efficiency"></div></div>
+    <div class="insight" data-insight="movers"><div class="label">Top project movers <span class="badge" title="vs the previous equal-length period">Δ</span></div><div id="ins-movers"></div></div>
   </div>
 
   <!-- ================= Charts ================= -->
@@ -830,10 +857,7 @@ const Insights = {
     const dim = new Date(y, m, 0).getDate();
     let mtd = 0;
     const byDay = new Map();
-    for (const r of rows) {
-      if (!r.d.startsWith(ym)) continue;
-      const c = costOf(r); mtd += c; byDay.set(r.d, (byDay.get(r.d) || 0) + c);
-    }
+    for (const r of rows) { const c = costOf(r); byDay.set(r.d, (byDay.get(r.d) || 0) + c); if (r.d.startsWith(ym)) mtd += c; }
     let last7 = 0, n = 0;
     for (let i = 1; i <= 7; i++) { const k = addDays(today, -i); last7 += byDay.get(k) || 0; n++; }
     const avg = n ? last7 / n : 0;
@@ -1878,6 +1902,41 @@ function renderSparkline(container, values) {
   container.appendChild(svg);
 }
 
+/* ---------- calendar heatmap (13 weeks × 7 days) ---------- */
+function renderHeatmap(container, hm, metric) {
+  clear(container);
+  const cell = 12, gap = 2, W = 13 * (cell + gap) + 30, H = 7 * (cell + gap) + 18;
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Activity heatmap, last 13 weeks' });
+  const styles = getComputedStyle(document.documentElement);
+  const c0 = styles.getPropertyValue('--grid').trim(), c1 = styles.getPropertyValue('--seq-150').trim(), c2 = styles.getPropertyValue('--seq-250').trim(), c3 = styles.getPropertyValue('--accent').trim();
+  hm.days.forEach((x, i) => {
+    const wk = Math.floor(i / 7), dow = i % 7;
+    const t = hm.max ? x.v / hm.max : 0;
+    const fill = x.v === 0 ? c0 : t < 0.34 ? c1 : t < 0.67 ? c2 : c3;
+    const r = el('rect', { class: 'hm', x: 30 + wk * (cell + gap), y: dow * (cell + gap), width: cell, height: cell, rx: 2, fill });
+    r.appendChild(el('title', { text: `${x.d}: ${fmtMetric(x.v, metric)}` }));
+    svg.appendChild(r);
+  });
+  ['M', 'W', 'F'].forEach((lab, k) => svg.appendChild(el('text', { class: 'axis-t', x: 0, y: (k * 2) * (cell + gap) + cell - 2, text: lab })));
+  container.appendChild(svg);
+}
+/* ---------- 24-bin hour histogram ---------- */
+function renderHourBars(container, hb) {
+  const W = 240, H = 44, bw = W / 24;
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H + 12}`, role: 'img', 'aria-label': 'Messages by hour of day' });
+  const max = Math.max(1, ...hb.bins);
+  const styles = getComputedStyle(document.documentElement);
+  const fill = styles.getPropertyValue('--s1').trim();
+  hb.bins.forEach((v, h) => {
+    const bh = (v / max) * H;
+    const r = el('rect', { class: 'hb', x: h * bw + 1, y: H - bh, width: bw - 2, height: bh, fill, opacity: v ? 1 : 0.15 });
+    r.appendChild(el('title', { text: `${h}:00 — ${v} msgs` }));
+    svg.appendChild(r);
+  });
+  [0, 6, 12, 18].forEach(h => svg.appendChild(el('text', { class: 'axis-t', x: h * bw + 1, y: H + 10, text: String(h) })));
+  container.appendChild(svg);
+}
+
 /* ---------- legend (shared) ---------- */
 function renderLegend(container, series, hidden, onToggle, mirror) {
   clear(container);
@@ -1963,6 +2022,7 @@ const App = {
 
     this.renderChips();
     this.renderKPIs(win, rows, days);
+    this.renderInsights(win, rows);
     this.renderHub();
     this.renderDaily(days, rows, metric, hasEst);
     this.renderModels(rows, metric);
@@ -1981,6 +2041,60 @@ const App = {
     $('last-updated').textContent = srcNames.length
       ? `Data ${span.min || '—'} → ${span.max || '—'} · sources: ${srcNames.join(', ')} · rendered ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
       : 'No data yet — connect a source below.';
+  },
+
+  /* ---------- insights ---------- */
+  renderInsights(win, rows) {
+    const today = todayKey();
+    const costOf = (r) => Pricing.cost(r.model, r);
+    const allRows = Store.allRows().filter(r => !this.filters.hiddenPlatforms.has(r.platform));   // insights that need "this month"/"13 weeks" ignore the date filter, respect platform chips
+    // 1) projection
+    const p = Insights.projection(allRows, costOf, today);
+    $('ins-projection-value').textContent = fmtUSD(p.projected);
+    $('ins-projection-note').textContent = `${fmtUSD(p.mtd)} so far · ${fmtUSD(p.avgDaily)}/day pace · ${p.daysLeft} day${p.daysLeft === 1 ? '' : 's'} left`;
+    // 2) heatmap
+    const metric = this.filters.metric;
+    const hm = Insights.heatmap(allRows, (r) => this.metricOf(r), today, 13);
+    renderHeatmap($('ins-heatmap'), hm, metric);
+    // 3) WoW
+    const w = Insights.weekOverWeek(allRows, costOf, today);
+    const wowBox = clear($('ins-wow'));
+    const chip = (label, cur, prev, fmt) => {
+      const pct = prev > 0 ? Math.round(((cur - prev) / prev) * 100) : (cur > 0 ? 100 : 0);
+      const cls = pct > 0 ? 'up' : pct < 0 ? 'down' : '';
+      return el('span', { class: 'wow-chip ' + cls, text: `${label} ${fmt(cur)} (${pct > 0 ? '+' : ''}${pct}%)` });
+    };
+    wowBox.appendChild(chip('cost', w.thisWeek, w.lastWeek, fmtUSD));
+    wowBox.appendChild(chip('tokens', w.thisTok, w.lastTok, fmtCompact));
+    wowBox.appendChild(chip('msgs', w.thisMsgs, w.lastMsgs, fmtCompact));
+    // 4) cache savings (window rows)
+    const cs = Insights.cacheSavings(rows);
+    $('ins-cache-value').textContent = fmtUSD(cs.saved);
+    $('ins-cache-note').textContent = cs.tokens ? `${fmtCompact(cs.tokens)} cache-read tokens vs. full input price` : 'no cache reads in range';
+    // 5) hours
+    const hb = Insights.busiestHours(rows);
+    const hoursBox = clear($('ins-hours'));
+    if (!hb.total) hoursBox.appendChild(el('div', { class: 'note', text: 'No timestamped events in range (local Claude logs carry hours; API buckets do not).' }));
+    else { renderHourBars(hoursBox, hb); hoursBox.appendChild(el('div', { class: 'note', text: `peak ${hb.peak}:00 · ${fmtCompact(hb.total)} msgs with timestamps` })); }
+    // 6) efficiency
+    const eff = Insights.efficiency(rows, costOf, 20);
+    const effBox = clear($('ins-efficiency'));
+    if (!eff.length) effBox.appendChild(el('div', { class: 'note', text: 'No model has 20+ messages in range yet.' }));
+    else {
+      const tbl = el('table', {}, el('thead', {}, el('tr', {}, el('th', { text: 'model' }), el('th', { class: 'num', text: 'msgs' }), el('th', { class: 'num', text: '$/msg' }), el('th', { class: 'num', text: 'tok/msg' }))));
+      const tb = el('tbody');
+      for (const e of eff.slice(0, 6)) tb.appendChild(el('tr', {}, el('td', { text: e.model }), el('td', { class: 'num', text: fmtCompact(e.msgs) }), el('td', { class: 'num', text: fmtUSD(e.costPerMsg) }), el('td', { class: 'num', text: fmtCompact(e.tokPerMsg) })));
+      tbl.appendChild(tb); effBox.appendChild(tbl);
+    }
+    // 7) movers — window vs previous equal-length window, by project (local rows only carry projects via Store.projects; use platform as the "project" surrogate when no projects)
+    const len = dayRange(win.from, win.to).length;
+    const prevWin = { from: addDays(win.from, -len), to: addDays(win.from, -1) };
+    const grp = (rs) => { const m = new Map(); for (const r of rs) m.set(r.platform, (m.get(r.platform) || 0) + costOf(r)); return [...m.entries()].map(([project, cost]) => ({ project, cost })); };
+    const currRows = rows, prevRows = Store.allRows().filter(r => r.d >= prevWin.from && r.d <= prevWin.to && !this.filters.hiddenPlatforms.has(r.platform));
+    const mv = Insights.topMovers(grp(currRows), grp(prevRows), 5);
+    const mvBox = clear($('ins-movers'));
+    if (!mv.length) mvBox.appendChild(el('div', { class: 'note', text: 'No data in range yet.' }));
+    else for (const m of mv) mvBox.appendChild(el('div', { class: 'note', text: `${m.project}: ${m.delta >= 0 ? '+' : '−'}${fmtUSD(Math.abs(m.delta))} (${fmtUSD(m.prev)} → ${fmtUSD(m.curr)})` }));
   },
 
   /* ---------- accounts hub ---------- */
