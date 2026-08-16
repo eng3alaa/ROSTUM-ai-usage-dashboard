@@ -945,7 +945,7 @@ const Insights = {
 const Budgets = {
   limits: {},          // { total?: n, [platform]: n }
   load() { this.limits = LS.get('budgets', null) || {}; },
-  set(key, usd) { if (usd == null || !(usd > 0)) delete this.limits[key]; else this.limits[key] = +usd; LS.set('budgets', this.limits); },
+  set(key, usd) { if (usd == null || !Number.isFinite(+usd) || !(+usd > 0)) delete this.limits[key]; else this.limits[key] = +usd; LS.set('budgets', this.limits); },
   monthKey(today) { return (today || todayKey()).slice(0, 7); },
   status(today) {
     const t = today || todayKey(); const ym = this.monthKey(t);
@@ -2203,10 +2203,10 @@ const App = {
     const top = (m) => [...m.entries()].sort((a, b) => b[1] - a[1])[0];
     const tm = top(byModel), tp = top(byPlat), td = top(byDay);
     const p = Insights.projection(Store.allRows().filter(r => !this.filters.hiddenPlatforms.has(r.platform)), costOf, todayKey());
-    const w = Insights.weekOverWeek(Store.allRows(), costOf, todayKey());
+    const w = Insights.weekOverWeek(Store.allRows().filter(r => !this.filters.hiddenPlatforms.has(r.platform)), costOf, todayKey());
     const S = [];
     S.push(`You used ${fmtCompact(tok)} tokens across ${fmtCompact(msgs)} messages, worth about ${fmtUSD(cost)} at API list prices.`);
-    if (tm) S.push(`${tm[0]} was the biggest line item at ${fmtUSD(tm[1])} (${Math.round(tm[1] / cost * 100)}% of spend)${tp ? `, and ${tp[0]} was the top platform` : ''}.`);
+    if (tm && cost > 0) S.push(`${tm[0]} was the biggest line item at ${fmtUSD(tm[1])} (${Math.round(tm[1] / cost * 100)}% of spend)${tp ? `, and ${tp[0]} was the top platform` : ''}.`);
     if (td) S.push(`Your busiest day was ${fmtDayShort(td[0])} at ${fmtUSD(td[1])}.`);
     if (w.lastWeek > 0 || w.thisWeek > 0) S.push(`This week is ${w.pct === 0 ? 'flat' : (w.pct > 0 ? 'up ' : 'down ') + Math.abs(w.pct) + '%'} versus last week.`);
     S.push(`At the current pace this month projects to ${fmtUSD(p.projected)} (${fmtUSD(p.mtd)} so far, ${p.daysLeft} days left).`);

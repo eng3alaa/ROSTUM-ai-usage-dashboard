@@ -40,6 +40,12 @@ export async function run({ browser, ok }) {
       return [...document.querySelectorAll('#alerts .alert')].map(a => a.dataset.kind);
     });
     ok('budgets: exceeded banner replaces approaching', ex.includes('exceed:total') && !ex.includes('approach:total'), JSON.stringify(ex));
+
+    const inf = await page.evaluate(() => {
+      Budgets.set('total', '1e400');
+      return Budgets.limits.total === undefined && !('total' in Budgets.limits);
+    });
+    ok('budgets: non-finite input is rejected, not stored as Infinity', inf, String(inf));
   } finally {
     await page.close();
   }

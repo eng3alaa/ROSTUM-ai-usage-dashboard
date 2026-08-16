@@ -20,6 +20,18 @@ export async function run({ browser, ok }) {
     });
     ok('narrative: mentions totals, top model, top platform, projection', /\$\d/.test(t.txt) && /claude-sonnet-5/.test(t.txt) && /Anthropic API/.test(t.txt) && /project/i.test(t.txt), t.txt.slice(0, 200));
     ok('narrative: empty range degrades to a single honest sentence', /not enough data/i.test(t.emptyTxt), t.emptyTxt);
+
+    const zero = await page.evaluate(() => {
+      Pricing.rows.unshift({ pat: '^freebie$', label: 'Free', in: 0, out: 0, cw: 0, cr: 0 });
+      Pricing._cache.clear();
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      Store.setSource('anthropic', [{ model: 'freebie', platform: 'X', in: 100, out: 10, cw: 0, cr: 0, msgs: 1, d: todayKey() }], {});
+      App.filters.range = '30'; App._render();
+      const txt = document.getElementById('narrative').textContent;
+      Pricing.rows.shift(); Pricing._cache.clear();
+      return { txt };
+    });
+    ok('narrative: zero-cost range never prints NaN', !/NaN/.test(zero.txt), zero.txt);
   } finally {
     await page.close();
   }
