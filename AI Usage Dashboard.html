@@ -202,6 +202,9 @@ input[type="date"], input[type="text"], input[type="password"], select {
   body { background: #fff; color: #000; }
   .card, .tile, .insight { break-inside: avoid; border-color: #ccc; }
   .wrap { max-width: none; padding: 0; }
+  /* charts carry a fixed pixel `width` attribute baked in at the last JS render — print
+     doesn't re-render, so constrain visually via CSS or a wide screen render clips/overflows */
+  .chartbox svg, #daily-chart svg { max-width: 100%; height: auto; }
 }
 
 /* ============ KPI row ============ */
@@ -256,8 +259,7 @@ svg text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
 .bar-label { fill: var(--ink-2); font-size: 11px; }
 .crosshair { stroke: var(--baseline); stroke-width: 1; shape-rendering: crispEdges; }
 .colband { fill: transparent; }
-.colband:focus-visible { outline: none; fill: var(--wash); }
-.colband:hover { fill: var(--wash); }
+.colband.active { fill: var(--wash); }
 .hbar-hit:hover rect.mark, .hbar-hit:focus-visible rect.mark { filter: brightness(1.12); }
 .hbar-hit:focus-visible { outline: none; }
 
@@ -1126,11 +1128,13 @@ const ColorMap = {
   save() { LS.set('colormap', this.maps); },
   slotFor(kind, name, orderedCandidates) {
     const map = this.maps[kind];
-    if (map[name] != null) return map[name];
+    // -1 is the "no free slot" overflow sentinel, not a real assignment — entities persisted
+    // with it (e.g. from before the palette widened past 8 slots) must be free to re-assign.
+    if (map[name] != null && map[name] !== -1) return map[name];
     // assign next free slot, seeding in the given deterministic order
     const used = new Set(Object.values(map));
     for (const cand of orderedCandidates) {
-      if (map[cand] != null) continue;
+      if (map[cand] != null && map[cand] !== -1) continue;
       let s = 0; while (used.has(s) && s < SLOT_VARS.length) s++;
       if (s >= SLOT_VARS.length) { map[cand] = -1; } else { map[cand] = s; used.add(s); }
     }
@@ -1788,6 +1792,7 @@ function roundedRightRect(x, y, w, h, r) {
 function renderStackedColumns(container, { days, series, metric }) {
   const { buckets, unit } = bucketDays(days);
   const labels = buckets.map(b => b.label);
+  const tickDays = buckets.map(b => b.days[0]);   // first day actually in range — for week/month buckets this can differ from the bucket key (e.g. a Monday before the range start)
   if (unit !== 'day') {
     const idx = new Map(days.map((d, i) => [d, i]));
     series = series.map(s => ({ ...s, values: buckets.map(b => b.days.reduce((a, d) => a + (s.values[idx.get(d)] || 0), 0)) }));
@@ -1822,7 +1827,7 @@ function renderStackedColumns(container, { days, series, metric }) {
   days.forEach((d, i) => {
     if (i % every !== 0 && i !== n - 1) return;
     const cx = padL + band * i + band / 2;
-    svg.appendChild(el('text', { class: 'axis-t', x: cx, y: padT + plotH + 16, 'text-anchor': 'middle', text: fmtDayShort(d) }));
+    svg.appendChild(el('text', { class: 'axis-t', x: cx, y: padT + plotH + 16, 'text-anchor': 'middle', text: fmtDayShort(tickDays[i]) }));
   });
 
   // columns
@@ -1857,6 +1862,14 @@ function renderStackedColumns(container, { days, series, metric }) {
     class: 'hitlayer', x: padL, y: padT, width: innerW, height: plotH, fill: 'transparent',
     tabindex: 0, role: 'img', 'aria-label': 'Daily usage detail, use arrow keys to browse'
   });
+  const bandEls = [];
+  days.forEach((d, i) => {
+    const bx = padL + band * i;
+    const bandEl = el('rect', { class: 'colband', x: bx, y: padT, width: band, height: plotH, 'pointer-events': 'none' });
+    bandEls.push(bandEl);
+    svg.appendChild(bandEl);
+  });
+  const hideBands = () => { for (const b of bandEls) b.classList.remove('active'); };
   const showDay = (i, clientX, clientY) => {
     const cx = padL + band * i + band / 2;
     cross.setAttribute('x1', cx); cross.setAttribute('x2', cx);
@@ -1871,11 +1884,8 @@ function renderStackedColumns(container, { days, series, metric }) {
       rows.length ? rows : [{ color: 'transparent', name: 'no usage', value: '—' }],
       rows.length > 1 ? { name: 'total', value: fmtMetric(total, metric) } : null);
     hit.setAttribute('aria-label', `${ttTitle}: ${fmtMetric(total, metric)} total`);
+    for (let j = 0; j < bandEls.length; j++) bandEls[j].classList.toggle('active', j === i);
   };
-  days.forEach((d, i) => {
-    const bx = padL + band * i;
-    svg.appendChild(el('rect', { class: 'colband', x: bx, y: padT, width: band, height: plotH, 'pointer-events': 'none' }));
-  });
   let focusIdx = n - 1;
   const clampIdx = (i) => Math.max(0, Math.min(n - 1, i));
   const idxFromClientX = (clientX) => {
@@ -1884,7 +1894,7 @@ function renderStackedColumns(container, { days, series, metric }) {
   };
   const posForIdx = (i) => { const r = svg.getBoundingClientRect(); return { x: r.left + padL + band * i + band / 2, y: r.top + 40 }; };
   hit.addEventListener('pointermove', (e) => { focusIdx = idxFromClientX(e.clientX); showDay(focusIdx, e.clientX, e.clientY); });
-  hit.addEventListener('pointerleave', () => { Tooltip.hide(); cross.setAttribute('x1', -9); cross.setAttribute('x2', -9); });
+  hit.addEventListener('pointerleave', () => { Tooltip.hide(); cross.setAttribute('x1', -9); cross.setAttribute('x2', -9); hideBands(); });
   hit.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowLeft') focusIdx = clampIdx(focusIdx - 1);
     else if (e.key === 'ArrowRight') focusIdx = clampIdx(focusIdx + 1);
@@ -1894,7 +1904,7 @@ function renderStackedColumns(container, { days, series, metric }) {
     showDay(focusIdx, p.x, p.y);
   });
   hit.addEventListener('focus', () => { const p = posForIdx(focusIdx); showDay(focusIdx, p.x, p.y); });
-  hit.addEventListener('blur', () => { Tooltip.hide(); cross.setAttribute('x1', -9); cross.setAttribute('x2', -9); });
+  hit.addEventListener('blur', () => { Tooltip.hide(); cross.setAttribute('x1', -9); cross.setAttribute('x2', -9); hideBands(); });
   svg.appendChild(hit);
 
   container.appendChild(svg);
@@ -2104,7 +2114,17 @@ const App = {
   },
 
   rowsIn(win) {
-    return Store.allRows().filter(r => r.d >= win.from && r.d <= win.to && !this.filters.hiddenPlatforms.has(r.platform) && (this._drill == null || r.platform === this._drill));
+    const d = this._drill;
+    return Store.allRows().filter(r => r.d >= win.from && r.d <= win.to && (d != null ? r.platform === d : !this.filters.hiddenPlatforms.has(r.platform)));
+  },
+
+  // platform-filtered rows with NO date-window bound — for insights/narrative sections
+  // that intentionally look past the current date filter ("this month", "last 13 weeks").
+  // Drilling overrides the chip-hidden set (so drilling into a hidden platform still shows
+  // it) rather than ANDing with it — mirrors rowsIn().
+  visibleRows() {
+    const d = this._drill;
+    return Store.allRows().filter(r => d != null ? r.platform === d : !this.filters.hiddenPlatforms.has(r.platform));
   },
 
   metricOf(r) {
@@ -2190,7 +2210,7 @@ const App = {
   renderInsights(win, rows) {
     const today = todayKey();
     const costOf = (r) => Pricing.cost(r.model, r);
-    const allRows = Store.allRows().filter(r => !this.filters.hiddenPlatforms.has(r.platform));   // insights that need "this month"/"13 weeks" ignore the date filter, respect platform chips
+    const allRows = this.visibleRows();   // insights that need "this month"/"13 weeks" ignore the date filter, respect platform chips + drill
     // 1) projection
     const p = Insights.projection(allRows, costOf, today);
     $('ins-projection-value').textContent = fmtUSD(p.projected);
@@ -2233,7 +2253,7 @@ const App = {
     const len = dayRange(win.from, win.to).length;
     const prevWin = { from: addDays(win.from, -len), to: addDays(win.from, -1) };
     const grp = (rs) => { const m = new Map(); for (const r of rs) m.set(r.platform, (m.get(r.platform) || 0) + costOf(r)); return [...m.entries()].map(([project, cost]) => ({ project, cost })); };
-    const currRows = rows, prevRows = Store.allRows().filter(r => r.d >= prevWin.from && r.d <= prevWin.to && !this.filters.hiddenPlatforms.has(r.platform));
+    const currRows = rows, prevRows = this.visibleRows().filter(r => r.d >= prevWin.from && r.d <= prevWin.to);
     const mv = Insights.topMovers(grp(currRows), grp(prevRows), 5);
     const mvBox = clear($('ins-movers'));
     if (!mv.length) mvBox.appendChild(el('div', { class: 'note', text: 'No data in range yet.' }));
@@ -2253,8 +2273,8 @@ const App = {
     }
     const top = (m) => [...m.entries()].sort((a, b) => b[1] - a[1])[0];
     const tm = top(byModel), tp = top(byPlat), td = top(byDay);
-    const p = Insights.projection(Store.allRows().filter(r => !this.filters.hiddenPlatforms.has(r.platform)), costOf, todayKey());
-    const w = Insights.weekOverWeek(Store.allRows().filter(r => !this.filters.hiddenPlatforms.has(r.platform)), costOf, todayKey());
+    const p = Insights.projection(this.visibleRows(), costOf, todayKey());
+    const w = Insights.weekOverWeek(this.visibleRows(), costOf, todayKey());
     const S = [];
     S.push(`You used ${fmtCompact(tok)} tokens across ${fmtCompact(msgs)} messages, worth about ${fmtUSD(cost)} at API list prices.`);
     if (tm && cost > 0) S.push(`${tm[0]} was the biggest line item at ${fmtUSD(tm[1])} (${Math.round(tm[1] / cost * 100)}% of spend)${tp ? `, and ${tp[0]} was the top platform` : ''}.`);
