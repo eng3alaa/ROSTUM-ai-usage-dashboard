@@ -109,6 +109,48 @@ export async function run({ browser, ok }) {
       return { c, otherHex };
     });
     ok('backlog-13b: legacy -1 slots re-assign after palette widening', legacy.c !== legacy.otherHex, JSON.stringify(legacy));
+
+    // item 15: cached scan reports lines/badLines
+    const meta = await page.evaluate(async () => {
+      const bad = '{"type":"assistant","message":{"usage":{"input_tokens":1,"output_tokens":1},"model":"m","id":"z1"},"requestId":"z1","timestamp":"2026-08-10T10:00:00Z"}\nnot json\n';
+      const res = await parseClaudeLogsCached([{ path: 'projects/-p/s.jsonl', file: new File([bad], 's.jsonl') }], null, new Map());
+      return { lines: res.meta.lines, badLines: res.meta.badLines };
+    });
+    ok('backlog-15: cached scan preserves lines/badLines diagnostics', meta.lines === 2 && meta.badLines === 1, JSON.stringify(meta));
+    // item 16: ScanCache prunes signatures not seen in the latest scan
+    const evict = await page.evaluate(async () => {
+      const cache = new Map();
+      const f1 = { path: 'projects/-p/a.jsonl', file: new File(['{"type":"assistant","message":{"usage":{"input_tokens":1,"output_tokens":1},"model":"m","id":"a1"},"requestId":"a1","timestamp":"2026-08-10T10:00:00Z"}'], 'a.jsonl', { lastModified: 1 }) };
+      const f2 = { path: 'projects/-p/b.jsonl', file: new File(['{"type":"assistant","message":{"usage":{"input_tokens":1,"output_tokens":1},"model":"m","id":"b1"},"requestId":"b1","timestamp":"2026-08-10T10:00:00Z"}'], 'b.jsonl', { lastModified: 1 }) };
+      await parseClaudeLogsCached([f1, f2], null, cache);
+      const before = cache.size;
+      await parseClaudeLogsCached([f1], null, cache);   // b vanished
+      return { before, after: cache.size };
+    });
+    ok('backlog-16: cache prunes entries for files absent from the latest scan', evict.before === 2 && evict.after === 1, JSON.stringify(evict));
+    // item 18: v1.1-shaped store (no connectors) migrates to connected cards
+    const mig = await page.evaluate(() => {
+      Store.sources = {}; Store.connectors = {};
+      Store.sources.anthropic = { rows: [{ d: todayKey(), platform: 'Anthropic API', model: 'm', in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }], meta: { updated: Date.now() - 1000 } };
+      Store.migrateConnectors();
+      return { st: Store.connectorStatus(connectorById('anthropic')), label: (Store.connectors.anthropic || {}).label };
+    });
+    ok('backlog-18: sources without connector state migrate to a labeled connected card', mig.st === 'ok' && /stored data/i.test(mig.label), JSON.stringify(mig));
+    // item 14: connected new-platform source cards are revealed in Data sources
+    const reveal = await page.evaluate(() => {
+      Store.setConnector('openrouter', { label: 'k', lastSync: Date.now() });
+      App._render();
+      return document.getElementById('src-openrouter').hidden === false;
+    });
+    ok('backlog-14: connected OpenRouter card is visible in Data sources', reveal, '');
+    // item 4: large import parse runs off the main thread (worker path exists and returns identical rows)
+    const wk = await page.evaluate(async () => {
+      const conv = [{ current_node: 'B', mapping: { root: { id: 'root', parent: null, children: ['u'] }, u: { id: 'u', parent: 'root', children: ['B'], message: { author: { role: 'user' }, create_time: 1, content: { content_type: 'text', parts: ['hi'] } } }, B: { id: 'B', parent: 'u', children: [], message: { author: { role: 'assistant' }, create_time: 2, metadata: { model_slug: 'gpt-5.4' }, content: { content_type: 'text', parts: ['x'.repeat(400)] } } } } }];
+      const direct = parseChatGPTExport(conv);
+      const viaWorker = await parseInWorker('chatgpt', JSON.stringify(conv));
+      return { same: JSON.stringify(direct.rows) === JSON.stringify(viaWorker.rows), msgs: viaWorker.meta.msgs };
+    });
+    ok('backlog-4: worker parse returns identical rows for chat exports', wk.same && wk.msgs === 1, JSON.stringify(wk));
   } finally {
     await page.close();
   }
