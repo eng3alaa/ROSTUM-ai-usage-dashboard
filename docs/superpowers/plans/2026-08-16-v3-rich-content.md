@@ -494,6 +494,8 @@ export async function run({ browser, ok }) {
 
 RED: `#narrative` missing.
 
+- [ ] **Step 1b — heatmap size cap (from T3 review):** add `#ins-heatmap svg { max-width: 300px; }` after the insights CSS so the heatmap doesn't balloon to ~30px cells on wide layouts. No check needed (visual; T10 screenshots confirm).
+
 - [ ] **Step 2 — implement.** HTML: insert directly after the `#insights` div: `<div class="card" id="card-narrative"><div class="card-head"><div><h2>This period in AI</h2><div class="sub" id="narrative-range"></div></div></div><div id="narrative" class="narrative"></div></div>` and CSS `.narrative { font-size: 13.5px; line-height: 1.55; } .narrative p { margin: 0 0 6px; }` (append after the insights CSS). Add `this.renderNarrative(win, rows);` in `_render()` after `renderInsights`. Method (anchor: before `/* ---------- accounts hub ---------- */`):
 
 ```js
