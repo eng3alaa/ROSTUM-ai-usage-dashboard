@@ -196,6 +196,16 @@ Recorded scope notes and deferred minors from the Plan 2 final integration revie
 17. **Scan cache stores post-dedup subsets** (Plan 2 fix-round residual): when cross-file duplicate messages exist, the losing file's cache entry omits the shared messages; if the winning file later vanishes, scans under-count until the loser's signature changes. Plan 3: cache full per-file rows+ids and dedupe at merge time. — accepted trade-off (documented: under-count self-heals on file change; full-rows caching deferred)
 18. **v1.1 → v2 hub migration**: persisted v1.1 data has no `connectors` entries, so existing users see all-gray "Not connected" cards (with their data still charted) until the first re-sync. Plan 3: one-time `load()` migration synthesizing `{label: 'stored data', lastSync: meta.updated}` for sources present without a connector entry; also give kept-but-disconnected cards a data-removal affordance. — DONE (Plan 3) — migration + affordance: kept-but-disconnected cards can remove data via Clear stored data; per-card removal deferred
 
+Post-v3 backlog (from the Plan 3 final integration review — recorded limitations, none data-corrupting):
+
+19. **Hour granularity multiplies stored local rows** within the 90-day sid window (~6× for multi-session days). Honest failure via the storage banner; mitigation: drop `hour` in compaction at ~30 days (busiest-hours is a recent-activity view), or accept.
+20. **Budget editor covers registry platforms only** — ChatGPT/Claude.ai/arbitrary CSV platforms count toward Total but can't carry their own limit.
+21. **dismissedAlerts keys accumulate** across months — prune keys older than the current month on write.
+22. **Reveal-cards list hardcodes gemini/copilot/openrouter** — derive from CONNECTORS (kind !== folder/files/admin-key) to keep the registry single-sourced.
+23. **Chip clicks while drilled** are visually inert but persist — disable chips while drilled or make the pill the only control.
+24. **Partial worker offload** — main thread still does f.text() + JSON.parse + a JSON.stringify before hand-off; pass raw text + a wrapped flag to the worker.
+25. **Print polish** — orphan "Data sources"/"API price list" section titles; "Top project movers" label says projects while listing platforms; nested live regions on alerts.
+
 ## Acceptance criteria
 
 - Each of the 7 platforms has an account card with working connect → validate → sync → disconnect lifecycle and truthful capability notes.
