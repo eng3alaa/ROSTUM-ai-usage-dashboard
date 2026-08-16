@@ -198,6 +198,9 @@ input[type="date"], input[type="text"], input[type="password"], select {
 .report-meta { font-size: 12px; color: var(--ink-2); margin: 0 0 12px; }
 @media print {
   .topbar .top-actions, .filterbar, #accounts-hub, #sources, .sources, #card-budgets, #card-pricing, #alerts, #storage-warning, .toggle, .btn { display: none !important; }
+  /* an open <dialog> renders in the top layer, above the normal document flow — hiding its
+     ancestors via the print stylesheet does not hide it, so it needs its own rule */
+  dialog { display: none !important; }
   .report-meta { display: block !important; }
   body { background: #fff; color: #000; }
   .card, .tile, .insight { break-inside: avoid; border-color: #ccc; }
@@ -2250,12 +2253,15 @@ const App = {
   /* ---------- budgets & alerts ---------- */
   renderAlerts() {
     const box = clear($('alerts'));
-    for (const a of Budgets.alerts()) {
+    const all = Budgets.alerts();
+    const MAX = 4;
+    for (const a of all.slice(0, MAX)) {
       const n = el('div', { class: 'alert ' + a.level, 'data-kind': a.kind, role: 'status' },
         el('span', { text: (a.level === 'critical' ? '⛔ ' : '⚠ ') + a.msg }),
         el('button', { class: 'btn small alert-dismiss', text: 'Dismiss', onclick: () => { Budgets.dismiss(a.kind); this.render(); } }));
       box.appendChild(n);
     }
+    if (all.length > MAX) box.appendChild(el('div', { class: 'note', text: `+${all.length - MAX} more — see Budgets` }));
   },
   renderBudgets() {
     const box = clear($('budget-editor'));
@@ -3331,6 +3337,9 @@ const App = {
     // top actions
     $('export-csv').addEventListener('click', () => this.exportCSV());
     $('print-report').addEventListener('click', () => this.printReport(false));
+    // Ctrl+P / File > Print bypasses the button entirely — only 'beforeprint' fires for
+    // every print path, so the report header must be filled from there too.
+    window.addEventListener('beforeprint', () => App.printReport(true));
     $('refresh-all').addEventListener('click', () => this.refreshAll());
     $('add-price').addEventListener('click', () => {
       Pricing.rows.splice(Math.max(0, Pricing.rows.length - 1), 0, { pat: 'my-model', label: 'New model', in: 0, out: 0, cw: 0, cr: 0 });

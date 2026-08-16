@@ -64,6 +64,26 @@ export async function run({ browser, ok }) {
       await page.emulateMediaType('screen');
       await page.setViewport(origVp);
     }
+
+    // M1/M2: an open <dialog> paints ABOVE everything (its own top layer) regardless of the
+    // print stylesheet hiding its ancestors, so it must be hidden explicitly. And Ctrl+P /
+    // File > Print never calls App.printReport — only window.print() does — so the browser's
+    // native print entry point (the 'beforeprint' event) must fill the report header itself.
+    try {
+      await page.evaluate(() => { $('report-meta').hidden = true; $('report-meta').textContent = ''; App.openConnectorModal('anthropic'); });
+      await page.emulateMediaType('print');
+      const dlgDisplay = await page.evaluate(() => getComputedStyle(document.getElementById('connector-modal')).display);
+      const filled = await page.evaluate(() => {
+        window.dispatchEvent(new Event('beforeprint'));
+        const m = document.getElementById('report-meta');
+        return { hidden: m.hidden, text: m.textContent };
+      });
+      ok('print: dialog hidden and beforeprint fills header',
+        dlgDisplay === 'none' && filled.hidden === false && filled.text.length > 0, JSON.stringify({ dlgDisplay, filled }));
+    } finally {
+      await page.emulateMediaType('screen');
+      await page.evaluate(() => { const dlg = document.getElementById('connector-modal'); if (dlg.open) dlg.close(); });
+    }
   } finally {
     await page.close();
   }
