@@ -59,6 +59,21 @@ export async function run({ browser, ok }) {
       gate.atLimit.includes('exceed:total'),
       JSON.stringify(gate));
 
+    // Same falsehood, other surfaces: status().pct must floor so the narrative gate,
+    // hub bar class, and editor note agree with the spent >= limit alert gate.
+    const floorPct = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      // 99.6% of a $100 budget: 49.8M input tokens of sonnet-5 at $2/M = $99.60
+      Store.setSource('anthropic', [{ d: todayKey(), platform: 'Anthropic API', model: 'claude-sonnet-5', in: 49_800_000, cw: 0, cr: 0, out: 0, msgs: 1 }], {});
+      Budgets.set('total', 100);
+      const st = Budgets.status();
+      App._render();
+      return { pct: st.total.pct, narrative: document.getElementById('narrative').textContent };
+    });
+    ok('budgets: status pct floors (99.6% reads 99, narrative says "used" not "over")',
+      floorPct.pct === 99 && /have used 99%/.test(floorPct.narrative) && !/are over/.test(floorPct.narrative),
+      JSON.stringify(floorPct));
+
     const inf = await page.evaluate(() => {
       Budgets.set('total', '1e400');
       return Budgets.limits.total === undefined && !('total' in Budgets.limits);

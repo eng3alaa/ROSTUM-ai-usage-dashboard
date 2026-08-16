@@ -987,7 +987,7 @@ const Budgets = {
     const byPlat = new Map(); let total = 0;
     for (const r of rows) { const c = costOf(r); total += c; byPlat.set(r.platform, (byPlat.get(r.platform) || 0) + c); }
     const proj = Insights.projection(Store.allRows(), costOf, t);
-    const mk = (spent, limit, projected) => ({ spent, limit, pct: limit ? Math.round(spent / limit * 100) : 0, projected });
+    const mk = (spent, limit, projected) => ({ spent, limit, pct: limit ? Math.floor(spent / limit * 100) : 0, projected });   // floor: pct >= 100 ⟺ spent >= limit
     const out = { total: this.limits.total ? mk(total, this.limits.total, proj.projected) : null, byPlatform: {} };
     for (const [k, lim] of Object.entries(this.limits)) {
       if (k === 'total') continue;
