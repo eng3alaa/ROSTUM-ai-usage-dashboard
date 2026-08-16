@@ -2880,21 +2880,21 @@ const App = {
     if (!key) { status.textContent = 'Paste an Admin API key first (starts with sk-ant-admin).'; return; }
     if ($('remember-anthropic').checked) LS.set('key:anthropic', key);
     const days = parseInt($('anthropic-days').value, 10);
-    status.textContent = 'Fetching usage…';
+    status.textContent = 'Fetching usage…'; status.dataset.gen = String(gen);
     try {
       const { usage, cost } = await fetchAnthropicAll(key, days);
-      if (gen !== this._gen.anthropic) { if (/^(Fetching|Validating)/.test(status.textContent)) status.textContent = ''; return; }   // superseded by a newer fetch
+      if (gen !== this._gen.anthropic) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded by a newer fetch — only clear the placeholder if it's still ours
       Store.setSource('anthropic', usage.rows, { days });
       Store.setBilled('anthropic', cost);
       Store.setConnector('anthropic', { label: 'Admin key ·  last 4: ' + key.slice(-4), lastSync: Date.now(), err: null });
-      status.textContent = '';
+      status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
       status.appendChild(document.createTextNode(`${usage.rows.length} usage rows${cost && cost.length ? ' + billed costs' : ''} · updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`));
       this.render();
     } catch (e) {
-      if (gen !== this._gen.anthropic) { if (/^(Fetching|Validating)/.test(status.textContent)) status.textContent = ''; return; }   // superseded by a newer fetch
+      if (gen !== this._gen.anthropic) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded by a newer fetch — only clear the placeholder if it's still ours
       Store.setConnector('anthropic', { err: (e.message || String(e)).slice(0, 80) });
-      status.textContent = '';
+      status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
       status.appendChild(document.createTextNode((e.message || String(e)) + ' — if this is a CORS/network block, use the PowerShell fallback below.'));
       document.querySelector('#src-anthropic details.fallback').open = true;
@@ -2908,21 +2908,21 @@ const App = {
     if (!key) { status.textContent = 'Paste an Admin key first (starts with sk-admin).'; return; }
     if ($('remember-openai').checked) LS.set('key:openai', key);
     const days = parseInt($('openai-days').value, 10);
-    status.textContent = 'Fetching usage…';
+    status.textContent = 'Fetching usage…'; status.dataset.gen = String(gen);
     try {
       const { usage, cost } = await fetchOpenAIAll(key, days);
-      if (gen !== this._gen.openai) { if (/^(Fetching|Validating)/.test(status.textContent)) status.textContent = ''; return; }   // superseded by a newer fetch
+      if (gen !== this._gen.openai) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded by a newer fetch — only clear the placeholder if it's still ours
       Store.setSource('openai', usage.rows, { days });
       Store.setBilled('openai', cost);
       Store.setConnector('openai', { label: 'Admin key ·  last 4: ' + key.slice(-4), lastSync: Date.now(), err: null });
-      status.textContent = '';
+      status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
       status.appendChild(document.createTextNode(`${usage.rows.length} usage rows${cost && cost.length ? ' + billed costs' : ''} · updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`));
       this.render();
     } catch (e) {
-      if (gen !== this._gen.openai) { if (/^(Fetching|Validating)/.test(status.textContent)) status.textContent = ''; return; }   // superseded by a newer fetch
+      if (gen !== this._gen.openai) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded by a newer fetch — only clear the placeholder if it's still ours
       Store.setConnector('openai', { err: (e.message || String(e)).slice(0, 80) });
-      status.textContent = '';
+      status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
       status.appendChild(document.createTextNode((e.message || String(e)) + ' — if this is a CORS/network block, use the PowerShell fallback below.'));
       document.querySelector('#src-openai details.fallback').open = true;
@@ -2935,20 +2935,20 @@ const App = {
     const status = $('gemini-status');
     if (!key) { status.textContent = 'Paste a Google AI Studio API key first (starts with AIza).'; return; }
     if ($('remember-gemini') && $('remember-gemini').checked) LS.set('key:gemini', key);
-    status.textContent = 'Validating…';
+    status.textContent = 'Validating…'; status.dataset.gen = String(gen);
     try {
       const j = await fetchJSON('https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(key), {});
-      if (gen !== this._gen.gemini) { if (/^(Fetching|Validating)/.test(status.textContent)) status.textContent = ''; return; }
+      if (gen !== this._gen.gemini) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
       const n = (j.models || []).length;
       Store.setConnector('gemini', { label: n + ' models available', lastSync: Date.now(), err: null });
-      status.textContent = '';
+      status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
       status.appendChild(document.createTextNode(`${n} models · usage history comes from billing CSV imports`));
       this.render();
     } catch (e) {
-      if (gen !== this._gen.gemini) { if (/^(Fetching|Validating)/.test(status.textContent)) status.textContent = ''; return; }
+      if (gen !== this._gen.gemini) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
       Store.setConnector('gemini', { err: (e.message || String(e)).slice(0, 80) });
-      status.textContent = '';
+      status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'err', text: 'Validation failed: ' }));
       status.appendChild(document.createTextNode(e.message || String(e)));
       this.render();
@@ -2961,22 +2961,22 @@ const App = {
     const status = $('copilot-status');
     if (!key) { status.textContent = 'Paste a fine-grained GitHub token first (github_pat_…).'; return; }
     if ($('remember-copilot') && $('remember-copilot').checked) LS.set('key:copilot', key);
-    status.textContent = 'Validating…';
+    status.textContent = 'Validating…'; status.dataset.gen = String(gen);
     try {
       const res = await fetchCopilotAll(key);
-      if (gen !== this._gen.copilot) { if (/^(Fetching|Validating)/.test(status.textContent)) status.textContent = ''; return; }
+      if (gen !== this._gen.copilot) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
       Store.setConnector('copilot', { label: res.login, lastSync: Date.now(), err: null });
       if (res.rows.length) { Store.setSource('copilot', res.rows, {}); Store.setBilled('copilot', res.billed); }
-      status.textContent = '';
+      status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
       status.appendChild(document.createTextNode(res.rows.length
         ? `${res.rows.length} usage rows (premium requests) + billed costs`
         : (res.hadUsage ? 'validated — no Copilot usage in the billing data' : 'validated — GitHub exposes no usage data for this account')));
       this.render();
     } catch (e) {
-      if (gen !== this._gen.copilot) { if (/^(Fetching|Validating)/.test(status.textContent)) status.textContent = ''; return; }
+      if (gen !== this._gen.copilot) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
       Store.setConnector('copilot', { err: (e.message || String(e)).slice(0, 80) });
-      status.textContent = '';
+      status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'err', text: 'Validation failed: ' }));
       status.appendChild(document.createTextNode(e.message || String(e)));
       this.render();
@@ -2989,23 +2989,23 @@ const App = {
     const status = $('openrouter-status');
     if (!key) { status.textContent = 'Paste an OpenRouter API key first (sk-or-…).'; return; }
     if ($('remember-openrouter') && $('remember-openrouter').checked) LS.set('key:openrouter', key);
-    status.textContent = 'Fetching…';
+    status.textContent = 'Fetching…'; status.dataset.gen = String(gen);
     try {
       const res = await fetchOpenRouterAll(key);
-      if (gen !== this._gen.openrouter) { if (/^(Fetching|Validating)/.test(status.textContent)) status.textContent = ''; return; }
+      if (gen !== this._gen.openrouter) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
       Store.setConnector('openrouter', { label: res.label, lastSync: Date.now(), err: null });
       if (res.rows.length) { Store.setSource('openrouter', res.rows, {}); Store.setBilled('openrouter', res.billed); }
       const creditsNote = res.credits ? ` · ${fmtUSD((res.credits.total_credits || 0) - (res.credits.total_usage || 0))} credits left` : '';
-      status.textContent = '';
+      status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
       status.appendChild(document.createTextNode(res.rows.length
         ? `${res.rows.length} daily activity rows${creditsNote}`
         : `validated${creditsNote} — daily activity not available for this key type`));
       this.render();
     } catch (e) {
-      if (gen !== this._gen.openrouter) { if (/^(Fetching|Validating)/.test(status.textContent)) status.textContent = ''; return; }
+      if (gen !== this._gen.openrouter) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
       Store.setConnector('openrouter', { err: (e.message || String(e)).slice(0, 80) });
-      status.textContent = '';
+      status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
       status.appendChild(document.createTextNode(e.message || String(e)));
       this.render();

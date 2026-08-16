@@ -151,6 +151,20 @@ export async function run({ browser, ok }) {
       return { same: JSON.stringify(direct.rows) === JSON.stringify(viaWorker.rows), msgs: viaWorker.meta.msgs };
     });
     ok('backlog-4: worker parse returns identical rows for chat exports', wk.same && wk.msgs === 1, JSON.stringify(wk));
+
+    // item 9 residual: a stale bail must not blank a NEWER in-flight fetch's own placeholder
+    const dbl = await page.evaluate(async () => {
+      Store.sources = {}; Store.connectors = {};
+      let n = 0;
+      window.fetchAnthropicAll = async () => { const me = ++n; await new Promise(r => setTimeout(r, me === 1 ? 50 : 400)); return { usage: { rows: [{ d: todayKey(), platform: 'Anthropic API', model: 'm' + me, in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }] }, cost: [] }; };
+      document.getElementById('anthropic-key').value = 'sk-ant-admin-x';
+      const p1 = App.fetchAnthropic(); const p2 = App.fetchAnthropic();
+      await new Promise(r => setTimeout(r, 120));   // p1 (stale) has resolved & bailed; p2 still in flight
+      const mid = document.getElementById('anthropic-status').textContent;
+      await Promise.allSettled([p1, p2]);
+      return { mid, final: document.getElementById('anthropic-status').textContent, model: Store.sources.anthropic.rows[0].model };
+    });
+    ok('backlog-9: stale bail does not blank a newer in-flight placeholder', /Fetching/.test(dbl.mid) && /Connected/.test(dbl.final) && dbl.model === 'm2', JSON.stringify(dbl));
   } finally {
     await page.close();
   }

@@ -1,7 +1,7 @@
 # AI Usage Dashboard v2 — Accounts Hub & Rich Content
 
 **Date:** 2026-08-15
-**Status:** Approved design, pending user review of this spec
+**Status:** Implemented through Plan 3 (v3).
 **Target:** `AI Usage Dashboard.html` (single self-contained file, evolved in place — Approach A)
 
 ## Background
@@ -174,26 +174,26 @@ Also carried in from unverified-but-plausible review notes: fallback commands co
 Non-blocking findings from the final whole-branch review of v1.1, accepted as Plan 2 work items alongside deferred defects #5 (connector registry) and #7 (incremental scan cache):
 
 1. **sid row multiplication**: per-session aggregation rows multiply storage/render volume for heavy multi-session days — add a sid side-index or store sids as a list on merged rows, plus a retention policy for the localStorage blob. — DONE (Plan 2)
-2. **Week-bucket edge labels**: a range starting mid-week labels its first bucket "Week of <Monday before the range>" — clamp displayed labels to the range.
-3. **Delegated chart pointer handler**: defect #4's second clause (one pointermove handler on the SVG deriving day index from x) — bucketing bounds the cost today; finish the remedy in the chart rewrite.
-4. **Worker/chunked import parsing**: defect #8's second clause — the tab still freezes on very large exports, now with honest feedback; move parse to a Blob worker in v2.
+2. **Week-bucket edge labels**: a range starting mid-week labels its first bucket "Week of <Monday before the range>" — clamp displayed labels to the range. — DONE (Plan 3)
+3. **Delegated chart pointer handler**: defect #4's second clause (one pointermove handler on the SVG deriving day index from x) — bucketing bounds the cost today; finish the remedy in the chart rewrite. — DONE (Plan 3)
+4. **Worker/chunked import parsing**: defect #8's second clause — the tab still freezes on very large exports, now with honest feedback; move parse to a Blob worker in v2. — DONE (Plan 3)
 5. **Harness default storage isolation**: `openDashboard` should clear `aiusage:*` storage unless seeding, instead of relying on per-check discipline. — DONE (Plan 2)
 6. **postRun coverage on throw**: `tests/run.mjs` skips a module's `postRun` if its `run` throws — move postRun into a finally or its own try. — DONE (Plan 2)
 7. **scanHandle catch gen-guard**: fetch error paths are gen-guarded; the folder-scan catch is not (low risk, same category). — DONE (Plan 2)
 8. **Soft-fail race check**: the import-vs-fetch gen guard is covered by a hard-reject check; add a usage-OK-cost-null variant to pin the soft-fail path explicitly (mechanism verified manually in the final review). — DONE (Plan 2 T10 pin)
-9. **Superseded-fetch status text**: when an import supersedes an in-flight fetch, the fetch bails before updating its status line, leaving "Fetching usage…" stuck (cosmetic; data correct). Reset or annotate the status on bail; the accounts-hub card states in v2 subsume this. — DONE (Plan 2 T10), with one residual cosmetic case for Plan 3: two overlapping fetches on the SAME connector — the older bail can blank the newer's in-flight placeholder (self-heals on resolve).
-10. **Drill-down persistence** (Plan 2 T9 review): drill-down mutates hiddenPlatforms without persisting to LS, unlike chip toggles — decide in Plan 3 whether ephemeral is intended (likely yes: document it) or persist for consistency. Known leak path: a chip click AFTER a drill persists the drill-derived hide set.
+9. **Superseded-fetch status text**: when an import supersedes an in-flight fetch, the fetch bails before updating its status line, leaving "Fetching usage…" stuck (cosmetic; data correct). Reset or annotate the status on bail; the accounts-hub card states in v2 subsume this. — DONE (Plan 2 T10), with one residual cosmetic case for Plan 3: two overlapping fetches on the SAME connector — the older bail can blank the newer's in-flight placeholder (self-heals on resolve). — DONE (Plan 3 T9)
+10. **Drill-down persistence** (Plan 2 T9 review): drill-down mutates hiddenPlatforms without persisting to LS, unlike chip toggles — decide in Plan 3 whether ephemeral is intended (likely yes: document it) or persist for consistency. Known leak path: a chip click AFTER a drill persists the drill-derived hide set. — DONE (Plan 3)
 
 Recorded scope notes and deferred minors from the Plan 2 final integration review (all Plan 3 work):
 
-11. **Platform detail panel**: the spec's drill-down section promises a detail panel; Plan 2 shipped filter-drill only. The panel belongs with Plan 3's insights work.
-12. **Fallback auto-expand on CORS failure** (spec Connect modal section): not yet wired for the new connectors (all three are browser-callable; revisit only if real-world blocks appear). The registry also simplified the spec's function-valued `validate/fetch/capabilities` fields into a data table + `fetchMethod` string — record as the accepted design.
-13. **Color slots**: 9 platforms now exceed the 8 accessible series slots — an `Other`-bucket collision can render two gray "Other" legend entries. Plan 3's chart work should widen the palette or fold overflow honestly.
-14. **Hidden source cards**: connected Gemini/Copilot/OpenRouter cards stay hidden in the Data sources section (reachable only via hub Manage) — decide whether to reveal on connect or remove the legacy section once the hub fully replaces it.
-15. **Scan meta diagnostics**: `parseClaudeLogsCached` drops `lines`/`badLines` from meta — restore malformed-line reporting through the cached path.
-16. **ScanCache eviction**: `scan:` IDB entries are never pruned; edited files orphan old signatures. Add pruning on rescan or clear-data.
-17. **Scan cache stores post-dedup subsets** (Plan 2 fix-round residual): when cross-file duplicate messages exist, the losing file's cache entry omits the shared messages; if the winning file later vanishes, scans under-count until the loser's signature changes. Plan 3: cache full per-file rows+ids and dedupe at merge time.
-18. **v1.1 → v2 hub migration**: persisted v1.1 data has no `connectors` entries, so existing users see all-gray "Not connected" cards (with their data still charted) until the first re-sync. Plan 3: one-time `load()` migration synthesizing `{label: 'stored data', lastSync: meta.updated}` for sources present without a connector entry; also give kept-but-disconnected cards a data-removal affordance.
+11. **Platform detail panel**: the spec's drill-down section promises a detail panel; Plan 2 shipped filter-drill only. The panel belongs with Plan 3's insights work. — DONE (Plan 3: drill-down + insights row constitute the detail view; no separate panel)
+12. **Fallback auto-expand on CORS failure** (spec Connect modal section): not yet wired for the new connectors (all three are browser-callable; revisit only if real-world blocks appear). The registry also simplified the spec's function-valued `validate/fetch/capabilities` fields into a data table + `fetchMethod` string — record as the accepted design. — accepted (registry-as-data design)
+13. **Color slots**: 9 platforms now exceed the 8 accessible series slots — an `Other`-bucket collision can render two gray "Other" legend entries. Plan 3's chart work should widen the palette or fold overflow honestly. — DONE (Plan 3)
+14. **Hidden source cards**: connected Gemini/Copilot/OpenRouter cards stay hidden in the Data sources section (reachable only via hub Manage) — decide whether to reveal on connect or remove the legacy section once the hub fully replaces it. — DONE (Plan 3)
+15. **Scan meta diagnostics**: `parseClaudeLogsCached` drops `lines`/`badLines` from meta — restore malformed-line reporting through the cached path. — DONE (Plan 3)
+16. **ScanCache eviction**: `scan:` IDB entries are never pruned; edited files orphan old signatures. Add pruning on rescan or clear-data. — DONE (Plan 3)
+17. **Scan cache stores post-dedup subsets** (Plan 2 fix-round residual): when cross-file duplicate messages exist, the losing file's cache entry omits the shared messages; if the winning file later vanishes, scans under-count until the loser's signature changes. Plan 3: cache full per-file rows+ids and dedupe at merge time. — accepted trade-off (documented: under-count self-heals on file change; full-rows caching deferred)
+18. **v1.1 → v2 hub migration**: persisted v1.1 data has no `connectors` entries, so existing users see all-gray "Not connected" cards (with their data still charted) until the first re-sync. Plan 3: one-time `load()` migration synthesizing `{label: 'stored data', lastSync: meta.updated}` for sources present without a connector entry; also give kept-but-disconnected cards a data-removal affordance. — DONE (Plan 3)
 
 ## Acceptance criteria
 
