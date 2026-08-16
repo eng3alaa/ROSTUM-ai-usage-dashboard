@@ -19,6 +19,7 @@
   --accent: #2a78d6;
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
   --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  --s9: #7c5cff; --s10: #0aa2c0; --s11: #b3861a; --s12: #c2417a;
   --other: #a9a79f;
   --good-text: #006300;
   --serious: #ec835a;
@@ -42,6 +43,7 @@
     --accent: #3987e5;
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
     --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    --s9: #9d85ff; --s10: #22b7d6; --s11: #d09a2c; --s12: #e0568f;
     --other: #6f6e68;
     --good-text: #0ca30c;
     --seq-150: #184f95;
@@ -63,6 +65,7 @@
   --accent: #3987e5;
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
   --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  --s9: #9d85ff; --s10: #22b7d6; --s11: #d09a2c; --s12: #e0568f;
   --other: #6f6e68;
   --good-text: #0ca30c;
   --seq-150: #184f95;
@@ -140,6 +143,7 @@ input[type="date"], input[type="text"], input[type="password"], select {
 .chip .sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 .chip[aria-pressed="true"] { color: var(--ink); border-color: var(--baseline); box-shadow: inset 0 0 0 1px var(--baseline); }
 .chip[aria-pressed="false"] { opacity: .45; }
+.chip.drill-pill { color: var(--ink); border-color: var(--accent); background: var(--wash); font-weight: 600; }
 
 /* ============ Accounts hub ============ */
 #accounts-hub { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-bottom: 16px; }
@@ -756,7 +760,7 @@ const addDays = (key, n) => { const d = new Date(key + 'T12:00:00'); d.setDate(d
 const dayRange = (from, to) => { const out = []; let k = from; let guard = 0; while (k <= to && guard++ < 4000) { out.push(k); k = addDays(k, 1); } return out; };
 /* Fold a day list into week/month buckets when it exceeds what the pixel width can show */
 function bucketDays(days, maxCols = 160) {
-  if (days.length <= maxCols) return { buckets: days.map(d => ({ key: d, days: [d] })), unit: 'day' };
+  if (days.length <= maxCols) return { buckets: days.map(d => ({ key: d, days: [d], label: fmtDayShort(d) })), unit: 'day' };
   const unit = Math.ceil(days.length / 7) <= maxCols ? 'week' : 'month';
   const map = new Map();
   for (const d of days) {
@@ -769,7 +773,16 @@ function bucketDays(days, maxCols = 160) {
     if (!b) { b = { key: k, days: [] }; map.set(k, b); }
     b.days.push(d);
   }
-  return { buckets: [...map.values()], unit };
+  const buckets = [...map.values()];
+  for (const b of buckets) {
+    // label uses the first day actually IN range (b.days[0]), not the bucket key — the
+    // key can fall before the requested range start (e.g. the Monday of a week that
+    // begins mid-week relative to the range).
+    b.label = unit === 'week'
+      ? 'Week of ' + fmtDayShort(b.days[0])
+      : new Date(b.days[0] + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }
+  return { buckets, unit };
 }
 const fmtDayShort = (key) => { const d = new Date(key + 'T12:00:00'); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
 
@@ -1106,7 +1119,7 @@ const Store = {
 };
 
 /* ---------- fixed color slots (color follows the entity, never rank) ---------- */
-const SLOT_VARS = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7','--s8'];
+const SLOT_VARS = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7','--s8','--s9','--s10','--s11','--s12'];
 const ColorMap = {
   maps: { platform: {}, model: {} },
   load() { this.maps = LS.get('colormap', null) || { platform: {}, model: {} }; },
@@ -1118,8 +1131,8 @@ const ColorMap = {
     const used = new Set(Object.values(map));
     for (const cand of orderedCandidates) {
       if (map[cand] != null) continue;
-      let s = 0; while (used.has(s) && s < 8) s++;
-      if (s >= 8) { map[cand] = -1; } else { map[cand] = s; used.add(s); }
+      let s = 0; while (used.has(s) && s < SLOT_VARS.length) s++;
+      if (s >= SLOT_VARS.length) { map[cand] = -1; } else { map[cand] = s; used.add(s); }
     }
     this.save();
     return map[name] != null ? map[name] : -1;
@@ -1774,6 +1787,7 @@ function roundedRightRect(x, y, w, h, r) {
 /* ---------- stacked daily columns with crosshair ---------- */
 function renderStackedColumns(container, { days, series, metric }) {
   const { buckets, unit } = bucketDays(days);
+  const labels = buckets.map(b => b.label);
   if (unit !== 'day') {
     const idx = new Map(days.map((d, i) => [d, i]));
     series = series.map(s => ({ ...s, values: buckets.map(b => b.days.reduce((a, d) => a + (s.values[idx.get(d)] || 0), 0)) }));
@@ -1836,9 +1850,13 @@ function renderStackedColumns(container, { days, series, metric }) {
     });
   });
 
-  // crosshair + hover bands
+  // crosshair + one delegated hit layer (bands themselves are inert visuals)
   const cross = el('line', { class: 'crosshair', y1: padT, y2: padT + plotH, x1: -9, x2: -9, 'pointer-events': 'none' });
   svg.appendChild(cross);
+  const hit = el('rect', {
+    class: 'hitlayer', x: padL, y: padT, width: innerW, height: plotH, fill: 'transparent',
+    tabindex: 0, role: 'img', 'aria-label': 'Daily usage detail, use arrow keys to browse'
+  });
   const showDay = (i, clientX, clientY) => {
     const cx = padL + band * i + band / 2;
     cross.setAttribute('x1', cx); cross.setAttribute('x2', cx);
@@ -1848,25 +1866,36 @@ function renderStackedColumns(container, { days, series, metric }) {
       .sort((a, b) => b.v - a.v)
       .map(r => ({ color: r.color, name: r.name, value: fmtMetric(r.v, metric) }));
     const total = totals[i] || 0;
-    const ttTitle = unit === 'week' ? 'Week of ' + fmtDayShort(days[i])
-      : unit === 'month' ? new Date(days[i] + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-      : new Date(days[i] + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    const ttTitle = labels[i];
     Tooltip.show(clientX, clientY, ttTitle,
       rows.length ? rows : [{ color: 'transparent', name: 'no usage', value: '—' }],
       rows.length > 1 ? { name: 'total', value: fmtMetric(total, metric) } : null);
+    hit.setAttribute('aria-label', `${ttTitle}: ${fmtMetric(total, metric)} total`);
   };
   days.forEach((d, i) => {
     const bx = padL + band * i;
-    const hit = el('rect', {
-      class: 'colband', x: bx, y: padT, width: band, height: plotH, tabindex: 0, role: 'img',
-      'aria-label': `${unit === 'day' ? d : (unit === 'week' ? 'week of ' + d : d.slice(0, 7))}: ${fmtMetric(totals[i] || 0, metric)} total`
-    });
-    hit.addEventListener('pointermove', (e) => showDay(i, e.clientX, e.clientY));
-    hit.addEventListener('pointerleave', () => { Tooltip.hide(); cross.setAttribute('x1', -9); cross.setAttribute('x2', -9); });
-    hit.addEventListener('focus', () => { const r = hit.getBoundingClientRect(); showDay(i, r.left + r.width / 2, r.top + 40); });
-    hit.addEventListener('blur', () => { Tooltip.hide(); cross.setAttribute('x1', -9); cross.setAttribute('x2', -9); });
-    svg.appendChild(hit);
+    svg.appendChild(el('rect', { class: 'colband', x: bx, y: padT, width: band, height: plotH, 'pointer-events': 'none' }));
   });
+  let focusIdx = n - 1;
+  const clampIdx = (i) => Math.max(0, Math.min(n - 1, i));
+  const idxFromClientX = (clientX) => {
+    const r = svg.getBoundingClientRect();
+    return clampIdx(Math.floor((clientX - r.left - padL) / band));
+  };
+  const posForIdx = (i) => { const r = svg.getBoundingClientRect(); return { x: r.left + padL + band * i + band / 2, y: r.top + 40 }; };
+  hit.addEventListener('pointermove', (e) => { focusIdx = idxFromClientX(e.clientX); showDay(focusIdx, e.clientX, e.clientY); });
+  hit.addEventListener('pointerleave', () => { Tooltip.hide(); cross.setAttribute('x1', -9); cross.setAttribute('x2', -9); });
+  hit.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') focusIdx = clampIdx(focusIdx - 1);
+    else if (e.key === 'ArrowRight') focusIdx = clampIdx(focusIdx + 1);
+    else return;
+    e.preventDefault();
+    const p = posForIdx(focusIdx);
+    showDay(focusIdx, p.x, p.y);
+  });
+  hit.addEventListener('focus', () => { const p = posForIdx(focusIdx); showDay(focusIdx, p.x, p.y); });
+  hit.addEventListener('blur', () => { Tooltip.hide(); cross.setAttribute('x1', -9); cross.setAttribute('x2', -9); });
+  svg.appendChild(hit);
 
   container.appendChild(svg);
 }
@@ -2057,6 +2086,7 @@ const App = {
   hiddenShare: new Set(),
   dirHandle: null,
   _renderQueued: false,
+  _drill: null,   // ephemeral platform drill-down (from an accounts-hub card click) — never persisted, never touches filters.hiddenPlatforms
 
   window() {
     const t = todayKey();
@@ -2074,7 +2104,7 @@ const App = {
   },
 
   rowsIn(win) {
-    return Store.allRows().filter(r => r.d >= win.from && r.d <= win.to && !this.filters.hiddenPlatforms.has(r.platform));
+    return Store.allRows().filter(r => r.d >= win.from && r.d <= win.to && !this.filters.hiddenPlatforms.has(r.platform) && (this._drill == null || r.platform === this._drill));
   },
 
   metricOf(r) {
@@ -2328,10 +2358,10 @@ const App = {
   },
 
   drillDown(c) {
-    if (!c.platform) { this.filters.hiddenPlatforms = new Set(); this.render(); return; }   // imports → show everything
-    const others = Store.platforms().filter(p => p !== c.platform);
-    const already = others.length && others.every(p => this.filters.hiddenPlatforms.has(p)) && !this.filters.hiddenPlatforms.has(c.platform);
-    this.filters.hiddenPlatforms = already ? new Set() : new Set(others);
+    // ephemeral view filter, layered on top of the persisted chip state — never touches
+    // filters.hiddenPlatforms, so it never leaks into localStorage.
+    if (!c.platform) { this._drill = null; this.render(); return; }   // imports → show everything
+    this._drill = this._drill === c.platform ? null : c.platform;
     this.render();
     $('card-daily').scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
@@ -2340,6 +2370,12 @@ const App = {
   renderChips() {
     const box = $('platform-chips');
     clear(box);
+    if (this._drill) {
+      const pill = el('button', { class: 'chip drill-pill', type: 'button', title: 'Clear drill-down' },
+        el('span', { text: `drilled: ${this._drill} — clear` }));
+      pill.addEventListener('click', () => { this._drill = null; this.render(); });
+      box.appendChild(pill);
+    }
     const platforms = Store.platforms();
     const candidates = platforms;
     for (const p of platforms) {
