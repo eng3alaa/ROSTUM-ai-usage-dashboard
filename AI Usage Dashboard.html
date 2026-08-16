@@ -190,6 +190,16 @@ input[type="date"], input[type="text"], input[type="password"], select {
 .budget-bar .fill { height: 100%; background: var(--accent); }
 .budget-bar.warn .fill { background: var(--serious); } .budget-bar.over .fill { background: var(--critical); }
 
+/* ============ Print report ============ */
+.report-meta { font-size: 12px; color: var(--ink-2); margin: 0 0 12px; }
+@media print {
+  .topbar .top-actions, .filterbar, #accounts-hub, #sources, .sources, #card-budgets, #card-pricing, #alerts, #storage-warning, .toggle, .btn { display: none !important; }
+  .report-meta { display: block !important; }
+  body { background: #fff; color: #000; }
+  .card, .tile, .insight { break-inside: avoid; border-color: #ccc; }
+  .wrap { max-width: none; padding: 0; }
+}
+
 /* ============ KPI row ============ */
 .kpis {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
@@ -327,6 +337,7 @@ progress { width: 160px; height: 8px; }
 <body>
 <div class="wrap">
   <div id="alerts" aria-live="polite"></div>
+  <div id="report-meta" class="report-meta" hidden></div>
 
   <!-- ================= Header ================= -->
   <header class="topbar">
@@ -342,6 +353,7 @@ progress { width: 160px; height: 8px; }
         </select>
       </label>
       <button class="btn small" id="export-csv" title="Download the filtered data as CSV">Export CSV</button>
+      <button class="btn small" id="print-report" title="Print / save as PDF">Print report</button>
       <button class="btn small" id="theme-toggle" aria-label="Toggle color theme">◐ Theme</button>
       <button class="btn small primary" id="refresh-all">↻ Refresh</button>
     </div>
@@ -646,7 +658,7 @@ progress { width: 160px; height: 8px; }
     <button class="btn small" id="add-price">+ Add model</button>
     <button class="btn small" id="reset-prices">Reset to defaults</button>
   </div>
-  <div class="card" style="overflow-x:auto">
+  <div class="card" id="card-pricing" style="overflow-x:auto">
     <table class="data" id="pricing-table">
       <thead>
         <tr><th>Model (match pattern)</th><th>Label</th><th>Input</th><th>Output</th><th>Cache write</th><th>Cache read</th><th></th></tr>
@@ -2135,6 +2147,15 @@ const App = {
     for (const c of CONNECTORS) if (c.platform) box.appendChild(rowFor(c.platform, c.name));
   },
 
+  /* ---------- print report ---------- */
+  printReport(dryRun) {
+    const win = this.window();
+    const m = $('report-meta');
+    m.hidden = false;
+    m.textContent = `AI usage report · ${fmtDayShort(win.from)} – ${fmtDayShort(win.to)} · Generated ${new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })} · API-equivalent costs are estimates at list prices`;
+    if (!dryRun) { window.print(); }
+  },
+
   /* ---------- insights ---------- */
   renderInsights(win, rows) {
     const today = todayKey();
@@ -3158,6 +3179,7 @@ const App = {
 
     // top actions
     $('export-csv').addEventListener('click', () => this.exportCSV());
+    $('print-report').addEventListener('click', () => this.printReport(false));
     $('refresh-all').addEventListener('click', () => this.refreshAll());
     $('add-price').addEventListener('click', () => {
       Pricing.rows.splice(Math.max(0, Pricing.rows.length - 1), 0, { pat: 'my-model', label: 'New model', in: 0, out: 0, cw: 0, cr: 0 });
