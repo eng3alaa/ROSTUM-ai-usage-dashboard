@@ -177,6 +177,8 @@ input[type="date"], input[type="text"], input[type="password"], select {
 .wow-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin: 4px 6px 0 0; background: var(--wash); }
 .wow-chip.up { color: var(--critical); } .wow-chip.down { color: var(--good-text); }
 @media (max-width: 720px) { .insight.span2 { grid-column: span 1; } }
+#ins-heatmap svg { max-width: 300px; }
+.narrative { font-size: 13.5px; line-height: 1.55; } .narrative p { margin: 0 0 6px; }
 
 /* ============ KPI row ============ */
 .kpis {
@@ -415,6 +417,9 @@ progress { width: 160px; height: 8px; }
     <div class="insight span2" data-insight="efficiency"><div class="label">Model efficiency <span class="badge">≥20 msgs</span></div><div id="ins-efficiency"></div></div>
     <div class="insight" data-insight="movers"><div class="label">Top project movers <span class="badge" title="vs the previous equal-length period">Δ</span></div><div id="ins-movers"></div></div>
   </div>
+
+  <!-- ================= Narrative summary ================= -->
+  <div class="card" id="card-narrative"><div class="card-head"><div><h2>This period in AI</h2><div class="sub" id="narrative-range"></div></div></div><div id="narrative" class="narrative"></div></div>
 
   <!-- ================= Charts ================= -->
   <div class="grid">
@@ -2023,6 +2028,7 @@ const App = {
     this.renderChips();
     this.renderKPIs(win, rows, days);
     this.renderInsights(win, rows);
+    this.renderNarrative(win, rows);
     this.renderHub();
     this.renderDaily(days, rows, metric, hasEst);
     this.renderModels(rows, metric);
@@ -2095,6 +2101,32 @@ const App = {
     const mvBox = clear($('ins-movers'));
     if (!mv.length) mvBox.appendChild(el('div', { class: 'note', text: 'No data in range yet.' }));
     else for (const m of mv) mvBox.appendChild(el('div', { class: 'note', text: `${m.project}: ${m.delta >= 0 ? '+' : '−'}${fmtUSD(Math.abs(m.delta))} (${fmtUSD(m.prev)} → ${fmtUSD(m.curr)})` }));
+  },
+
+  renderNarrative(win, rows) {
+    const box = clear($('narrative'));
+    $('narrative-range').textContent = `${fmtDayShort(win.from)} – ${fmtDayShort(win.to)}`;
+    if (!rows.length) { box.appendChild(el('p', { text: 'Not enough data in this range to summarize yet.' })); return; }
+    const costOf = (r) => Pricing.cost(r.model, r);
+    let cost = 0, tok = 0, msgs = 0; const byModel = new Map(), byPlat = new Map(), byDay = new Map();
+    for (const r of rows) {
+      const c = costOf(r), tk = (r.in||0)+(r.cw||0)+(r.cr||0)+(r.out||0);
+      cost += c; tok += tk; msgs += r.msgs || 0;
+      byModel.set(r.model, (byModel.get(r.model) || 0) + c); byPlat.set(r.platform, (byPlat.get(r.platform) || 0) + c); byDay.set(r.d, (byDay.get(r.d) || 0) + c);
+    }
+    const top = (m) => [...m.entries()].sort((a, b) => b[1] - a[1])[0];
+    const tm = top(byModel), tp = top(byPlat), td = top(byDay);
+    const p = Insights.projection(Store.allRows().filter(r => !this.filters.hiddenPlatforms.has(r.platform)), costOf, todayKey());
+    const w = Insights.weekOverWeek(Store.allRows(), costOf, todayKey());
+    const S = [];
+    S.push(`You used ${fmtCompact(tok)} tokens across ${fmtCompact(msgs)} messages, worth about ${fmtUSD(cost)} at API list prices.`);
+    if (tm) S.push(`${tm[0]} was the biggest line item at ${fmtUSD(tm[1])} (${Math.round(tm[1] / cost * 100)}% of spend)${tp ? `, and ${tp[0]} was the top platform` : ''}.`);
+    if (td) S.push(`Your busiest day was ${fmtDayShort(td[0])} at ${fmtUSD(td[1])}.`);
+    if (w.lastWeek > 0 || w.thisWeek > 0) S.push(`This week is ${w.pct === 0 ? 'flat' : (w.pct > 0 ? 'up ' : 'down ') + Math.abs(w.pct) + '%'} versus last week.`);
+    S.push(`At the current pace this month projects to ${fmtUSD(p.projected)} (${fmtUSD(p.mtd)} so far, ${p.daysLeft} days left).`);
+    const b = typeof Budgets !== 'undefined' && Budgets.status ? Budgets.status() : null;
+    if (b && b.total) S.push(b.total.pct >= 100 ? `You are over your ${fmtUSD(b.total.limit)} monthly budget.` : `You have used ${b.total.pct}% of your ${fmtUSD(b.total.limit)} monthly budget.`);
+    for (const s of S) box.appendChild(el('p', { text: s }));
   },
 
   /* ---------- accounts hub ---------- */
