@@ -820,6 +820,82 @@ const Pricing = {
 };
 
 /* =================================================================
+ * INSIGHTS — pure analytics helpers. All take (rows, costOf, todayKey)
+ * so callers (and tests) control cost attribution and "today".
+ * ================================================================= */
+const Insights = {
+  projection(rows, costOf, today) {
+    const ym = today.slice(0, 7);
+    const y = +today.slice(0, 4), m = +today.slice(5, 7), dd = +today.slice(8, 10);
+    const dim = new Date(y, m, 0).getDate();
+    let mtd = 0;
+    const byDay = new Map();
+    for (const r of rows) {
+      if (!r.d.startsWith(ym)) continue;
+      const c = costOf(r); mtd += c; byDay.set(r.d, (byDay.get(r.d) || 0) + c);
+    }
+    let last7 = 0, n = 0;
+    for (let i = 1; i <= 7; i++) { const k = addDays(today, -i); last7 += byDay.get(k) || 0; n++; }
+    const avg = n ? last7 / n : 0;
+    const daysLeft = dim - dd;
+    return { mtd, avgDaily: avg, daysLeft, projected: mtd + avg * daysLeft, dim, dd };
+  },
+  isoWeekStart(key) { const dt = new Date(key + 'T12:00:00'); return addDays(key, -((dt.getDay() + 6) % 7)); },
+  weekOverWeek(rows, costOf, today) {
+    const thisStart = this.isoWeekStart(today), lastStart = addDays(thisStart, -7);
+    const thisEnd = addDays(thisStart, 6), lastEnd = addDays(thisStart, -1);
+    let a = 0, b = 0, aMsgs = 0, bMsgs = 0, aTok = 0, bTok = 0;
+    const tok = (r) => (r.in || 0) + (r.cw || 0) + (r.cr || 0) + (r.out || 0);
+    for (const r of rows) {
+      if (r.d >= thisStart && r.d <= thisEnd) { a += costOf(r); aMsgs += r.msgs || 0; aTok += tok(r); }
+      else if (r.d >= lastStart && r.d <= lastEnd) { b += costOf(r); bMsgs += r.msgs || 0; bTok += tok(r); }
+    }
+    const pct = b > 0 ? Math.round(((a - b) / b) * 100) : (a > 0 ? 100 : 0);
+    return { thisWeek: a, lastWeek: b, pct, thisMsgs: aMsgs, lastMsgs: bMsgs, thisTok: aTok, lastTok: bTok, thisStart, lastStart };
+  },
+  topMovers(curr, prev, n = 5) {
+    const m = new Map();
+    for (const p of curr) m.set(p.project, { project: p.project, curr: p.cost, prev: 0 });
+    for (const p of prev) { const e = m.get(p.project) || { project: p.project, curr: 0, prev: 0 }; e.prev = p.cost; m.set(p.project, e); }
+    return [...m.values()].map(e => ({ ...e, delta: e.curr - e.prev }))
+      .sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta)).slice(0, n);
+  },
+  efficiency(rows, costOf, minMsgs = 20) {
+    const by = new Map();
+    for (const r of rows) {
+      let e = by.get(r.model); if (!e) { e = { model: r.model, cost: 0, tok: 0, msgs: 0 }; by.set(r.model, e); }
+      e.cost += costOf(r); e.tok += (r.in || 0) + (r.cw || 0) + (r.cr || 0) + (r.out || 0); e.msgs += r.msgs || 0;
+    }
+    return [...by.values()].filter(e => e.msgs >= minMsgs)
+      .map(e => ({ model: e.model, msgs: e.msgs, costPerMsg: e.cost / e.msgs, tokPerMsg: Math.round(e.tok / e.msgs) }))
+      .sort((a, b) => b.msgs - a.msgs);
+  },
+  cacheSavings(rows) {
+    let saved = 0, tokens = 0;
+    for (const r of rows) {
+      const cr = r.cr || 0; if (!cr) continue;
+      const p = Pricing.resolve(r.model);
+      saved += cr * (p.in - p.cr) / 1e6; tokens += cr;
+    }
+    return { saved, tokens };
+  },
+  busiestHours(rows) {
+    const bins = new Array(24).fill(0); let total = 0;
+    for (const r of rows) { if (r.hour == null) continue; bins[r.hour] += r.msgs || 0; total += r.msgs || 0; }
+    let peak = -1, best = -1; bins.forEach((v, i) => { if (v > best) { best = v; peak = i; } });
+    return { bins, total, peak: total ? peak : -1 };
+  },
+  heatmap(rows, valueOf, today, weeks = 13) {
+    const end = today; const start = addDays(this.isoWeekStart(today), -7 * (weeks - 1));
+    const by = new Map();
+    for (const r of rows) if (r.d >= start && r.d <= end) by.set(r.d, (by.get(r.d) || 0) + valueOf(r));
+    const days = dayRange(start, end).map(d => ({ d, v: by.get(d) || 0 }));
+    const max = Math.max(0, ...days.map(x => x.v));
+    return { start, end, days, max };
+  },
+};
+
+/* =================================================================
  * STORE — normalized usage rows + per-source metadata
  * Row: { d:'YYYY-MM-DD', platform, model, in, cw, cr, out, msgs, est, cost? }
  *   `cost` set only when the provider reported a real billed amount.
