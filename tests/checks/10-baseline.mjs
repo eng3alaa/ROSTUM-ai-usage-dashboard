@@ -40,6 +40,18 @@ export async function run({ browser, ok }) {
       sniffJSON([{ chat_messages: [] }], 'conversations.json'),
     ]);
     ok('baseline: sniff chat exports', kinds[0] === 'chatgpt-export' && kinds[1] === 'claudeai-export', kinds.join(','));
+
+    const hourText = fs.readFileSync(path.join(OUT, 'claude-logs', 'projects', '-D--proj2', 'sess-hours.jsonl'), 'utf8');
+    const hours = await page.evaluate(async (text) => {
+      const res = await parseClaudeLogs([{ path: 'projects/-D--proj2/sess-hours.jsonl', file: new File([text], 'sess-hours.jsonl') }], null);
+      const h = new Map();
+      for (const r of res.rows) h.set(r.hour, (h.get(r.hour) || 0) + r.msgs);
+      const expA = new Date('2026-08-12T06:15:00.000Z').getHours(), expB = new Date('2026-08-12T20:05:00.000Z').getHours();
+      return { got: [...h.entries()].sort(), expA, expB };
+    }, hourText);
+    ok('baseline: local rows carry hour buckets (2 msgs early, 1 late)',
+      hours.got.length === 2 && hours.got.some(([hh, n]) => hh === hours.expA && n === 2) && hours.got.some(([hh, n]) => hh === hours.expB && n === 1),
+      JSON.stringify(hours));
   } finally {
     await page.close();
   }

@@ -962,13 +962,19 @@ const ColorMap = {
 
 /* ---------- generic aggregation helper ---------- */
 function makeAgg() {
-  const map = new Map(); // day / platform / model [/ sid] -> bundle
+  const map = new Map(); // day / platform / model [/ sid] [/ hour] -> bundle
   return {
-    add(d, platform, model, t, sid) {
+    add(d, platform, model, t, sid, hour) {
       if (!d) return;
-      const key = d + '\u0001' + platform + '\u0001' + model + '\u0001' + (sid || '');
+      const hk = (hour == null || Number.isNaN(hour)) ? '' : String(hour);
+      const key = d + '\u0001' + platform + '\u0001' + model + '\u0001' + (sid || '') + '\u0001' + hk;
       let b = map.get(key);
-      if (!b) { b = { d, platform, model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0, est: t.est ? 1 : 0 }; if (sid) b.sid = sid; map.set(key, b); }
+      if (!b) {
+        b = { d, platform, model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0, est: t.est ? 1 : 0 };
+        if (sid) b.sid = sid;
+        if (hk !== '') b.hour = hour;
+        map.set(key, b);
+      }
       b.in += t.in || 0; b.cw += t.cw || 0; b.cr += t.cr || 0; b.out += t.out || 0; b.msgs += t.msgs || 0;
       if (t.est) b.est = 1;
     },
@@ -1053,8 +1059,10 @@ async function parseClaudeLogs(files, onProgress, seen = new Set()) {
         cw = Object.values(u.cache_creation).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
       }
       const t = { in: u.input_tokens || 0, cw: cw || 0, cr: u.cache_read_input_tokens || 0, out: u.output_tokens || 0, msgs: 1 };
-      const d = dayKey(obj.timestamp || file.lastModified);
-      agg.add(d, 'Claude Code/Desktop', model, t, sid);
+      const ts = obj.timestamp ? new Date(obj.timestamp) : null;
+      const d = dayKey(ts || file.lastModified);
+      const hour = ts && !isNaN(ts) ? ts.getHours() : undefined;
+      agg.add(d, 'Claude Code/Desktop', model, t, sid, hour);
       msgs++;
       const projName = prettyProject(projectCwd || projectDir);
       const pk = projName + '\u0001' + model;
