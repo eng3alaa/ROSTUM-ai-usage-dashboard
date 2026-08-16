@@ -180,6 +180,16 @@ input[type="date"], input[type="text"], input[type="password"], select {
 #ins-heatmap svg { max-width: 300px; }
 .narrative { font-size: 13.5px; line-height: 1.55; } .narrative p { margin: 0 0 6px; }
 
+/* ============ Alerts & budgets ============ */
+#alerts .alert { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin: 0 0 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-1); font-size: 13px; }
+#alerts .alert.serious { border-left: 4px solid var(--serious); } #alerts .alert.critical { border-left: 4px solid var(--critical); }
+#alerts .alert .alert-dismiss { margin-left: auto; }
+.budget-row { display: grid; grid-template-columns: 1fr 120px 1fr; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--grid); }
+.budget-row:first-child { border-top: 0; }
+.budget-bar { height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+.budget-bar .fill { height: 100%; background: var(--accent); }
+.budget-bar.warn .fill { background: var(--serious); } .budget-bar.over .fill { background: var(--critical); }
+
 /* ============ KPI row ============ */
 .kpis {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
@@ -316,6 +326,7 @@ progress { width: 160px; height: 8px; }
 </head>
 <body>
 <div class="wrap">
+  <div id="alerts" aria-live="polite"></div>
 
   <!-- ================= Header ================= -->
   <header class="topbar">
@@ -621,6 +632,12 @@ progress { width: 160px; height: 8px; }
     </div>
   </div>
 
+  <!-- ================= Budgets ================= -->
+  <div class="card" id="card-budgets">
+    <div class="card-head"><div><h2>Budgets</h2><div class="sub">Monthly USD limits — alerts at 80%, 100%, and projected overrun. Stored locally.</div></div></div>
+    <div id="budget-editor"></div>
+  </div>
+
   <!-- ================= Pricing ================= -->
   <div class="section-title">
     <h2>API price list</h2>
@@ -922,6 +939,48 @@ const Insights = {
     const max = Math.max(0, ...days.map(x => x.v));
     return { start, end, days, max };
   },
+};
+
+/* ---------- BUDGETS — monthly USD limits per platform or 'total' ---------- */
+const Budgets = {
+  limits: {},          // { total?: n, [platform]: n }
+  load() { this.limits = LS.get('budgets', null) || {}; },
+  set(key, usd) { if (usd == null || !(usd > 0)) delete this.limits[key]; else this.limits[key] = +usd; LS.set('budgets', this.limits); },
+  monthKey(today) { return (today || todayKey()).slice(0, 7); },
+  status(today) {
+    const t = today || todayKey(); const ym = this.monthKey(t);
+    const costOf = (r) => Pricing.cost(r.model, r);
+    const rows = Store.allRows().filter(r => r.d.startsWith(ym));
+    const byPlat = new Map(); let total = 0;
+    for (const r of rows) { const c = costOf(r); total += c; byPlat.set(r.platform, (byPlat.get(r.platform) || 0) + c); }
+    const proj = Insights.projection(Store.allRows(), costOf, t);
+    const mk = (spent, limit, projected) => ({ spent, limit, pct: limit ? Math.round(spent / limit * 100) : 0, projected });
+    const out = { total: this.limits.total ? mk(total, this.limits.total, proj.projected) : null, byPlatform: {} };
+    for (const [k, lim] of Object.entries(this.limits)) {
+      if (k === 'total') continue;
+      const spent = byPlat.get(k) || 0;
+      const share = total ? spent / total : 0;
+      out.byPlatform[k] = mk(spent, lim, proj.projected * share);
+    }
+    return out;
+  },
+  alerts(today) {
+    const st = this.status(today); const ym = this.monthKey(today);
+    const dismissed = LS.get('dismissedAlerts', {});
+    const list = [];
+    const consider = (scope, s, label) => {
+      if (!s) return;
+      const kinds = [];
+      if (s.pct >= 100) kinds.push(['exceed', `${label}: ${fmtUSD(s.spent)} spent — over the ${fmtUSD(s.limit)} monthly budget (${s.pct}%).`]);
+      else if (s.pct >= 80) kinds.push(['approach', `${label}: ${s.pct}% of the ${fmtUSD(s.limit)} monthly budget used (${fmtUSD(s.spent)}).`]);
+      if (s.projected > s.limit && s.pct < 100) kinds.push(['overrun', `${label}: on pace to exceed the ${fmtUSD(s.limit)} budget by about ${fmtUSD(s.projected - s.limit)} this month.`]);
+      for (const [k, msg] of kinds) { const kind = `${k}:${scope}`; if (!dismissed[`${kind}:${ym}`]) list.push({ kind, msg, level: k === 'exceed' ? 'critical' : 'serious' }); }
+    };
+    consider('total', st.total, 'Total');
+    for (const [p, s] of Object.entries(st.byPlatform)) consider(p, s, p);
+    return list;
+  },
+  dismiss(kind, today) { const d = LS.get('dismissedAlerts', {}); d[`${kind}:${this.monthKey(today)}`] = Date.now(); LS.set('dismissedAlerts', d); },
 };
 
 /* =================================================================
@@ -2025,11 +2084,13 @@ const App = {
     const metric = this.filters.metric;
     const hasEst = rows.some(r => r.est);
 
+    this.renderAlerts();
     this.renderChips();
     this.renderKPIs(win, rows, days);
     this.renderInsights(win, rows);
     this.renderNarrative(win, rows);
     this.renderHub();
+    this.renderBudgets();
     this.renderDaily(days, rows, metric, hasEst);
     this.renderModels(rows, metric);
     this.renderShare(rows, metric);
@@ -2047,6 +2108,31 @@ const App = {
     $('last-updated').textContent = srcNames.length
       ? `Data ${span.min || '—'} → ${span.max || '—'} · sources: ${srcNames.join(', ')} · rendered ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
       : 'No data yet — connect a source below.';
+  },
+
+  /* ---------- budgets & alerts ---------- */
+  renderAlerts() {
+    const box = clear($('alerts'));
+    for (const a of Budgets.alerts()) {
+      const n = el('div', { class: 'alert ' + a.level, 'data-kind': a.kind, role: 'status' },
+        el('span', { text: (a.level === 'critical' ? '⛔ ' : '⚠ ') + a.msg }),
+        el('button', { class: 'btn small alert-dismiss', text: 'Dismiss', onclick: () => { Budgets.dismiss(a.kind); this.render(); } }));
+      box.appendChild(n);
+    }
+  },
+  renderBudgets() {
+    const box = clear($('budget-editor'));
+    const st = Budgets.status();
+    const rowFor = (key, label) => {
+      const s = key === 'total' ? st.total : st.byPlatform[key];
+      const inp = el('input', { type: 'number', min: '0', step: '1', placeholder: 'no limit', value: Budgets.limits[key] != null ? String(Budgets.limits[key]) : '' });
+      inp.addEventListener('change', () => { Budgets.set(key, inp.value === '' ? null : +inp.value); this.render(); });
+      const bar = el('div', { class: 'budget-bar' + (s ? (s.pct >= 100 ? ' over' : s.pct >= 80 ? ' warn' : '') : '') }, el('div', { class: 'fill', style: { width: (s ? Math.min(100, s.pct) : 0) + '%' } }));
+      const note = el('div', { class: 'note', text: s ? `${fmtUSD(s.spent)} of ${fmtUSD(s.limit)} (${s.pct}%) · projected ${fmtUSD(s.projected)}` : 'no limit set' });
+      return el('div', { class: 'budget-row' }, el('div', { text: label }), inp, el('div', {}, bar, note));
+    };
+    box.appendChild(rowFor('total', 'Total (all platforms)'));
+    for (const c of CONNECTORS) if (c.platform) box.appendChild(rowFor(c.platform, c.name));
   },
 
   /* ---------- insights ---------- */
@@ -2139,6 +2225,7 @@ const App = {
     const u2 = dayKeyUTC(new Date());
     const win30 = { from: addDays(t2, -29), to: u2 > t2 ? u2 : t2 };
     const allRows = Store.allRows();   // computed once — avoid O(connectors × N) rebuilds
+    const bst = Budgets.status();      // computed once — avoid O(connectors) status rebuilds
     for (const c of CONNECTORS) {
       const st = Store.connectors[c.id] || {};
       const status = Store.connectorStatus(c);
@@ -2162,6 +2249,7 @@ const App = {
         el('div', { class: 'acct-label', text: st.err ? ('⚠ ' + st.err) : (st.label || (status === 'off' ? 'Not connected' : '')) }),
         el('div', { class: 'acct-sync', text: st.lastSync ? ('Synced ' + new Date(st.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : '' }),
         el('div', { class: 'acct-stats', text: rows.length ? `${fmtCompact(tok)} tokens · ${fmtUSD(cost)} (30d)` : '' }),
+        (c.platform && Budgets.limits[c.platform]) ? (() => { const s = bst.byPlatform[c.platform]; return el('div', { class: 'budget-bar' + (s.pct >= 100 ? ' over' : s.pct >= 80 ? ' warn' : ''), title: `${fmtUSD(s.spent)} of ${fmtUSD(s.limit)} this month` }, el('div', { class: 'fill', style: { width: Math.min(100, s.pct) + '%' } })); })() : null,
         el('div', { class: 'acct-actions' },
           el('button', { class: 'btn small acct-manage', text: status === 'off' ? 'Connect' : 'Manage', onclick: (e) => { e.stopPropagation(); this.openConnectorModal(c.id); } }),
           status !== 'off' && c.id !== 'imports' ? el('button', { class: 'btn small acct-sync-btn', text: 'Sync', onclick: (e) => { e.stopPropagation(); this.syncConnector(c.id); } }) : null,
@@ -2945,7 +3033,7 @@ const App = {
   },
 
   init() {
-    Pricing.load(); ColorMap.load(); Store.load();
+    Pricing.load(); ColorMap.load(); Store.load(); Budgets.load();
     initTheme(); Tooltip.init();
     this.renderPricing();
 
