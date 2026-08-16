@@ -902,6 +902,7 @@ RED: no `#print-report`.
 
 - [ ] Suite ×2 → all green, exit 0 (expect ~110). Byte hygiene → zero control bytes across tracked text files. Size gate ≤ 400 KB.
 - [ ] Screenshots light + dark with seeded rich data (15 days of multi-platform rows incl. `hour`, one budget at 80%, one connected + one attention connector) → `tests/artifacts/`; zero console errors; visually confirm the insights row (heatmap filled, hour bars, chips), the narrative paragraph, an alert banner, budget bars on cards, and the widened palette on the daily chart. Also emulate print media once and screenshot → confirm the report layout hides hub/sources/filters.
+- [ ] Spec honesty pass (from T8/T9 review): in the spec, (a) under *Visual identity* note "text monograms + brand tints shipped (Plans 2–3); original SVG monogram artwork deferred"; (b) under *Insights row* item 7 (movers) note "platform is the project surrogate for non-local rows; per-project movers await dated project rows"; (c) backlog item 18: replace the trailing "DONE (Plan 3)" with "DONE (Plan 3) — migration + affordance: kept-but-disconnected cards can remove data via Clear stored data; per-card removal deferred". Commit with the docs step below.
 - [ ] Docs: append to `docs/superpowers/reviews/2026-08-15-v1-code-review.md` Status: `Plan 3 (branch v3-rich-content) delivers the four rich-content packs and closes backlog 2–4, 9–18.` Commit `git add docs && git commit -m "docs: Plan 3 status"`.
 - [ ] Report `git log --oneline main..HEAD` and clean status.
 
