@@ -1,0 +1,130 @@
+# AI Usage Dashboard v4 — Every LLM + Customizable View
+
+**Date:** 2026-08-16
+**Status:** Approved design, pending user review of this spec
+**Target:** `AI Usage Dashboard.html` (single self-contained file; v3 = 127 checks green)
+**Research basis:** `2026-08-16-llm-platform-research.json` (40 platforms, web-verified Aug 2026 by 4 research agents + 6 skeptic verifications; every card's copy must match its row).
+
+## Background
+
+v3 ships an accounts hub with 7 connectors (Claude Code/Desktop, Anthropic API, OpenAI API, Gemini API, GitHub Copilot, OpenRouter, Imports), insights, narrative, budgets, print. The user asked: (1) **"check what else I can add — by login or web login"**, (2) **"add everything LLM — by locating a folder, or by web login/login"**, (3) **"give me the option to hide and unhide"**.
+
+Research finding that shapes the design: **consumer web-login usage access does not exist** for any chat product (ChatGPT, Claude.ai, Gemini, MS Copilot, Perplexity, Grok, Meta AI, DeepSeek chat) — their usage endpoints are cookie-bound and CORS-blocked from a local page, with no OAuth usage scope. The real paths are: **local log folders** (many coding tools + local runners write exact token counts), **local servers**, **API/admin keys**, **cloud CLI tokens**, and **data exports**. The design says this plainly on every card.
+
+## Goals
+
+1. **Hide/unhide** for account cards, dashboard sections, individual insight cards, and the legacy Data sources section — persisted, always reversible, connected cards auto-reveal.
+2. **Every viable platform** from the research table, honestly labeled by data quality; platforms with no path get a link-only card.
+3. **Generic connector kinds** so each new platform is one registry entry + one small parser/adapter, not bespoke code.
+4. **Hub at scale**: category groups, connected-first ordering, search when >12 cards.
+5. Preserve all v3 behavior; suite stays green; single file ≤ 600 KB.
+
+## Non-goals
+
+- No consumer OAuth / cookie-session scraping of chat sites (impossible from file:// and against the honesty rules).
+- No bundled proxy/server binaries. The optional **usage-logger** for local runners is a documented one-file script the user runs themselves; the dashboard only READS its JSONL.
+- No persistence of cloud CLI tokens (session-only by design).
+- Anyscale: not added (no LLM-usage path; recorded here as intentionally excluded).
+
+## Architecture
+
+### View preferences (`aiusage:view`)
+
+```
+{ hiddenCards: [connectorId], collapsed: [sectionId], hiddenInsights: [insightKey], showLegacySources: bool }
+```
+- Account cards: hover ✕ → hidden; "**N hidden — show**" chip restores; `Store.connectors[id]` transitioning to connected removes the id from `hiddenCards` (auto-reveal).
+- Sections: each major card header gets a ▾/▸ toggle (insights row, narrative, daily chart, by-model, platform share, model breakdown, projects, budgets, price list, data sources). Collapsed = body hidden, header stays. Print ignores collapse.
+- Insight cards: ✕ per card, "show all insights" chip.
+- Data sources section: hidden by default in v4 (the modal hosts the real cards); settings toggle "show legacy source cards".
+
+### Connector kinds (registry `kind` + shared driver)
+
+| kind | credential | driver behavior | data quality |
+|---|---|---|---|
+| `folder-log` | folder pick / file drop | glob-match files → per-platform parser → rows (exact tokens, hour, project); incremental cache by (path,size,mtime); reuses the Claude-log scan pipeline generalized (`scanFolder(connector, handle)`) | exact (or estimated where the format lacks counts — Aider fallback, Jan input) |
+| `local-server` | base URL | validate ping; then one of: **history** (LocalAI `/api/usage`), **metrics-poll** (vLLM/llama.cpp `/metrics` counter diffs → daily rows while page open, persisted), **live-validate** (Ollama `/api/ps`, GPT4All/Jan `/v1/models`) + optional usage-logger JSONL via folder-log | exact (poll/live: "counts while this page is open" label) |
+| `api-key` | key | validate URL; optional usage fetcher (Fireworks billingUsage; DeepSeek balance) | exact / validate-only |
+| `cloud-token` | pasted CLI token (session-only) | Azure Monitor metrics + Cost Mgmt; GCP Monitoring + BigQuery billing; AWS CloudWatch + Cost Explorer via in-page SigV4 | exact + billed |
+| `export-file` | dropped file | shape-sniffed parser (Gemini Takeout, Grok, MS Copilot CSV, Perplexity, Meta AI, DeepSeek chat + API ZIP, Cursor CSV) | estimated / exact per format |
+| `link-only` | none | honest card: reason + vendor usage-page link | none |
+| existing `admin-key` / `folder` / `files` | unchanged | Anthropic/OpenAI/local Claude/imports | as today |
+
+The registry entry carries: `id, name, category, kind, platform, brand, mark, statusEl?, quality ('exact'|'estimated'|'validate'|'none'), qualityNote, patterns? (folder-log globs), parser? (function name), baseUrl? (local-server default), validate? (url or fn name), fetchMethod?, links {get, usage}`. Drivers are generic; per-platform code = parser or fetcher only.
+
+### Hub at scale
+
+Groups in this order: **Coding tools · Chat apps · Local runners · API vendors · Cloud**. Group headers collapsible (View store). Within a group: connected → attention → disconnected, then registry order. A search box appears above the hub when visible cards > 12; it filters by name. Existing 7 connectors map: Claude Code/Desktop → Coding tools; Anthropic/OpenAI/Gemini/OpenRouter → API vendors; Copilot → Coding tools; Imports → Chat apps (front door for all export-file formats).
+
+### Platform table (from research; card copy must match)
+
+| Platform | Category | Data quality | Best method | Path / endpoint | Confidence |
+|---|---|---|---|---|---|
+| ChatGPT web + desktop app (consumer) | chat-app | estimated | data-export-file | Settings > Data controls > Export data -> ZIP: conversations.json, chat.html, message_feed | high |
+| Claude.ai web + Claude Desktop app | chat-app | estimated | local-logs-folder | ~/.claude/projects/**/*.jsonl (Cowork+Code transcripts, tokens); Claude/local-agent-mode-s | high |
+| Gemini web app (gemini.google.com) incl. Google Takeout | chat-app | estimated | data-export-file | Takeout/My Activity/Gemini Apps/MyActivity.json (choose JSON format) | high |
+| Microsoft Copilot (consumer + Microsoft 365) | chat-app | estimated | data-export-file | account.microsoft.com/privacy > Copilot activity history > Export all activity history (CS | medium |
+| Perplexity | chat-app | estimated | data-export-file | Settings > Account > Request data export (ZIP of JSON) / privacy@perplexity.ai | medium |
+| Grok / xAI (chat + API) | chat-app | exact | admin-key | POST https://management-api.x.ai/v1/billing/teams/{teamId}/usage ; GET /v1/billing/teams/{ | high |
+| Meta AI (meta.ai / Facebook / Instagram / WhatsApp) | chat-app | estimated | data-export-file | Accounts Center > Download your information (JSON/HTML) ; WhatsApp /download-all-ai-info | medium |
+| DeepSeek (chat + API) | chat-app | validate-only | data-export-file | chat.deepseek.com Settings > Data > Export data (JSON archive) | high |
+| Cursor | coding-tool | exact | admin-key | https://api.cursor.com/teams/filtered-usage-events (POST), /teams/daily-usage-data (POST), | high |
+| Windsurf / Codeium (now Cognition 'Devin Desktop') | coding-tool | validate-only | admin-key | POST https://server.codeium.com/api/v1/UserPageAnalytics (also /Analytics, /CascadeAnalyti | medium |
+| GitHub Copilot | coding-tool | exact | local-logs-folder | Copilot CLI: %USERPROFILE%\.copilot\session-state\<session-id>\events.jsonl (+ %USERPROFIL | high |
+| Cline / Roo Code (VS Code extensions) | coding-tool | exact | local-logs-folder | Cline: %APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\tasks\<taskId>\ui_messages | high |
+| Continue.dev | coding-tool | exact | local-logs-folder | %USERPROFILE%\.continue\dev_data\<schemaVersion, e.g. 0.2.0>\tokensGenerated.jsonl, chatIn | high |
+| Aider | coding-tool | estimated | local-logs-folder | Per-repo: .aider.chat.history.md (AIDER_CHAT_HISTORY_FILE), .aider.input.history; optional | medium |
+| Gemini CLI | coding-tool | exact | local-logs-folder | %USERPROFILE%\.gemini\tmp\<project_hash>\chats\session-*.json (auto-recorded sessions; ~/. | medium |
+| OpenAI Codex CLI | coding-tool | exact | local-logs-folder | %USERPROFILE%\.codex\sessions\YYYY\MM\DD\rollout-<timestamp>-<uuid>.jsonl (+ ~/.codex/arch | high |
+| Amazon Q Developer (IDE) / Kiro CLI (ex Q Developer CLI) | coding-tool | none | local-logs-folder | Kiro CLI: ~/.local/share/kiro-cli/data.sqlite3 (Linux), ~/Library/Application Support/kiro | medium |
+| JetBrains AI Assistant / Junie | coding-tool | estimated | local-logs-folder | Junie IDE plugin: %LOCALAPPDATA%\JetBrains\<IDE-version>\projects\<project>\matterhorn\.ma | medium |
+| Ollama | local | exact | local-server | http://localhost:11434 — POST /api/generate, POST /api/chat (native), POST /v1/chat/comple | high |
+| LM Studio | local | exact | local-logs-folder | macOS/Linux: ~/.lmstudio/conversations/ ; Windows: %USERPROFILE%\.lmstudio\conversations\  | medium |
+| llama.cpp (llama-server) | local | exact | local-server | http://localhost:8080 — POST /completion (fields tokens_evaluated, tokens_predicted, timin | high |
+| vLLM | local | exact | local-server | http://localhost:8000 — GET /metrics (Prometheus, on by default: vllm:prompt_tokens_total, | high |
+| LocalAI | local | exact | local-server | http://localhost:8080 — GET /api/usage?period=day/week/month/all (current/'local' user; ti | medium |
+| GPT4All | local | validate-only | local-server | http://localhost:4891/v1 (Settings > Application > Advanced > 'Enable Local API Server'; p | high |
+| Jan.ai | local | estimated | local-server | http://127.0.0.1:1337 (prefix /v1 configurable) — POST /v1/chat/completions, GET /v1/model | medium |
+| text-generation-webui (oobabooga) | local | estimated | local-server | http://127.0.0.1:5000 (--api, --api-port, OPENEDAI_PORT) — POST /v1/chat/completions, /v1/ | high |
+| Mistral (La Plateforme) | api | validate-only | api-key | GET https://api.mistral.ai/v1/models | medium |
+| Cohere | api | validate-only | api-key | POST https://api.cohere.com/v1/check-api-key ; GET https://api.cohere.com/v2/models | high |
+| Together AI | api | validate-only | api-key | GET https://api.together.xyz/v1/models | high |
+| Fireworks AI | api | exact | api-key | GET https://api.fireworks.ai/v1/accounts/{account_id}/billingUsage ; POST .../billingUsage | high |
+| Groq | api | validate-only | api-key | GET https://api.groq.com/openai/v1/models | high |
+| Perplexity API (Sonar) | api | validate-only | api-key | GET https://api.perplexity.ai/v1/models | medium |
+| DeepSeek API | api | exact | data-export-file | platform.deepseek.com/usage -> Export monthly data (ZIP: amount-*.csv + cost-*.csv) | medium |
+| xAI (Grok API) | api | validate-only | admin-key | POST https://management-api.x.ai/v1/billing/teams/{team_id}/usage ; GET .../prepaid/balanc | medium |
+| Azure OpenAI (Microsoft Foundry) | api | exact | oauth | GET https://management.azure.com/{resourceId}/providers/microsoft.insights/metrics?api-ver | medium |
+| AWS Bedrock | api | exact | api-key | POST https://monitoring.{region}.amazonaws.com/ (GetMetricData, Namespace AWS/Bedrock, Dim | high |
+| Google Vertex AI | api | exact | oauth | GET https://monitoring.googleapis.com/v3/projects/{project}/timeSeries (metric.type aiplat | medium |
+| Hugging Face Inference Providers | api | validate-only | api-key | GET https://huggingface.co/api/whoami-v2 | high |
+| Replicate | api | none | api-key | GET https://api.replicate.com/v1/account ; GET https://api.replicate.com/v1/predictions | medium |
+| Anyscale | api | none | none |  | high |
+
+Wave assignment: **Wave 1** = View layer, hub grouping/search, `folder-log` driver + parsers (Codex CLI, Gemini CLI, Copilot CLI, Continue.dev, Cline, Roo Code, Aider, JetBrains Junie, LM Studio, Ollama history), Ollama `local-server` live-validate + usage-logger doc, Gemini Takeout export parser, Cursor CSV export parser. **Wave 2** = LocalAI history, vLLM/llama.cpp metrics-poll, GPT4All/Jan/text-generation-webui, Fireworks + DeepSeek api-key, cloud-token trio (Azure/Vertex/Bedrock), remaining export parsers (Grok, MS Copilot, Perplexity, Meta AI, DeepSeek chat/API ZIP), validate-only vendors (Mistral, Cohere, Together, Groq, HF, xAI, Perplexity API, Windsurf), link-only (Amazon Q, Replicate), Claude.ai Enterprise Analytics API (admin-key kind).
+
+## Honesty rules
+
+- Card copy states data quality first: **exact / estimated / validate-only / no data**. Estimated rows carry `est.`.
+- Metrics-poll / live connectors say "counts while this page is open — not full history".
+- Cloud tokens: never persisted; card explains minting (`az account get-access-token`, `gcloud auth print-access-token`, IAM read-only key).
+- No card claims web-login access to consumer chat usage; chat-app cards say "usage comes from your data export".
+- Anyscale intentionally excluded; Amazon Q / Replicate / Windsurf link-only with the reason.
+
+## Storage & migration
+
+`aiusage:view` new. Rows unchanged in shape (platform strings extend to new names). `PLATFORM_ORDER` derives from the registry (already). Series palette: 12 slots + honest overflow to Other (existing). ScanCache keys per (connectorId, path, size, mtime) so folder-log platforms don't collide.
+
+## Error handling
+
+Folder-log: unrecognized files skipped and counted; parse errors per file → note, never abort the batch. Local-server: unreachable → "not running" (off, not error); CORS-blocked (Ollama without `OLLAMA_ORIGINS`) → card explains the one-line env fix. Cloud-token: 401 → "token expired — mint a new one". Export: unrecognized shape → "format not recognized" as today.
+
+## Testing
+
+Per parser: synthetic fixture (real format shape, ≥3 lines incl. one duplicate/malformed) + exact-totals check. Per driver: one behavior check (folder-log incremental + skip; local-server validate/unreachable/CORS messages with stubbed fetch; metrics-poll diff math with stubbed /metrics; cloud-token 401 path; export sniff routing). View layer: hide/unhide/persist/auto-reveal/collapse/print-ignores-collapse checks. Hub: grouping order, connected-first, search filter. Suite runs twice per task; whole-branch integration review before each wave's merge; light/dark/print screenshots at each wave end.
+
+## Acceptance
+
+- Every platform in the table has a card whose copy matches its row; hide/unhide works for all four surfaces and persists; connected cards auto-reveal.
+- Wave 1 folder-log parsers produce exact totals against fixtures; Ollama validates against a stubbed `/api/ps`; Gemini Takeout and Cursor CSV import as expected.
+- File ≤ 600 KB; suite green ×2; both themes + print verified.

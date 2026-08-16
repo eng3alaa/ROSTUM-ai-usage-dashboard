@@ -1,0 +1,1686 @@
+{
+  "platforms": [
+    {
+      "name": "ChatGPT web + desktop app (consumer)",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "chatgpt.com (or desktop app) > profile > Settings > Data controls > Export data. Email/SMS link (expires 24h; usually minutes, up to 7 days) to a ZIP containing conversations.json (array of conversations; each has title, create_time, update_time, current_node and a `mapping` tree of nodes {id,parent,children,message{author.role, content.parts, create_time, metadata.model_slug}}), chat.html, message_feedback.json, user.json (some exports also shared_conversations.json / model_comparisons.json). All-or-nothing; no per-conversation selection. No token counts anywhere; tokens must be estimated from text of the active branch (already implemented in the dashboard). Model per turn is recorded (metadata.model_slug).",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "Settings > Data controls > Export data -> ZIP: conversations.json, chat.html, message_feedback.json, user.json",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://help.openai.com/en/articles/7260999-exporting-your-chatgpt-history-and-data"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Conversations are server-side; the desktop apps only keep a cache. macOS: ~/Library/Application Support/com.openai.chat/ (conversations-{uuid}/ cache was plain-text in mid-2024, encrypted since the July 2024 update; not parseable). Windows (MSIX): %LOCALAPPDATA%\\Packages\\OpenAI.ChatGPT-Desktop_2p2nqsd0c76g0\\LocalCache\\Roaming\\ (WebView cache/state; no documented conversation store). The Windows app's built-in Codex uses %USERPROFILE%\\.codex (Codex session JSONL there carries token_count events, but that is Codex/coding usage, not ChatGPT chat). Net: no usable local chat log with tokens.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "macOS ~/Library/Application Support/com.openai.chat/ ; Windows %LOCALAPPDATA%\\Packages\\OpenAI.ChatGPT-Desktop_2p2nqsd0c76g0\\LocalCache\\Roaming\\ ; Codex: %USERPROFILE%\\.codex",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://learn.chatgpt.com/docs/windows/windows-app"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None for the consumer product. The OpenAI Platform usage/costs endpoints (api.openai.com/v1/organization/usage/*, /v1/organization/costs; admin key) cover API-key usage only and do NOT reflect ChatGPT Plus/Pro/Team chat consumption (already handled by the existing OpenAI admin connector).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://help.openai.com/en/articles/7260999-exporting-your-chatgpt-history-and-data"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None. There is no OAuth scope or public API exposing a ChatGPT account's usage or history to third-party pages. The internal chatgpt.com/backend-api endpoints (conversations list, per-conversation JSON, rate-limit/limits calls) require the logged-in session cookie/bearer and are same-origin only; from a file:// page they are CORS-blocked and cookies are not sent. Unofficial browser extensions/userscripts work only because they run inside the chatgpt.com origin.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none (chatgpt.com/backend-api/* is internal, unofficial)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://community.openai.com/t/decoding-exported-data-by-parsing-conversations-json-and-or-chat-html/403144"
+        }
+      ],
+      "bestMethod": "data-export-file (conversations.json; already supported) with text-based token estimation per model_slug",
+      "dataQuality": "estimated",
+      "confidence": "high",
+      "notes": "No official usage API, no live endpoint, no local transcript with tokens. Only improvement possible: richer parsing of conversations.json (model_slug per turn, branches, message_feedback.json) — no path to exact tokens or cost. Sources: https://help.openai.com/en/articles/7260999-exporting-your-chatgpt-history-and-data ; https://songyp.com/blog/analyzing-chatgpt-usage ; https://9to5mac.com/2024/07/03/chatgpt-macos-conversations-plain-text/"
+    },
+    {
+      "name": "Claude.ai web + Claude Desktop app",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "claude.ai or Claude Desktop > initials/Settings > Privacy > Export data (not on iOS/Android). Email link (24h expiry) to ZIP: conversations.json (array; each {uuid, name, created_at, updated_at, account{uuid}, chat_messages[{uuid, text, content[], sender: human|assistant, created_at, updated_at, attachments, files}]}), users.json, projects.json. Memory is not included. No model name and no token counts -> estimate from text (already implemented).",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "Settings > Privacy > Export data -> ZIP: conversations.json, users.json, projects.json",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.claude.com/en/articles/9450526-how-can-i-export-my-claude-ai-data"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Chat-tab conversations are server-side (no local files). Claude Desktop app data: macOS ~/Library/Application Support/Claude/ ; Windows %APPDATA%\\Claude\\ (exe install) or %LOCALAPPDATA%\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude\\ (Store/MSIX). Cowork: local-agent-mode-sessions/<org>/<user>/local_<uuid>.json = session metadata only (model, title, createdAt, lastActivityAt, cwd...) — no transcript, no tokens; newer builds also use claude-code-sessions/. The actual Cowork and Code transcripts are JSONL under ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl with per-message usage {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, cache_creation.ephemeral_5m/1h} — the dashboard's existing Claude Code scanner already covers these (Cowork sessions show up there). Also ~/.claude/jobs/ (background jobs). Logs (~/Library/Logs/Claude/ main.log, mcp.log, claude.ai-web.log) contain no tokens. The 3P (BYO-provider) edition uses Claude-3p directories and stores Chat conversations locally as session files, still without token fields.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "~/.claude/projects/**/*.jsonl (Cowork+Code transcripts, tokens); Claude/local-agent-mode-sessions/**/local_*.json (metadata only); Claude/claude-code-sessions/",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://claude.com/docs/third-party/claude-desktop/data-storage"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Claude Enterprise Analytics API (Enterprise orgs only; not Pro/Max/Team individuals). Primary owner creates an Analytics API key at claude.ai > Organization settings > API (scope read:analytics). Endpoints under https://api.anthropic.com/v1/organizations/analytics/ (user activity per user/day: conversations, messages, projects, files, artifacts, Claude Code sessions; activity summaries; project/skill/connector usage; cost & usage reports with per-user token usage/cost on usage-based Enterprise plans). Header x-api-key + anthropic-version. Data from 2026-01-01; 60 rpm/org. Preflight probe (Origin: null) returned allow-headers incl. anthropic-dangerous-direct-browser-access but no allow-origin without a real key; treat like the existing Anthropic admin connector (browser access requires that header).",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "https://api.anthropic.com/v1/organizations/analytics/* (Analytics API key from claude.ai/admin-settings/api-access)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://platform.claude.com/docs/en/manage-claude/analytics-api"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None for consumers. claude.ai > Settings > Usage shows Pro/Max 5-hour/weekly utilization in the UI; the backing endpoint (claude.ai/api/organizations/{org}/usage) is internal, cookie-authenticated and CORS-blocked from file:// (community trackers scrape it via Electron/extension). The Claude Code OAuth token can hit an unofficial api.anthropic.com/api/oauth/usage used by CLI monitors — coding-tool territory, undocumented, subject to change.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none official (claude.ai/api/organizations/{org}/usage internal)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://github.com/IgniteStudiosLtd/claude-usage-tool"
+        }
+      ],
+      "bestMethod": "data-export-file for chat history (already supported) + ~/.claude/projects JSONL for Cowork/Code (already scanned); Enterprise Analytics API only for Enterprise orgs",
+      "dataQuality": "estimated",
+      "confidence": "high",
+      "notes": "Chat conversations never touch disk in the standard app; Cowork sessions do (metadata in local_*.json, tokens in ~/.claude/projects JSONL). Only new opportunity: label Cowork sessions distinctly and, for Enterprise users, the Analytics API. Sources: https://platform.claude.com/docs/en/manage-claude/analytics-api ; https://claude.com/docs/third-party/claude-desktop/data-storage ; https://brycewatson.com/blog/09-cowork-session-schema/ ; https://github.com/a-data3/cowork-context-meter"
+    },
+    {
+      "name": "Gemini web app (gemini.google.com) incl. Google Takeout",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "takeout.google.com > Deselect all > tick 'My Activity' > 'All activity data included' > select only 'Gemini Apps' > 'Multiple formats' > set Activity records to JSON (default is HTML). Optionally also tick the separate 'Gemini' product (that one contains Gems only, not chats). Delivered as ZIP/TGZ via email/Drive; file: Takeout/My Activity/Gemini Apps/MyActivity.json — an array of activity records {header:'Gemini Apps', title:'Prompted <prompt text>', time (ISO 8601), safeHtmlItem:[{html:'<response>'}], products:['Gemini Apps'], activityControls, attachedFiles?}. It is an activity log (one record per prompt/response), not a conversation tree; no model name, no token counts. Tokens must be estimated from text.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "Takeout/My Activity/Gemini Apps/MyActivity.json (choose JSON format)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.google.com/gemini/answer/16920332?hl=en"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None. Gemini is web/PWA/mobile only; no desktop app and no local conversation or usage files.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.google.com/gemini/answer/13594961?hl=en"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None for the consumer app. The Gemini API key (ai.google.dev) and Cloud/Vertex quotas are a separate system with separate limits and never reflect gemini.google.com usage (already handled by the existing Gemini API connector).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://ai.google.dev/gemini-api/docs/rate-limits"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None. Google's Data Portability API (OAuth) resource groups cover YouTube, Maps, Search, My Ad Center, Shopping, Play — Gemini Apps activity is not among them; myactivity.google.com/product/gemini is UI-only. Google OAuth also cannot redirect to a file:// origin (needs http(s)/loopback server).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://developers.google.com/data-portability/schema-reference/my_activity"
+        }
+      ],
+      "bestMethod": "data-export-file (Takeout My Activity > Gemini Apps, JSON) with text-based token estimation",
+      "dataQuality": "estimated",
+      "confidence": "high",
+      "notes": "Add a Takeout MyActivity.json importer (detect header=='Gemini Apps'; strip HTML from safeHtmlItem). No live or exact path exists. Sources: https://support.google.com/gemini/answer/16920332 ; https://github.com/minipoisson/Gemini_Json2md4NotebookLM ; https://tulexai.com/import/gemini"
+    },
+    {
+      "name": "Microsoft Copilot (consumer + Microsoft 365)",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Consumer (personal Microsoft account): account.microsoft.com privacy dashboard > Privacy > Empower your productivity > Copilot > Your Copilot app activity history > choose 'Copilot apps' (copilot.microsoft.com / Copilot app) or 'Copilot in Microsoft 365 apps' > Export all activity history -> CSV downloaded immediately (prompts and AI responses with timestamps; content can be truncated). Also in-app: Copilot > profile > Privacy > Export or delete history. No model, no tokens. Work/school accounts are handled separately (admin/Purview).",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "account.microsoft.com/privacy > Copilot activity history > Export all activity history (CSV)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.microsoft.com/en-us/privacy/manage-your-copilot-activity-history-in-the-privacy-dashboard"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "Microsoft 365 (work) only, admin-level: Microsoft Graph reports GET https://graph.microsoft.com/v1.0/copilot/reports/getMicrosoft365CopilotUsageUserDetail(period='D7'|'D30'|'D90'|'D180') -> CSV (v1.0) / JSON (beta): per-user last-activity dates per app and (v2) prompt counts; needs Reports.Read.All with admin consent and only covers licensed M365 Copilot users. Full transcripts: GET /v1.0/copilot/users/{id}/interactionHistory/getAllEnterpriseInteractions (AiEnterpriseInteraction.Read.All, application permission only, Copilot license) and Purview audit (CopilotInteraction). No token counts anywhere. OAuth from a file:// page is not feasible (Entra rejects file:// / 'null' origin redirect URIs; needs http(s) or loopback server).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "https://graph.microsoft.com/v1.0/copilot/reports/getMicrosoft365CopilotUsageUserDetail(period='D30') ; /v1.0/copilot/users/{id}/interactionHistory/getAllEnterpriseInteractions",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/api/admin-settings/reports/copilotreportroot-getmicrosoft365copilotusageuserdetail"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None documented. The Copilot Windows/macOS apps are WebView2 wrappers; conversations live server-side and no local transcript or usage files are documented.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://www.microsoft.com/en-us/microsoft-copilot/for-individuals/privacy"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None. There is no personal API key or usage endpoint for consumer or M365 Copilot (distinct from GitHub Copilot, which the dashboard already supports).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://learn.microsoft.com/en-au/answers/questions/4378824/request-for-data-portability-and-chat-history-expo"
+        }
+      ],
+      "bestMethod": "data-export-file (privacy-dashboard CSV) for consumer; Graph reports only for tenant admins via a real OAuth host",
+      "dataQuality": "estimated",
+      "confidence": "medium",
+      "notes": "Consumer CSV export is instant and could be a simple importer (columns not officially documented; parse defensively). M365 admin APIs give prompt counts, never tokens, and cannot be authenticated from file://. Sources: https://support.microsoft.com/en-us/privacy/manage-your-copilot-activity-history-in-the-privacy-dashboard ; https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/api/ai-services/interaction-export/aiinteractionhistory-getallenterpriseinteractions ; https://office365itpros.com/2024/09/13/copilot-usage-report-api/"
+    },
+    {
+      "name": "Perplexity",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Account-level data request: perplexity.ai > Settings > Account > 'Request data export' (button not shown to all accounts) or email privacy@perplexity.ai / perplexity.typeform.com/datarequest; delivered as ZIP of JSON (threads: query text, answer text, timestamps, thread title, sources) via link expiring in 24h, up to ~30 days after request. Per-thread only: Share > Export (PDF/Markdown). No model or token counts. Enterprise admins get an Enterprise Usage Analytics dashboard (UI).",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "Settings > Account > Request data export (ZIP of JSON) / privacy@perplexity.ai",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://takeoutday.org/services/perplexity"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "Sonar API (api.perplexity.ai) responses carry per-request usage {prompt_tokens, completion_tokens, total_tokens, search_context_size, cost{input_tokens_cost, output_tokens_cost, request_cost, total_cost}} — but there is NO retrospective usage/billing endpoint for ordinary API keys; historical spend/tokens per key/model are only in the console (console.perplexity.ai > Billing usage chart / Usage Metrics). Enterprise-only exception: GET https://api.perplexity.ai/v1/analytics/computer/usage?dataset=credit_usage&start_time=<unix>[&end_time&bucket_width=1d|1h&user_email] with an organization analytics key (org admin: Settings > Organization > Computer) — Computer product only, bucketed counts by category, not raw tokens/cost. CORS probe: preflight from Origin:null returned Access-Control-Allow-Origin:* with Authorization allowed, so it is browser-callable.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://api.perplexity.ai/v1/analytics/computer/usage (org analytics key; Enterprise Computer only) ; no per-key usage endpoint",
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.perplexity.ai/api-reference/computer-analytics-usage-get"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None documented. Perplexity desktop apps (Mac/Windows, incl. 'Personal Computer' agent) show history in-app; no documented local transcript/usage files.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://www.perplexity.ai/help-center/en/collections/19800000-perplexity-desktop-app"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None. Web login exposes nothing to third-party pages; the internal thread endpoints used by exporter extensions/scripts run inside perplexity.ai and are cookie-bound and CORS-blocked from file://.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://github.com/kylebrodeur/perplexity-exporter"
+        }
+      ],
+      "bestMethod": "data-export-file (slow account dump) or manual; no live usage source for consumers or ordinary API keys",
+      "dataQuality": "estimated",
+      "confidence": "medium",
+      "notes": "Realistically 'none' for live tracking: no per-key usage API, no local logs; only a slow JSON dump and third-party extension exports (JSON per thread) that a generic importer could accept. Sources: https://community.perplexity.ai/t/api-token-usage-reports-and-billing/60 ; https://www.perplexity.ai/help-center/en/articles/10352995-api-settings ; https://community.perplexity.ai/t/cost-information-now-included-in-api-response-json/833"
+    },
+    {
+      "name": "Grok / xAI (chat + API)",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "admin-key",
+          "howItWorks": "xAI Management API (base https://management-api.x.ai, Authorization: Bearer <management key> created at console.x.ai > Settings > Management Keys; team admins). GET /auth/management-keys/validation -> {teamId, scope, acls...} (find team_id). POST /v1/billing/teams/{teamId}/usage with body {timeRange{start,end,timezone}, timeUnit (hour/day/week/month), values [{field, aggregation SUM/AVG/...}], groupBy (e.g. model/description, api key), filters} -> time series with token counts (numUnits/unitType e.g. 'Prompt text tokens','Completion text tokens') and USD. GET /v1/billing/teams/{teamId}/prepaid/balance -> {changes[], total (USD cents)}; GET .../invoices; GET .../postpaid/invoice/preview; GET/POST .../postpaid/spending-limits. CORS probe: OPTIONS preflight returns 204 with NO Access-Control headers (actual GET does send ACAO:*), so browser fetch with Authorization fails -> cors-blocked from file://; needs a relay.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "POST https://management-api.x.ai/v1/billing/teams/{teamId}/usage ; GET /v1/billing/teams/{teamId}/prepaid/balance ; GET /auth/management-keys/validation",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.x.ai/developers/rest-api-reference/management/billing"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "Regular xAI API key: GET https://api.x.ai/v1/api-key (Authorization: Bearer xai-...) returns key metadata (name, team_id, acls, create/modify time, redacted key) — validate + team_id only, no usage. Chat completions responses include usage {prompt_tokens, completion_tokens, total_tokens, completion_tokens_details.reasoning_tokens}. Console Usage Explorer (console.x.ai/team/default/usage) shows cost/tokens per key/model in the UI (no documented CSV/API). CORS probe: api.x.ai preflight returns Access-Control-Allow-Origin:* / headers:* -> browser-callable.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.x.ai/v1/api-key",
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.x.ai/developers/management-api-guide"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "grok.com > profile > Settings > Data > Export Data -> emailed link (minutes) to a single JSON file: {conversations:[{conversation:{title, create_time...}, responses:[{message, sender:'human'|'assistant', create_time:{$date:{$numberLong}}}]}]} (MongoDB extended-JSON timestamps). No model or token fields; deleted chats, files and billing metadata omitted; Grok-in-X chats may not be included. Formal DSAR alternative: xai-privacy.relyance.ai.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "grok.com Settings > Data > Export Data (single JSON, conversations[].responses[])",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://ai-chat-importer.com/blog/how-to-export-grok-conversations"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None documented for the Grok web app, the X app, or the Grok macOS app; no local transcript or usage files known.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.x.ai/docs/key-information/usage-explorer"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None. SuperGrok/Premium quota shown in-app; internal grok.com rate-limit endpoints are cookie-bound, undocumented and CORS-blocked from file://.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://jingrey.com/tools/current-supergrok-usage-limits/"
+        }
+      ],
+      "bestMethod": "API: Management API usage endpoint (exact tokens + USD) via a relay since it is CORS-blocked; browser-only fallback GET api.x.ai/v1/api-key (validate). Chat: JSON export import with estimated tokens.",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Two-tier: api.x.ai key gives validate-only in-browser; management key gives full billed usage but preflight has no CORS headers (verified 2026-08-16). Grok chat export is a good importer candidate (parse $date.$numberLong). Sources: https://docs.x.ai/developers/rest-api-reference/management/billing ; https://docs.x.ai/developers/rest-api-reference/management/auth ; https://docs.x.ai/developers/management-api-guide"
+    },
+    {
+      "name": "Meta AI (meta.ai / Facebook / Instagram / WhatsApp)",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "No single 'export all' — history is per surface. Accounts Center (Facebook/Instagram/meta.ai): Settings > Accounts Center > Your information and permissions > Download your information > Export your information > pick Meta AI data, format JSON or HTML > Create export; ready in hours-days, available for 4 days. Meta AI app: Menu > Settings > Data & privacy > Manage your information > Download your information. WhatsApp: type /download-all-ai-info in an AI chat to receive a link, or per-chat 'Export chat'. Content: prompts, responses, timestamps; no model, no tokens.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "Accounts Center > Download your information (JSON/HTML) ; WhatsApp /download-all-ai-info",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://www.meta.com/help/artificial-intelligence/1314808549771571/"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None. There is no consumer Meta AI API; the developer Llama API is a separate product not tied to Meta AI chat usage.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://www.llmnesia.com/blog/how-to-export-meta-ai-conversation-history"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None. meta.ai is web-only; WhatsApp/Messenger desktop databases are encrypted and not a practical usage source.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://www.llmnesia.com/blog/meta-ai-conversation-history-limits"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None. Facebook Login has no scope exposing Meta AI conversations or usage to third-party pages.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://privacycenter.instagram.com/dialog/download-chat-history-with-ai/"
+        }
+      ],
+      "bestMethod": "data-export-file (Download your information, JSON) with text-based estimation",
+      "dataQuality": "estimated",
+      "confidence": "medium",
+      "notes": "Effectively export-only; exact folder/file names inside the DYI archive for Meta AI are not officially documented, so an importer should sniff JSON structure. Sources: https://www.meta.com/help/artificial-intelligence/1314808549771571/ ; https://www.llmnesia.com/blog/how-to-export-meta-ai-conversation-history"
+    },
+    {
+      "name": "DeepSeek (chat + API)",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "GET https://api.deepseek.com/user/balance with Authorization: Bearer sk-... -> {is_available, balance_infos:[{currency:'CNY'|'USD', total_balance, granted_balance, topped_up_balance}]}. Balance only — no usage history, no per-key tokens, no ledger. Per-request usage appears in chat/completions responses (prompt_tokens, completion_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens). platform.deepseek.com/usage shows token charts in the UI only (no API, no documented export). CORS probe (Origin:null): preflight returned Access-Control-Allow-Origin:null (echo), allow-credentials true, allow-headers authorization -> browser-callable from file://.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.deepseek.com/user/balance",
+          "browserCallable": "yes",
+          "sourceUrl": "https://api-docs.deepseek.com/api/get-user-balance/"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "chat.deepseek.com (web only, not mobile) > Settings > Data > Export data > Export; archive is prepared then downloadable: JSON conversations (id, title, timestamps, messages with roles/timestamps; model reportedly recorded). Deleted chats/files excluded. Formal route: service@deepseek.com (up to 30 days). No token counts.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "chat.deepseek.com Settings > Data > Export data (JSON archive)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://www.kaspersky.com/blog/deepseek-privacy-and-security/54643/"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None. DeepSeek ships web + mobile only; 'desktop' apps are unofficial wrappers with no documented transcript store.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://github.com/doxdk/deepseek-desktop"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None. Web login exposes nothing to third-party pages; exporter extensions run inside chat.deepseek.com.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://api-docs.deepseek.com/quick_start/token_usage/"
+        }
+      ],
+      "bestMethod": "api-key balance check (validate + remaining credit, browser-callable) plus chat JSON export import with estimation",
+      "dataQuality": "validate-only",
+      "confidence": "high",
+      "notes": "Balance endpoint is a cheap 'connected + credit remaining' connector; a delta of total_balance over time approximates spend but not tokens. Sources: https://api-docs.deepseek.com/api/get-user-balance/ ; https://www.kaspersky.com/blog/deepseek-privacy-and-security/54643/ ; https://ai-chat-importer.com/blog/how-to-export-deepseek-conversations"
+    },
+    {
+      "name": "Cursor",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "admin-key",
+          "endpointOrPath": "https://api.cursor.com/teams/filtered-usage-events (POST), /teams/daily-usage-data (POST), /teams/spend (POST), /teams/members (GET); Analytics API: /analytics/team/models, /analytics/by-user/models etc.",
+          "howItWorks": "Team admin creates an API key at cursor.com/dashboard -> API Keys; HTTP Basic auth with key as username (`-u KEY:`). filtered-usage-events returns per-event timestamp, userEmail, model, kind, isTokenBasedCall, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, totalCents, chargedCents. Max 30-day windows, paginated, 60 req/min. Docs now say Enterprise teams only (Teams plan admins historically had Admin API); individual Pro/Hobby users cannot use it.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://cursor.com/docs/account/teams/admin-api"
+        },
+        {
+          "kind": "data-export-file",
+          "endpointOrPath": "cursor.com/dashboard?tab=usage -> Export CSV (backed by https://cursor.com/api/dashboard/export-usage-events-csv)",
+          "howItWorks": "Logged-in individual users can download a CSV of usage events (timestamp, model, kind, input/output/cache tokens, max mode). Cost column reportedly removed mid-2026 in favour of token amounts. Team admins get a separate per-user/per-day CSV. Import as a file into the dashboard.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://forum.cursor.com/t/dashboard-export-usage-events-csv-no-longer-exports-cost/167193"
+        },
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "Windows: %APPDATA%\\Cursor\\User\\globalStorage\\state.vscdb (SQLite, table cursorDiskKV: keys composerData:<id>, bubbleId:<composerId>:<bubbleId>); macOS: ~/Library/Application Support/Cursor/User/globalStorage/state.vscdb; also %USERPROFILE%\\.cursor\\chats\\*\\*\\store.db, %USERPROFILE%\\.cursor\\projects\\<slug>\\agent-transcripts\\*.jsonl (Cursor CLI), %USERPROFILE%\\.cursor\\ai-tracking\\ai-code-tracking.db",
+          "howItWorks": "Undocumented reverse-engineered storage. Bubble JSON blobs sometimes carry inputTokens/outputTokens and lastUsedModel, but coverage is uneven; no cost. Requires SQLite parsing (sql.js WASM in-page) and the DB is often >1 GB and locked while Cursor runs. agent-transcripts JSONL hold conversation text; token fields not confirmed.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://vibe-replay.com/blog/cursor-local-storage/"
+        },
+        {
+          "kind": "oauth",
+          "endpointOrPath": "cursor.com/api/usage, cursor.com/api/dashboard/get-aggregated-usage-events (undocumented, WorkosCursorSessionToken cookie)",
+          "howItWorks": "The web dashboard's own endpoints; require the browser session cookie, not an API key. Third-party tools scrape the local session token. Not documented, not stable, not reachable from a file:// page (cookie/CORS). Consumer web login exposes nothing usable to a local page.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://cursor.com/docs/api"
+        }
+      ],
+      "bestMethod": "Individual: dashboard usage-events CSV export (file import). Enterprise admin: Admin API /teams/filtered-usage-events via a proxy (no CORS from file://). Local state.vscdb is possible but heavy and incomplete.",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Admin/Analytics/AI-code-tracking APIs are team-admin (Enterprise) only; no personal-usage API exists for Pro users. Cursor's docs base URL is https://api.cursor.com. Sources: https://cursor.com/docs/account/teams/analytics-api , https://cursor.com/docs/api"
+    },
+    {
+      "name": "Windsurf / Codeium (now Cognition 'Devin Desktop')",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "admin-key",
+          "endpointOrPath": "POST https://server.codeium.com/api/v1/UserPageAnalytics (also /Analytics, /CascadeAnalytics, /GetTeamCreditBalance, /GetUsageConfig)",
+          "howItWorks": "Teams/Enterprise admin creates a service key with 'Teams Read-only' scope; key is sent in the JSON body ({service_key, group_name?, start_timestamp?, end_timestamp?}). Returns per-user name/email/activeDays/promptCreditsUsed (cents; current billing cycle only), lastChatUsageTime etc. Credits, not tokens. Not available on Free/Pro individual plans.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": false,
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.devin.ai/desktop/accounts/api-reference/user-page-analytics"
+        },
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "%USERPROFILE%\\.codeium\\windsurf\\ (hooks.json, memories/); %APPDATA%\\Windsurf\\User\\globalStorage\\state.vscdb; Cascade trajectories reportedly under ~/.codeium/windsurf/cascade/ (binary/protobuf, undocumented)",
+          "howItWorks": "Official docs only document ~/.codeium/windsurf/hooks.json and memories. Cascade conversation storage is not documented and appears to be binary; no token counts or credits are known to be stored locally. Hooks (Cascade hooks in hooks.json) can be used to write your own JSONL of prompts, but they do not receive token counts.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.windsurf.com/windsurf/cascade"
+        },
+        {
+          "kind": "data-export-file",
+          "endpointOrPath": "windsurf.com/subscription/usage (web page only)",
+          "howItWorks": "Individuals see prompt-credit consumption on the plan/usage page; no documented CSV export or API for individuals.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.windsurf.com/llms-full.txt"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "",
+          "howItWorks": "Consumer web login exposes no usage endpoint usable by a local page.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": ""
+        }
+      ],
+      "bestMethod": "Teams/Enterprise service key -> UserPageAnalytics via proxy (credits only). Individuals: nothing beyond manual entry.",
+      "dataQuality": "validate-only",
+      "confidence": "medium",
+      "notes": "docs.windsurf.com now 307-redirects to docs.devin.ai/desktop (Cognition rebrand). Credits are the unit; token counts are never exposed. Local Cascade storage is undocumented/binary."
+    },
+    {
+      "name": "GitHub Copilot",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "Copilot CLI: %USERPROFILE%\\.copilot\\session-state\\<session-id>\\events.jsonl (+ %USERPROFILE%\\.copilot\\session-store.db SQLite); opt-in OTEL: %USERPROFILE%\\.copilot\\otel\\*.jsonl",
+          "howItWorks": "Every CLI session writes events.jsonl; assistant.usage and session.shutdown events carry server-reported input/output/cache-read/cache-write tokens, model, and premium-request cost units (modelMetrics.*.requests.cost). Documented by GitHub (chronicle docs). Additionally set COPILOT_OTEL_ENABLED=true, COPILOT_OTEL_EXPORTER_TYPE=file, COPILOT_OTEL_FILE_EXPORTER_PATH=... to get OTel GenAI JSONL (gen_ai.usage.input_tokens etc.).",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.github.com/en/copilot/concepts/agents/copilot-cli/chronicle"
+        },
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "VS Code Copilot Chat: settings github.copilot.chat.otel.enabled=true, github.copilot.chat.otel.exporterType=\"file\", github.copilot.chat.otel.outfile=<path> -> JSONL",
+          "howItWorks": "Official VS Code OTel export (all users, not enterprise-only). Spans invoke_agent/chat carry gen_ai.usage.input_tokens, output_tokens, cache_read.input_tokens, cache_creation.input_tokens, gen_ai.request.model / response.model. Note: default VS Code chatSessions storage (%APPDATA%\\Code\\User\\workspaceStorage\\<id>\\chatSessions\\*.json) has NO token counts.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://code.visualstudio.com/docs/agents/guides/monitoring-agents"
+        },
+        {
+          "kind": "api-key",
+          "endpointOrPath": "GET https://api.github.com/users/{username}/settings/billing/premium_request/usage ; /users/{username}/settings/billing/ai_credit/usage ; /users/{username}/settings/billing/usage (already integrated)",
+          "howItWorks": "Bearer PAT (fine-grained 'Plan' user permission / GitHub App user token). Returns product, sku, model, unitType, gross/net quantity and amounts, filterable by year/month/day/model/product, 24 months history. Only for personally-billed Copilot; org/enterprise-managed seats return nothing here. api.github.com sends CORS headers, so callable from file://.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.github.com/en/rest/billing/usage"
+        }
+      ],
+      "bestMethod": "Add local-log connector for ~/.copilot/session-state/*/events.jsonl (exact tokens) and optional VS Code/CLI OTel file exporter; keep PAT billing (add premium_request/usage + ai_credit/usage endpoints).",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Copilot CLI events.jsonl is documented by GitHub; the exact field paths (assistant.usage, session.shutdown.modelMetrics) come from third-party parsers (J-Bax/copilot-token-tracker, ccusage) — verify against a real file. Sources: https://ccusage.com/guide/copilot/ , https://github.com/J-Bax/copilot-token-tracker"
+    },
+    {
+      "name": "Cline / Roo Code (VS Code extensions)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "Cline: %APPDATA%\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\tasks\\<taskId>\\ui_messages.json, api_conversation_history.json, task_metadata.json; state\\taskHistory.json (macOS: ~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/). Same layout under Cursor/Windsurf/VSCodium user dirs (e.g. %APPDATA%\\Cursor\\User\\globalStorage\\saoudrizwan.claude-dev\\)",
+          "howItWorks": "ui_messages.json is an array of ClineMessage; entries with say=\"api_req_started\" have a JSON string in text containing tokensIn, tokensOut, cacheWrites, cacheReads, cost, apiProtocol; taskHistory.json HistoryItems carry per-task tokensIn/tokensOut/cacheWrites/cacheReads/totalCost, ts, task. Model/provider is in api_conversation_history.json / task_metadata.json. Plain JSON, no DB.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://github.com/cline/cline/issues/7742"
+        },
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "Roo Code: %APPDATA%\\Code\\User\\globalStorage\\rooveterinaryinc.roo-cline\\tasks\\<taskId>\\ui_messages.json + api_conversation_history.json (Linux ~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks/); Kilo Code fork: kilocode.kilo-code",
+          "howItWorks": "Same file format as Cline (Roo is a fork): api_req_started messages carry tokensIn/tokensOut/cacheWrites/cacheReads/cost. Task history index is kept in VS Code globalState (state.vscdb) with a per-task JSON write-through copy.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://deepwiki.com/RooCodeInc/Roo-Code/2.3-state-management-and-storage"
+        },
+        {
+          "kind": "data-export-file",
+          "endpointOrPath": "Cline/Roo 'Export task' button -> Markdown of the conversation",
+          "howItWorks": "Manual per-task markdown export; contains the transcript, not structured token totals (some versions print the header cost line). Not useful for aggregate usage.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.cline.bot/core-workflows/task-management"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "Cline account / Roo Code Cloud",
+          "howItWorks": "Cline account credits and Roo Code Cloud show balances in-app/web only; no documented public usage API for individuals.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.cline.bot/core-workflows/task-management"
+        }
+      ],
+      "bestMethod": "Local folder pick of globalStorage/<extension-id>/tasks and parse ui_messages.json api_req_started entries (exact tokens + cost as computed by the extension).",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Cost in these files is the extension's own price-table estimate, not a bill. Task folders can be huge (checkpoints/); read only the JSON files. Field names verified via tokscale/cline-reader parsers: https://github.com/junhoyeo/tokscale"
+    },
+    {
+      "name": "Continue.dev",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "%USERPROFILE%\\.continue\\dev_data\\<schemaVersion, e.g. 0.2.0>\\tokensGenerated.jsonl, chatInteraction.jsonl, autocomplete.jsonl, chatFeedback.jsonl (macOS/Linux ~/.continue/dev_data/); sessions: %USERPROFILE%\\.continue\\sessions\\*.json + sessions.json index",
+          "howItWorks": "Development data is on by default and written locally as per-event JSONL. tokensGenerated events include promptTokens, generatedTokens, model, provider, timestamp. config.yaml `data:` block can add extra local-directory or HTTP destinations and a level filter (all/noCode). Sessions JSON hold transcripts without token totals.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.continue.dev/customize/deep-dives/development-data"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "Continue Hub account",
+          "howItWorks": "No public usage/billing API for individual accounts found in docs.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.continue.dev/reference"
+        }
+      ],
+      "bestMethod": "Local folder pick of ~/.continue/dev_data/<version>/tokensGenerated.jsonl.",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Token counts come from the provider response when available (some providers/ollama may report estimates). Cost must be computed from a price table."
+    },
+    {
+      "name": "Aider",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "Per-repo: .aider.chat.history.md (AIDER_CHAT_HISTORY_FILE), .aider.input.history; optional --llm-history-file .aider.llm.history; optional --analytics-log <file> (AIDER_ANALYTICS_LOG) JSONL",
+          "howItWorks": "Chat history markdown includes aider's tool output lines like 'Tokens: 8.2k sent, 578 received. Cost: $0.03 message, $0.05 session.' which can be regex-parsed (approximate, k-rounded). For exact numbers run aider with --analytics-log path.jsonl: message_send events carry main_model, edit_format, prompt_tokens, completion_tokens, total_tokens_sent/received, cost, total_cost. ~/.aider/analytics.json only stores the anonymous UUID/opt-in, not usage.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://aider.chat/docs/config/options.html"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "",
+          "howItWorks": "Aider has no account or server; usage lives with the underlying provider (OpenAI/Anthropic/OpenRouter keys already integrated).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://aider.chat/docs/faq.html"
+        }
+      ],
+      "bestMethod": "Pick project folders and parse .aider.chat.history.md 'Tokens:' lines; recommend users enable --analytics-log for exact JSONL.",
+      "dataQuality": "estimated",
+      "confidence": "medium",
+      "notes": "analytics-log is opt-in and only exists if the user set it; chat-history token lines are rounded (e.g. '8.2k'). Cost figures use aider's litellm price table. Source for event fields: https://deepwiki.com/Aider-AI/aider/12.1-usage-analytics"
+    },
+    {
+      "name": "Gemini CLI",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "%USERPROFILE%\\.gemini\\tmp\\<project_hash>\\chats\\session-*.json (auto-recorded sessions; ~/.gemini/tmp/<hash>/chats/ on mac/linux); %USERPROFILE%\\.gemini\\tmp\\<hash>\\checkpoints\\ (/chat save); GEMINI_CLI_HOME overrides ~/.gemini",
+          "howItWorks": "Official session management docs state recorded sessions include prompts, responses, tool calls and 'Token usage statistics (input, output, cached, etc.)'. JSON files, one per session; retention default maxAge 30d / maxCount 50 (general.sessionRetention). Exact field names not enumerated in docs; third-party parsers (tokscale) read token counts per model from these files.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://geminicli.com/docs/cli/session-management/"
+        },
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "Telemetry outfile: settings.json {\"telemetry\":{\"enabled\":true,\"target\":\"local\",\"outfile\":\".gemini/telemetry.log\"}} (env GEMINI_TELEMETRY_ENABLED / GEMINI_TELEMETRY_OUTFILE)",
+          "howItWorks": "Opt-in OTel export to a local file. gemini_cli.api_response events carry model, input_token_count, output_token_count, cached_content_token_count, thoughts_token_count, tool_token_count, total_token_count; metric gemini_cli.token.usage (attrs model, type). Also standard gen_ai.client.token.usage.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://geminicli.com/docs/cli/telemetry/"
+        },
+        {
+          "kind": "api-key",
+          "endpointOrPath": "Google AI Studio key (already integrated: validate + model list only); Vertex/Cloud Billing export for GCP-billed usage",
+          "howItWorks": "If Gemini CLI is run with GEMINI_API_KEY, usage is billed to that key but Google offers no per-key usage endpoint; Cloud Billing BigQuery export or Vertex AI usage requires GCP setup. Google-account (Code Assist free/Pro) quota is not exposed via any public API; /stats in the CLI shows session totals only.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://geminicli.com/docs/reference/commands/"
+        }
+      ],
+      "bestMethod": "Local folder pick of ~/.gemini/tmp/*/chats/session-*.json; optionally telemetry outfile for OTel-format exact counts.",
+      "dataQuality": "exact",
+      "confidence": "medium",
+      "notes": "Session file token field names not published in docs — sniff on first import. Sessions auto-prune after 30 days by default, so import regularly. Source for storage path: https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md"
+    },
+    {
+      "name": "OpenAI Codex CLI",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "%USERPROFILE%\\.codex\\sessions\\YYYY\\MM\\DD\\rollout-<timestamp>-<uuid>.jsonl (+ ~/.codex/archived_sessions/); CODEX_HOME overrides ~/.codex; also ~/.codex/history.jsonl (prompts only), ~/.codex/logs/",
+          "howItWorks": "Each rollout line is a JSON record; records with type=event_msg and payload.type=\"token_count\" hold payload.info.total_token_usage {input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, total_tokens} (CUMULATIVE per session — take deltas) and last_token_usage (per request), plus rate-limit snapshots. Model comes from session_meta / turn_context records. Documented in OpenAI's codex repo issues; parsed by ccusage/tokscale.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://ccusage.com/guide/codex/"
+        },
+        {
+          "kind": "oauth",
+          "endpointOrPath": "GET https://chatgpt.com/backend-api/wham/usage (Bearer token from ~/.codex/auth.json)",
+          "howItWorks": "Undocumented endpoint the CLI polls for ChatGPT-plan 5-hour/weekly rate-limit percentages and reset times. Requires the ChatGPT OAuth access token stored locally; not CORS-enabled and not a public contract. Shows quota %, not tokens.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://github.com/openai/codex/issues/10869"
+        },
+        {
+          "kind": "api-key",
+          "endpointOrPath": "OpenAI Admin API /v1/organization/usage/completions (already integrated)",
+          "howItWorks": "Only when Codex is run with an API key instead of ChatGPT sign-in; ChatGPT-plan usage never appears in the API usage endpoints.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan"
+        }
+      ],
+      "bestMethod": "Local folder pick of ~/.codex/sessions/**/rollout-*.jsonl with delta-of-cumulative token_count parsing.",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Cache-write tokens are not recorded (issue #32479). Cost must be computed from a price table (ChatGPT-plan usage has no dollar value). Sources: https://github.com/openai/codex/issues/19022 , https://dev.to/newtorob/claude-code-and-codex-are-logging-your-token-usage-locally-here-is-how-to-read-it-580"
+    },
+    {
+      "name": "Amazon Q Developer (IDE) / Kiro CLI (ex Q Developer CLI)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "admin-key",
+          "endpointOrPath": "AWS Console: Amazon Q Developer -> Dashboard (Pro tier admins); User activity reports -> daily CSV at s3://<bucket>/<prefix>/AWSLogs/<acct>/QDeveloperLogs/by_user_analytic/<region>/<y>/<m>/<d>/00/<acct>_by_user_analytic_<ts>.csv; prompt logs to S3; CloudWatch metrics",
+          "howItWorks": "Enterprise/Pro-tier admin features only. Per-user daily CSV rows with metrics (chat messages, inline suggestions accepted/lines, agent usage) — counts, not tokens or dollars. Reading requires AWS SigV4-signed S3/CloudWatch calls (no CORS from file://; would need AWS credentials in-page — not advisable).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/q-admin-user-telemetry.html"
+        },
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "Kiro CLI: ~/.local/share/kiro-cli/data.sqlite3 (Linux), ~/Library/Application Support/kiro-cli/data.sqlite3 (macOS); ~/.kiro/sessions/cli/*.json; legacy Q CLI ~/.aws/amazonq/. Windows: Kiro CLI runs under WSL only. Q Developer VS Code/JetBrains plugins: no local token logs.",
+          "howItWorks": "Q Developer CLI was renamed Kiro CLI on 17 Nov 2025 (auto-updated 24 Nov 2025). Conversation history is in a local SQLite DB and session JSON; third-party trackers (tokscale, kiro-usage-tracker) read input/output tokens from these. Undocumented schema, no cost. IDE plugin stores nothing usable locally.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/upgrade-to-kiro.html"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "Free tier / Builder ID users",
+          "howItWorks": "No personal usage API, no export; the IDE shows remaining monthly limits only. Kiro individual plans show credit usage on kiro.dev account page (web only).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://kiro.dev/docs/enterprise/monitor-and-track/"
+        }
+      ],
+      "bestMethod": "None practical for a file:// page. Manual entry, or (WSL/mac/linux users) folder-pick Kiro CLI data.sqlite3 with sql.js.",
+      "dataQuality": "none",
+      "confidence": "medium",
+      "notes": "All official monitoring is org-admin (Pro/Enterprise) and lands in S3/CloudWatch behind SigV4. Sources: https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/monitoring-overview.html , https://kiro.dev/docs/upgrade-guides/migrating-from-q/"
+    },
+    {
+      "name": "JetBrains AI Assistant / Junie",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "Junie IDE plugin: %LOCALAPPDATA%\\JetBrains\\<IDE-version>\\projects\\<project>\\matterhorn\\.matterhorn\\events\\<issueId> <taskId>-events.jsonl (macOS ~/Library/Caches/JetBrains/<IDE>/projects/<name>/matterhorn/.matterhorn/, Linux ~/.cache/JetBrains/...); Junie CLI: ~/.junie/sessions/*/events.jsonl",
+          "howItWorks": "Junie writes per-task JSONL event logs; LlmResponseEvent records carry inputTokens, outputTokens, cacheTokens, cost, model (parsed by junie-explorer/tokscale). Undocumented format, cache dir may be cleared. AI Assistant chat itself (non-Junie) has no local token log.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://github.com/dmeehan1968/junie-explorer"
+        },
+        {
+          "kind": "data-export-file",
+          "endpointOrPath": "JetBrains Central Console -> AI Credits consumption (org admins) -> download",
+          "howItWorks": "Org admins can view/download per-user AI-credit consumption split by Junie / Claude Agent / Codex / AI Assistant; credits only (no tokens). No public API. Individuals only get the IDE toolbar widget percentage and the Junie CLI /usage command (per-session tokens, model, remaining balance).",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://www.jetbrains.com/help/jetbrains-console/ai-credits-consumption.html"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "JetBrains Account (individual)",
+          "howItWorks": "No usage API or export for individual licenses; detailed quota report is an open feature request (LLM-19959).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://youtrack.jetbrains.com/projects/LLM/issues/LLM-19959"
+        }
+      ],
+      "bestMethod": "Folder-pick Junie matterhorn events JSONL (exact tokens, Junie only); everything else manual.",
+      "dataQuality": "estimated",
+      "confidence": "medium",
+      "notes": "Only Junie agent runs are logged with tokens; regular AI Assistant chat/completion usage is invisible locally. Windows cache path pattern derived from junie-explorer README (%APPDATA%\\..\\Local\\JetBrains). Sources: https://www.jetbrains.com/help/ai-assistant/licensing-and-subscriptions.html , https://junie.jetbrains.com/docs/slash-commands.html"
+    },
+    {
+      "name": "Ollama",
+      "category": "local",
+      "methods": [
+        {
+          "kind": "local-server",
+          "endpointOrPath": "http://localhost:11434 — POST /api/generate, POST /api/chat (native), POST /v1/chat/completions, /v1/completions (OpenAI-compat), GET /api/tags, GET /api/ps",
+          "howItWorks": "Every native response (final chunk when streaming, done:true) carries prompt_eval_count (input tokens) and eval_count (output tokens) plus total_duration/load_duration/prompt_eval_duration/eval_duration in ns. The /v1/* OpenAI layer maps these to usage.prompt_tokens/completion_tokens/total_tokens. There is NO usage-history, billing or per-request log endpoint: the dashboard can only capture usage for requests it makes itself (or that are proxied through it). CORS: server sends CORS headers only for allow-listed origins; the built-in default list is http(s)://localhost, 127.0.0.1, 0.0.0.0 (any port) plus app://*, file://*, tauri://*, vscode-webview://*, vscode-file://*. Chrome sends `Origin: null` for file:// pages, and gin-contrib/cors matches wildcards by prefix, so `null` does NOT match `file://*` — in practice set OLLAMA_ORIGINS=\"*\" (or a specific origin) and restart Ollama; then Access-Control-Allow-Origin:* is returned and a file:// page can call it.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.ollama.com/api/generate ; https://github.com/ollama/ollama/blob/main/envconfig/config.go ; https://github.com/ollama/ollama/issues/300"
+        },
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "Windows (tray app): %LOCALAPPDATA%\\Ollama\\server.log (rotated server-1.log, server-2.log …) and app.log; macOS: ~/.ollama/logs/server.log; Linux systemd: journalctl -u ollama (manual `ollama serve` prints to stdout only)",
+          "howItWorks": "Plain-text server log. Default INFO level writes GIN access lines: `[GIN] <ts> | <status> | <latency> | <ip> | <METHOD> \"/api/chat\"` — i.e. one line per request with method, path, status, latency, but NO model name and NO token counts. OLLAMA_DEBUG=1 adds llama.cpp runner timing lines; OLLAMA_DEBUG_LOG_REQUESTS=true (default false) logs request bodies/prompts (sensitive). So the log gives request counts/timestamps only; tokens cannot be derived from it.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.ollama.com/troubleshooting ; https://www.pwndefend.com/2026/07/22/logging-reference-ollama-agent-zero/"
+        },
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "Desktop-app chat store (SQLite): Windows %LOCALAPPDATA%\\Ollama\\db.sqlite (+ db.sqlite-wal/-shm); macOS ~/Library/Application Support/Ollama/db.sqlite; Linux ~/.ollama/db.sqlite",
+          "howItWorks": "The Ollama desktop app (2025+) persists GUI chats in SQLite: tables chats(id,title,created_at) and messages(id,chat_id,role,content,thinking,model_name,model_cloud,created_at,updated_at,thinking_time_start/end) plus tool_calls. Only chats made in the desktop UI appear here (API/CLI usage does not). No token counts are stored — a page could only estimate tokens from content length. Reading requires a SQLite parser in-browser (e.g. sql.js inlined) via the File System Access API; the WAL file may hold un-checkpointed rows.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://github.com/ollama/ollama/blob/main/app/store/store.go ; https://github.com/ollama/ollama/blob/main/app/store/schema.sql ; https://github.com/ollama/ollama/issues/12452"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "n/a",
+          "howItWorks": "No official data export, no cloud usage API, no OAuth. (ollama.com account sign-in only gates cloud models; it exposes no per-user usage endpoint usable by a local page.)",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.ollama.com/api"
+        }
+      ],
+      "bestMethod": "Live-capture: proxy/observe requests the dashboard itself sends to http://localhost:11434 (exact prompt_eval_count/eval_count) with OLLAMA_ORIGINS=* set; supplement with server.log GIN lines for request counts/timestamps and (optionally) db.sqlite for desktop-app chat history (no tokens).",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Ollama has no retrospective usage store; token counts exist only in individual API responses. Anything historic must come from a request log kept by the caller. Windows tray-app log path is %LOCALAPPDATA%\\Ollama\\server.log per official docs; running `ollama serve` manually writes nothing to disk."
+    },
+    {
+      "name": "LM Studio",
+      "category": "local",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "macOS/Linux: ~/.lmstudio/conversations/ ; Windows: %USERPROFILE%\\.lmstudio\\conversations\\ (older installs: ~/.cache/lm-studio/conversations). Files: *.conversation.json (folders per chat)",
+          "howItWorks": "Every GUI chat is a JSON file (name, perChatPredictionConfig, messages[] with versions[] / currentlySelected / role / content[] and, for assistant messages, steps[] contentBlocks carrying a genInfo object). genInfo = {indexedModelIdentifier, identifier, loadModelConfig, predictionConfig, stats}; stats is the SDK LLMPredictionStats shape: stopReason, tokensPerSecond, timeToFirstTokenSec, totalTimeSec, promptTokensCount, predictedTokensCount, totalTokensCount (+ draft-token fields). So per-assistant-message input/output token counts and model id ARE on disk and readable via the File System Access API. LM Studio explicitly says the structure is undocumented and may change ('do NOT rely on their structure').",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://lmstudio.ai/docs/app/basics/chat ; https://github.com/lmstudio-ai/lmstudio-js/blob/main/packages/lms-shared-types/src/llm/LLMPredictionStats.ts ; https://github.com/Wontfallo/LMStudio-JSON-Chat-to-Text/blob/main/LMStudio_JSON_Parse.py"
+        },
+        {
+          "kind": "local-server",
+          "endpointOrPath": "http://localhost:1234 — /v1/chat/completions, /v1/completions, /v1/embeddings, /v1/models, /v1/responses (OpenAI-compat); /api/v0/chat/completions etc. (REST v0, adds stats.tokens_per_second, time_to_first_token, generation_time, stop_reason); POST /api/v1/chat (REST v1, stats.input_tokens, total_output_tokens, reasoning_output_tokens, tokens_per_second, time_to_first_token_seconds)",
+          "howItWorks": "OpenAI-compatible responses include the standard usage object (prompt_tokens/completion_tokens/total_tokens); the native REST endpoints add richer stats. No endpoint lists past chats or aggregates usage (REST v1 stateful chats can only be continued by response_id). CORS is OFF by default ('Enable CORS' toggle in Server settings or `lms server start --cors`); with it on, a file:// page can call the server. Optional 'Require Authentication' adds Bearer API tokens.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://lmstudio.ai/docs/developer/openai-compat ; https://lmstudio.ai/docs/developer/rest/endpoints ; https://lmstudio.ai/docs/developer/rest/chat ; https://lmstudio.ai/docs/developer/core/server/settings ; https://lmstudio.ai/docs/cli/serve/server-start"
+        },
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "~/.lmstudio/server-logs/ (Windows %USERPROFILE%\\.lmstudio\\server-logs\\) — plain-text daily server logs; also `lms log stream --source server|model --stats --json`",
+          "howItWorks": "HTTP server logs ([INFO][LM STUDIO SERVER] lines: startup, endpoint registration, incoming request per model, and with verbose logging the request/response bodies which then include the usage JSON). Format is unversioned and meant for debugging; token counts are only reliably present when verbose/'log prompts and responses' is on. `lms log stream --stats` streams tok/s and token metrics but is a CLI, not a file the page can read.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://lmstudio.ai/blog/lmstudio-v0.3.26 ; https://lmstudio.ai/docs/cli/serve/log-stream"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "n/a",
+          "howItWorks": "No cloud account/usage API, no official export beyond the conversation JSON files, no OAuth.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://lmstudio.ai/docs"
+        }
+      ],
+      "bestMethod": "Scan ~/.lmstudio/conversations/**/*.conversation.json (folder picker) and sum genInfo.stats.promptTokensCount / predictedTokensCount per assistant message with model identifier and timestamps; add live capture of API calls (usage object) if the page proxies them.",
+      "dataQuality": "exact",
+      "confidence": "medium",
+      "notes": "Token stats in conversation files are confirmed by the SDK type (LLMPredictionStats inside LLMGenInfo) and community parsers that read genInfo, but LM Studio warns the file structure is unstable — parse defensively and expect breaks across versions. Chats made through the API server are not written to the conversations folder."
+    },
+    {
+      "name": "llama.cpp (llama-server)",
+      "category": "local",
+      "methods": [
+        {
+          "kind": "local-server",
+          "endpointOrPath": "http://localhost:8080 — POST /completion (fields tokens_evaluated, tokens_predicted, timings.prompt_n/predicted_n/…), POST /v1/chat/completions & /v1/completions (usage.prompt_tokens/completion_tokens/total_tokens, prompt_tokens_details.cached_tokens), GET /metrics (only with --metrics; Prometheus text: llamacpp:prompt_tokens_total, llamacpp:tokens_predicted_total, llamacpp:prompt_seconds_total, llamacpp:tokens_predicted_seconds_total, llamacpp:requests_processing…), GET /slots (enabled by default; per-slot state/token counters), GET /props, GET /health",
+          "howItWorks": "Per-request exact tokens in every response; cumulative process-lifetime token counters via /metrics (reset on restart; in router mode use /metrics?model=… or the aggregated /metrics with model label). No persisted history. CORS: default `--cors-origins *` with credentials enabled (Origin echoed back), so a file:// page CAN call all endpoints out of the box; if --api-key is set send Authorization: Bearer. Note enabling --tools/--agent/--mcp-servers-* silently restricts CORS to localhost origins (file:// = null would then be blocked).",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "yes",
+          "sourceUrl": "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md"
+        },
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "No default log file; `--log-file FNAME` (env LLAMA_ARG_LOG_FILE) writes the console log wherever the user chooses; `--verbose`/`-lv` adds request/response dumps",
+          "howItWorks": "Log lines are unstructured (slot/timing lines like 'prompt eval time … / N tokens' when verbose). Only useful for ad-hoc parsing; not stable. The built-in web UI keeps its chat history in the browser's IndexedDB, not on disk.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "n/a",
+          "howItWorks": "No account, export, or OAuth.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://github.com/ggml-org/llama.cpp"
+        }
+      ],
+      "bestMethod": "Poll GET /metrics (start server with --metrics) for cumulative prompt/predicted token counters and diff them over time; use /slots for live state; capture per-request usage when the page issues requests. CORS is open by default so this works from file:// with no config.",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Counters are process-lifetime only (lost on restart) — the dashboard must snapshot them periodically to build history. Metrics endpoint is off unless --metrics / LLAMA_ARG_ENDPOINT_METRICS=1."
+    },
+    {
+      "name": "vLLM",
+      "category": "local",
+      "methods": [
+        {
+          "kind": "local-server",
+          "endpointOrPath": "http://localhost:8000 — GET /metrics (Prometheus, on by default: vllm:prompt_tokens_total, vllm:generation_tokens_total, vllm:prompt_tokens_cached_total, vllm:request_success_total, histograms vllm:request_prompt_tokens / vllm:request_generation_tokens, vllm:num_requests_running/waiting, per model_name label), POST /v1/chat/completions, /v1/completions, /v1/responses (usage.prompt_tokens/completion_tokens/total_tokens; streaming needs stream_options.include_usage), POST /tokenize, /detokenize, GET /v1/models, /health, /version, /load (with --enable-server-load-tracking)",
+          "howItWorks": "Cumulative token counters and per-request histograms in /metrics; exact usage in each response. No history/log-retrieval endpoint. CORS: `--allowed-origins` defaults to ['*'] (allow_credentials default False, allowed methods/headers *), so a file:// page can call it by default; if --api-key is set add Authorization: Bearer (still fine with * origins).",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.vllm.ai/en/stable/usage/metrics/ ; https://docs.vllm.ai/en/stable/cli/serve/ ; https://docs.vllm.ai/en/stable/serving/online_serving/"
+        },
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "No log file by default (stdout/stderr; --log-config-file / VLLM_LOGGING_CONFIG_PATH to redirect). Periodic stats lines every 10 s ('Avg prompt throughput … tokens/s, Avg generation throughput …') unless --disable-log-stats; --enable-log-requests (default False) logs request id/params (prompt text only at DEBUG); --enable-log-outputs logs generations",
+          "howItWorks": "Server-side text logs are opt-in and unstructured; they give throughput not per-request token totals unless DEBUG. Not a realistic source for a browser page.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.vllm.ai/en/stable/cli/serve/"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "n/a",
+          "howItWorks": "No account, export or OAuth (self-hosted engine).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.vllm.ai/"
+        }
+      ],
+      "bestMethod": "Poll GET http://localhost:8000/metrics (default-on, CORS *) and diff vllm:prompt_tokens_total / vllm:generation_tokens_total per model_name; capture usage from responses the page makes.",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Counters reset on server restart; the page must snapshot. Metric names are shown without the Prometheus _total suffix in some docs pages but appear as *_total in the exposition."
+    },
+    {
+      "name": "LocalAI",
+      "category": "local",
+      "methods": [
+        {
+          "kind": "local-server",
+          "endpointOrPath": "http://localhost:8080 — GET /api/usage?period=day|week|month|all (current/'local' user; time-bucketed {usage:[{bucket,model,prompt_tokens,completion_tokens,total_tokens,request_count,…}], totals:{…}, viewer:{…}}), GET /api/usage/all?period=&user_id= (admin/cluster-wide), GET /api/auth/usage, /api/auth/admin/usage, /api/auth/usage/sources (when --auth is on), GET /metrics (Prometheus/OTel: api_call histogram by method/path; localai_tokens_total{user,served_model,kind}, localai_cost_usd_total, localai_billed_requests_total, localai_usage_unrecorded_total), POST /v1/chat/completions etc. (usage object)",
+          "howItWorks": "Since the routing/billing middleware (merged 25 May 2026, v4.4+; current release v4.8.2 Aug 2026) every OpenAI/Anthropic-shaped request is recorded (model, endpoint, prompt/completion/total tokens, duration, source, api key). Storage: GORM/SQLite auth DB when --auth is enabled (durable, powers the built-in Usage page), an in-memory ring buffer when auth is off (LOST on restart), or disabled with --disable-stats (endpoints return 503). CORS: default (LOCALAI_CORS unset) uses Echo's permissive CORS = Access-Control-Allow-Origin * so GET /api/usage and /metrics work from file://; setting --cors=true requires an explicit --cors-allow-origins list. A CSRF middleware (Sec-Fetch-Site) blocks cross-site unsafe methods (POST) from browsers unless an Authorization/x-api-key header is sent or LOCALAI_DISABLE_CSRF=true — GETs are unaffected. API keys via --api-keys / LOCALAI_API_KEY (Bearer or x-api-key).",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "yes",
+          "sourceUrl": "https://github.com/mudler/LocalAI/blob/master/core/http/routes/usage.go ; https://github.com/mudler/LocalAI/blob/master/core/http/auth/usage.go ; https://github.com/mudler/LocalAI/blob/master/core/services/routing/billing/prom.go ; https://github.com/mudler/LocalAI/blob/master/core/http/app.go ; https://localai.io/docs/reference/cli-reference/ ; https://github.com/mudler/LocalAI/discussions/9971"
+        },
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "No log file by default (stdout; --log-level info|debug|trace / LOCALAI_LOG_LEVEL). Usage DB lives inside the auth SQLite database when --auth is on (usage_records table)",
+          "howItWorks": "Console logs are not a usage source. The durable usage_records table (SQLite) could be read with an in-browser SQLite parser but the HTTP /api/usage endpoint is the supported route.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://localai.io/docs/reference/cli-reference/"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "n/a",
+          "howItWorks": "No cloud account/OAuth for usage (LocalAI's optional built-in auth/OAuth is for its own web UI, and its usage endpoints are then reachable with a LocalAI API key, not a third-party login).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://localai.io/docs/"
+        }
+      ],
+      "bestMethod": "GET http://localhost:8080/api/usage?period=all (and per-period buckets) — the only local runner with a real server-side usage-history API; add /metrics localai_tokens_total for cumulative counters.",
+      "dataQuality": "exact",
+      "confidence": "medium",
+      "notes": "Feature is new (mid-2026) and shapes come from source, not yet stable docs. Without --auth the store is in-memory and resets on restart, so the dashboard should poll and persist snapshots. Prometheus counters ('localai_cost_usd_total') exist but cost is only populated when models have configured prices."
+    },
+    {
+      "name": "GPT4All",
+      "category": "local",
+      "methods": [
+        {
+          "kind": "local-server",
+          "endpointOrPath": "http://localhost:4891/v1 (Settings > Application > Advanced > 'Enable Local API Server'; port configurable) — GET /v1/models, GET /v1/models/<name>, POST /v1/completions, POST /v1/chat/completions",
+          "howItWorks": "Responses include usage {prompt_tokens, completion_tokens, total_tokens}. Server adds Access-Control-Allow-Origin: * so a file:// page can call it. Only listens on 127.0.0.1 (IPv4), HTTP only, no auth. No history/usage endpoint; server-side chats appear as a special 'server' entry in the app's chat list.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.gpt4all.io/gpt4all_api_server/home.html ; https://github.com/nomic-ai/gpt4all/wiki/Local-API-Server ; https://github.com/nomic-ai/gpt4all/blob/main/gpt4all-chat/src/server.cpp"
+        },
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "Chats: gpt4all-<id>.chat files in the model folder — Windows %LOCALAPPDATA%\\nomic.ai\\GPT4All\\, macOS ~/Library/Application Support/nomic.ai/GPT4All/, Linux ~/.local/share/nomic.ai/GPT4All/ (settings in %APPDATA%\\nomic.ai / ~/.config/nomic.ai)",
+          "howItWorks": ".chat files are Qt QDataStream (Qt_6_2) binary serialisations of the chat model (messages, prompts/responses, embedded KV-cache in older versions — files can be hundreds of MB). Not JSON, no token counts stored, no documented schema, no export feature. Not practical for a browser page.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://github.com/nomic-ai/gpt4all/blob/main/gpt4all-chat/src/chatlistmodel.cpp ; https://github.com/nomic-ai/gpt4all/wiki/Frequently-Asked-Questions ; https://github.com/nomic-ai/gpt4all/discussions/3377"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "n/a",
+          "howItWorks": "No account, cloud usage API, export, or OAuth. Project appears dormant: last release v3.10.0 (25 Feb 2025), last commit May 2025; GitHub issues #3558/#3605 ask whether development stopped.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://github.com/nomic-ai/gpt4all/releases ; https://github.com/nomic-ai/gpt4all/issues/3558"
+        }
+      ],
+      "bestMethod": "Live capture only: usage object from /v1/chat/completions responses the page sends (CORS * so it works from file://). Nothing retrospective is readable.",
+      "dataQuality": "validate-only",
+      "confidence": "high",
+      "notes": "Low priority — dormant project, binary chat store without token counts. At most: detect the server via GET /v1/models and record calls made through the dashboard."
+    },
+    {
+      "name": "Jan.ai",
+      "category": "local",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "Windows %APPDATA%\\Jan\\data\\ ; macOS ~/Library/Application Support/Jan/data/ ; Linux ~/.local/share/Jan/data/ (customisable in Settings > General > Jan Data Folder). Structure: threads/<thread_id>/thread.json + messages.jsonl ; logs/app.log ; assistants/, extensions/, llamacpp/models/, mlx/models/",
+          "howItWorks": "Each thread has messages.jsonl (one JSON message per line with role, content, model, timestamps and metadata). Docs state message metadata carries 'token speed' info: lastTimestamp, message id, tokenCount and tokenSpeed (tokens/s) — i.e. OUTPUT token count for assistant messages; prompt/input tokens are not recorded, so input must be estimated. app.log has [APP]/[SERVER]/[SPECS] lines; with 'Verbose Server Logs' (on by default) it records API server requests/responses. Readable via the File System Access API (JSONL is easy to parse).",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://www.jan.ai/docs/desktop/data-folder ; https://www.jan.ai/docs/desktop/api-server"
+        },
+        {
+          "kind": "local-server",
+          "endpointOrPath": "http://127.0.0.1:1337 (prefix /v1 configurable) — POST /v1/chat/completions, GET /v1/models, etc. (llama.cpp-backed OpenAI-compatible server started from the Local API Server screen)",
+          "howItWorks": "Standard OpenAI-shaped responses with usage (llama.cpp backend). CORS is ENABLED by default (toggle in server settings), so a file:// page can call it; optional API key (any string) sent as Authorization: Bearer. No endpoint to list threads or aggregate usage over HTTP.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "yes",
+          "sourceUrl": "https://www.jan.ai/docs/desktop/api-server ; https://www.jan.ai/local-server/settings"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "n/a",
+          "howItWorks": "No cloud account/usage API, no OAuth, no separate export beyond the data folder (which is itself the export).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://www.jan.ai/docs/desktop/data-folder"
+        }
+      ],
+      "bestMethod": "Scan <Jan data>/threads/*/messages.jsonl for per-message model, timestamps and metadata tokenCount (output tokens); estimate input tokens from content; optionally capture live usage from the :1337 API (CORS on by default).",
+      "dataQuality": "estimated",
+      "confidence": "medium",
+      "notes": "Only output-token metadata is documented; treat totals as partial/estimated. Data folder moved from ~/jan to %APPDATA%\\Jan\\data in the 2025 rewrite; support both when scanning."
+    },
+    {
+      "name": "text-generation-webui (oobabooga)",
+      "category": "local",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "endpointOrPath": "<install>/user_data/logs/chat/<character>/<unique_id>.json (chat/chat-instruct), user_data/logs/instruct/<unique_id>.json, user_data/logs/notebook/, user_data/logs/chat_state.json",
+          "howItWorks": "Each history file is JSON {internal:[[user,assistant],…], visible:[…], metadata:{'user_<i>':{timestamp}, 'assistant_<i>':{timestamp, model_name, versions:[…], tool_sequence, attachments}}}. Timestamps and model_name per turn are stored but NO token counts — tokens must be estimated from text. Readable with the File System Access API.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://github.com/oobabooga/text-generation-webui/blob/main/modules/chat.py ; https://github.com/oobabooga/text-generation-webui/discussions/2542"
+        },
+        {
+          "kind": "local-server",
+          "endpointOrPath": "http://127.0.0.1:5000 (--api, --api-port, OPENEDAI_PORT) — POST /v1/chat/completions, /v1/completions (usage.prompt_tokens/completion_tokens/total_tokens; stream_options.include_usage supported), POST /v1/messages (Anthropic-shaped), GET /v1/models, POST /v1/internal/token-count, /v1/internal/encode, /v1/internal/model/info, GET /v1/billing/usage (stub, always {\"total_usage\":0})",
+          "howItWorks": "Exact usage in each response; /v1/internal/token-count lets the page tokenize text with the loaded model's tokenizer (useful for estimating tokens of history files). No history/usage store. Auth: --api-key (Bearer) and --admin-key. CORS: unless --listen or --public-api is used, allow_origin_regex is https?://(localhost|127.0.0.1)(:port)? — a file:// page (Origin: null) is BLOCKED; with --listen/--public-api allow_origins becomes * and file:// works.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://github.com/oobabooga/text-generation-webui/blob/main/modules/api/script.py ; https://github.com/oobabooga/text-generation-webui/blob/main/modules/api/completions.py ; https://github.com/oobabooga/text-generation-webui/wiki/12-%E2%80%90-OpenAI-API"
+        },
+        {
+          "kind": "none",
+          "endpointOrPath": "n/a",
+          "howItWorks": "No account, cloud usage, export feature or OAuth. The /v1/billing/usage endpoint exists only for OpenAI-client compatibility and returns 0.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://github.com/oobabooga/text-generation-webui/blob/main/modules/api/script.py"
+        }
+      ],
+      "bestMethod": "Scan user_data/logs/chat/**/*.json and logs/instruct/*.json for turns (timestamp + model_name) and estimate tokens (optionally via POST /v1/internal/token-count when the API is running with --listen); capture live usage from API calls the page makes.",
+      "dataQuality": "estimated",
+      "confidence": "high",
+      "notes": "History JSON has no token counts. CORS default blocks null-origin (file://) callers unless server started with --listen or --public-api; document that requirement in the connector."
+    },
+    {
+      "name": "Mistral (La Plateforme)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "Standard La Plateforme API keys have NO usage/billing endpoint. Only realistic key-based call is GET https://api.mistral.ai/v1/models (Authorization: Bearer) to validate the key and list models. Per-response `usage` object (prompt_tokens/completion_tokens) exists but that only helps if the page itself makes the calls.",
+          "endpointOrPath": "GET https://api.mistral.ai/v1/models",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.mistral.ai/getting-started/quickstart/"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Admin API (Preview, ENTERPRISE plans only) with a dedicated Admin API key sent as `x-api-key`. GET /v1/admin/usage?month=&year=&workspace_id= returns billed consumption by category (chat, completion, ocr, audio, connectors, libraries_api, fine_tuning, vibe_usage) + currency for a month; NO per-model token counts. GET /v1/admin/spend-limit, GET /v1/admin/rate-limit. Vibe Code analytics GET /v1/admin/analytics/vibe/usage/by_workspace?start_time&end_time returns daily input/output/cached tokens per model but only for Vibe (coding agent) sessions. CORS: preflight to /v1/admin/usage returned 401 with no Access-Control-Allow-Origin (probed) -> treat as CORS-blocked from file://.",
+          "endpointOrPath": "GET https://api.mistral.ai/v1/admin/usage (also /v1/admin/analytics/vibe/usage/by_workspace, /v1/admin/spend-limit)",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.mistral.ai/admin/admin-api/usage-metrics"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Console/Admin Panel: Administration > Workspaces > (workspace) > Usage tab shows month-to-date spend, tokens, usage by model/capability. No documented CSV export and no documented per-key usage API. No local log files written by the API. Le Chat/console login sessions expose nothing to a third-party local page.",
+          "endpointOrPath": "console.mistral.ai / admin.mistral.ai (Workspaces > Usage)",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.mistral.ai/admin/workspaces/usage-limits"
+        }
+      ],
+      "bestMethod": "Validate-only via GET /v1/models with the user's API key; optional Enterprise Admin API (/v1/admin/usage) only through a non-browser proxy because it is CORS-blocked and Enterprise-only.",
+      "dataQuality": "validate-only",
+      "confidence": "medium",
+      "notes": "For ordinary (non-Enterprise) accounts there is no way for a local page to pull historical token or cost data. Admin API is 'in Preview... available on Enterprise plans' and even then returns category-level cost, not tokens per model (except Vibe analytics). If the dashboard were to proxy the user's own chat calls it could record `usage` per response, but that is not 'obtaining' history."
+    },
+    {
+      "name": "Cohere",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "No usage/billing/spend endpoint in the public API. Key validation: POST https://api.cohere.com/v1/check-api-key (Authorization: Bearer) -> valid/organization info; GET https://api.cohere.com/v2/models lists models. Per-response `meta.billed_units` (input_tokens/output_tokens/search_units) and `meta.tokens` exist only on calls the page itself makes. CORS on api.cohere.com verified: Access-Control-Allow-Origin: * (probed).",
+          "endpointOrPath": "POST https://api.cohere.com/v1/check-api-key ; GET https://api.cohere.com/v2/models",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.cohere.com/reference/check-api-key"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Dashboard only: https://dashboard.cohere.com/billing (Billing & Usage; Spending Limit tab at ?tab=spending-limit) shows call volume by endpoint and spend. No documented CSV export, no usage API, no local logs. Web login gives a third-party page nothing.",
+          "endpointOrPath": "https://dashboard.cohere.com/billing",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.cohere.com/docs/cohere-faqs"
+        }
+      ],
+      "bestMethod": "Validate-only (POST /v1/check-api-key + GET /v2/models). No usage retrieval possible.",
+      "dataQuality": "validate-only",
+      "confidence": "high",
+      "notes": "Cohere docs explicitly say usage is provided 'as metadata for each conversation' (per response) plus the dashboard; there is no org/usage export endpoint. Trial keys are free/rate-limited; production keys billed per billed_units."
+    },
+    {
+      "name": "Together AI",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "No documented usage, credits or billing endpoint (docs.together.ai llms.txt lists only dashboard pages for credits/usage). Validate key with GET https://api.together.xyz/v1/models (Bearer). Serverless inference responses carry rate-limit/usage headers and a `usage` object, again only for calls the page makes. CORS on api.together.xyz verified * (probed); /v1/billing returns 404.",
+          "endpointOrPath": "GET https://api.together.xyz/v1/models",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.together.ai/docs/billing-usage-limits"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Dashboard only: https://api.together.ai/settings/organization/~current/billing (Usage section, 'Current Usage' draft invoice) and https://api.together.ai/settings/projects/~current/cost-analytics. Group by product / line item / API key (beta) / project (beta); measure Cost ($) or Units (tokens). No documented CSV export, no API, no local logs.",
+          "endpointOrPath": "https://api.together.ai/settings/organization/~current/billing",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.together.ai/docs/billing-usage-limits"
+        }
+      ],
+      "bestMethod": "Validate-only (GET /v1/models). Usage/cost is dashboard-only.",
+      "dataQuality": "validate-only",
+      "confidence": "high",
+      "notes": "Fully prepaid platform (min $5 top-up); balance limit configurable in dashboard. Nothing programmatic for balance or usage as of Aug 2026 docs."
+    },
+    {
+      "name": "Fireworks AI",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "Full usage + cost API using ANY normal Fireworks API key (fw_...) from the account as Bearer. (1) GET https://api.fireworks.ai/v1/accounts/{account_id}/billingUsage?startTime=&endTime=&usageType=SERVERLESS|DEDICATED_DEPLOYMENT&groupBy=model_name&groupBy=api_key_id&timezone= -> daily buckets with promptTokens/completionTokens (JSON strings), audioInputSeconds, accelerator_seconds; max 31-day window per request; daily granularity only; cached a few minutes. (2) POST .../billingUsage:query same + `filter` {dimension:{values:[...]}}. (3) GET .../billing/summary?granularity=DAILY -> rated USD line items by category (serverless/dedicated/training) with usageBuckets. (4) POST .../usageCosts:query -> USD subtotals grouped by up to two of HOUR/DAY/MODEL/USER/API_KEY (ACCOUNT scope needs account admin; annotation dims Enterprise). account_id is shown in app.fireworks.ai; GET /v1/accounts/{account_id} confirms. Group dims: model_name, api_key_id, api_key_name, deployment_name, accelerator_type, placement. CORS verified: Access-Control-Allow-Origin: * on billingUsage, billingUsage:query, billing/summary, usageCosts:query (probed; only when requested headers are just Authorization/Content-Type).",
+          "endpointOrPath": "GET https://api.fireworks.ai/v1/accounts/{account_id}/billingUsage ; POST .../billingUsage:query ; GET .../billing/summary ; POST .../usageCosts:query",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.fireworks.ai/accounts/exporting-usage-and-costs"
+        },
+        {
+          "kind": "local-server",
+          "howItWorks": "CLI equivalents: `firectl billing get-usage --start-time --end-time --usage-type --group-by --filter`, `firectl billing export-metrics`, `firectl billing list-invoices`. Not needed by the page but useful for one-off CSV.",
+          "endpointOrPath": "firectl billing get-usage / export-metrics / list-invoices",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.fireworks.ai/tools-sdks/firectl/commands/billing-get-usage"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Dashboard: https://app.fireworks.ai/account/billing (credits, auto top-up, spend limits, invoices). No local logs.",
+          "endpointOrPath": "https://app.fireworks.ai/account/billing",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.fireworks.ai/faq/billing-pricing-usage/billing/billing-management"
+        }
+      ],
+      "bestMethod": "billingUsage (tokens by day/model/api key) + billing/summary (USD by day) with a regular API key; usageCosts:query for $ per model/key where permitted.",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Best-in-class among this group. Remember 31-day window per request (page must loop months), token values are strings, and the user must supply account_id (visible in console URL/settings)."
+    },
+    {
+      "name": "Groq",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "No documented usage/spend API. Validate with GET https://api.groq.com/openai/v1/models (Bearer). CORS on api.groq.com verified * (probed). Per-response `usage` and `x-groq` headers only for calls the page makes.",
+          "endpointOrPath": "GET https://api.groq.com/openai/v1/models",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "yes",
+          "sourceUrl": "https://console.groq.com/docs/api-reference"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Console only: Dashboard > Usage (near-real-time, by model), Settings > Billing > Limits (spend updates every 10-15 min, alerts), Settings > Billing > Manage Billing (Stripe portal invoices/receipts). Prometheus metrics endpoint exists but Enterprise-only. No CSV export documented, no local logs.",
+          "endpointOrPath": "https://console.groq.com/dashboard/usage ; https://console.groq.com/settings/billing",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://console.groq.com/docs/billing-faqs"
+        }
+      ],
+      "bestMethod": "Validate-only (GET /openai/v1/models).",
+      "dataQuality": "validate-only",
+      "confidence": "high",
+      "notes": "Groq's docs index (console.groq.com/llms.txt) has no usage/billing API page; spend limits and usage are console-only. Enterprise customers can scrape Prometheus metrics (not a browser-page thing)."
+    },
+    {
+      "name": "Perplexity API (Sonar)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "No balance/usage endpoint for Sonar API keys. Validate/list: GET https://api.perplexity.ai/v1/models (docs say no auth required, so it does not even validate the key; a real validation needs a paid completion call). Chat responses include a `usage` object with a USD `cost` breakdown, only for calls the page makes.",
+          "endpointOrPath": "GET https://api.perplexity.ai/v1/models",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.perplexity.ai/api-reference/models-get"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Organization analytics key (created by an org admin in the Perplexity web app: Settings > Organization > Computer) -> GET https://api.perplexity.ai/v1/analytics/computer/usage?dataset=credit_usage&start_time=&end_time=&bucket_width=1d|1h&user_email= (90-day window, paged). Covers the 'Computer' product credit usage only, NOT Sonar API usage. CORS verified * (probed).",
+          "endpointOrPath": "GET https://api.perplexity.ai/v1/analytics/computer/usage",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.perplexity.ai/api-reference/computer-analytics-usage-get"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "API Console Billing page (perplexity.ai/account/api or console): credit balance, usage chart (requests, input/output/citation/reasoning tokens, Deep Research/Search requests; 7/30-day/custom), per-model usage/rate/cost table, invoice history, usage tier. No CSV export or usage API documented; no local logs.",
+          "endpointOrPath": "https://www.perplexity.ai/account/api (Billing tab)",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.perplexity.ai/docs/getting-started/api-groups"
+        }
+      ],
+      "bestMethod": "Validate-only (no free key-check exists; /v1/models is unauthenticated). Sonar usage is dashboard-only.",
+      "dataQuality": "validate-only",
+      "confidence": "medium",
+      "notes": "The only programmatic analytics endpoint is for the Perplexity 'Computer' product with a separate org analytics key, not for API/Sonar spend. Enterprise usage analytics exports exist in the Enterprise admin UI only."
+    },
+    {
+      "name": "DeepSeek API",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "GET https://api.deepseek.com/user/balance (Authorization: Bearer sk-...) -> {is_available, balance_infos:[{currency: CNY|USD, total_balance, granted_balance, topped_up_balance}]}. Current balance only; no usage-history endpoint. CORS verified: server echoes Origin (incl. `null`) with allow-credentials (probed) -> callable from file://.",
+          "endpointOrPath": "GET https://api.deepseek.com/user/balance",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "yes",
+          "sourceUrl": "https://api-docs.deepseek.com/api/get-user-balance/"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Platform > Usage (https://platform.deepseek.com/usage) > pick a month > 'Export monthly data' downloads a ZIP with two CSVs: amount-*.csv (per-day/per-model/per-API-key input, output and cache-hit tokens) and cost-*.csv (rates/cost). Both files of the same month are needed to compute cost. Third-party importers (deepseek-usage.xyz, github.com/shajanjp/deepseek-usage) parse exactly this. Column names not officially documented; sniff headers on import.",
+          "endpointOrPath": "platform.deepseek.com/usage -> Export monthly data (ZIP: amount-*.csv + cost-*.csv)",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://deepseek-usage.xyz/"
+        }
+      ],
+      "bestMethod": "Balance API for live status + monthly CSV/ZIP import (amount+cost) for exact token history.",
+      "dataQuality": "exact",
+      "confidence": "medium",
+      "notes": "Balance endpoint is official and CORS-open. The CSV export is real but its schema is documented only by third-party tools; build a tolerant importer (JSZip in-page or ask user to unzip). Balance is 'string' numbers; currency may be CNY."
+    },
+    {
+      "name": "xAI (Grok API)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "admin-key",
+          "howItWorks": "Management API (base https://management-api.x.ai, Bearer MANAGEMENT key from console.x.ai > Settings > Management Keys; team_id copied from https://console.x.ai/team/default/settings/team). POST /v1/billing/teams/{team_id}/usage {timeRange:{start,end,timezone}, timeUnit: DAY|HOUR|MONTH..., values:[{field,aggregation:SUM...}], groupBy:[...], filters:[...]} -> time-series in USD grouped by e.g. model/description ('Chat grok-4-0709'); GET /v1/billing/teams/{team_id}/prepaid/balance (credit balance + change ledger); GET .../postpaid/invoice/preview (current period charges by cluster+model); GET .../invoices; GET .../postpaid/spending-limits; GET /auth/management-keys/validation. CORS: preflight to management-api.x.ai returned 204 with NO Access-Control-Allow-Origin (probed twice) -> blocked from a file:// page without a proxy.",
+          "endpointOrPath": "POST https://management-api.x.ai/v1/billing/teams/{team_id}/usage ; GET .../prepaid/balance ; GET .../postpaid/invoice/preview",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.x.ai/developers/rest-api-reference/management/billing"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "Regular API key: GET https://api.x.ai/v1/api-key returns key metadata (validation) and GET https://api.x.ai/v1/models lists models. api.x.ai CORS verified * (probed). No usage endpoint on api.x.ai.",
+          "endpointOrPath": "GET https://api.x.ai/v1/api-key ; GET https://api.x.ai/v1/models",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.x.ai/developers/management-api-guide"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Console Usage Explorer (team admins): filter by API key/model/request IP/cluster/token type; dimension = cost USD, tokens, or billing items. Invoices under Billing > Invoices. No CSV export documented; no local logs.",
+          "endpointOrPath": "https://console.x.ai (Usage Explorer)",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.x.ai/docs/key-information/usage-explorer"
+        }
+      ],
+      "bestMethod": "From a pure file:// page: validate-only via api.x.ai. Management API gives billed usage history + prepaid balance but needs a local proxy/CLI because management-api.x.ai sends no CORS headers.",
+      "dataQuality": "validate-only",
+      "confidence": "medium",
+      "notes": "If the dashboard ever gains an optional local helper/proxy, xAI becomes 'billed' quality (USD by day/model, balance). Management usage endpoint returns dollar amounts and counts; token counts may be requestable as a value field but docs only illustrate USD."
+    },
+    {
+      "name": "Azure OpenAI (Microsoft Foundry)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "oauth",
+          "howItWorks": "Cost: POST https://management.azure.com/{scope}/providers/Microsoft.CostManagement/query?api-version=2025-03-01 with body {type:'ActualCost'|'Usage', timeframe:'Custom', timePeriod:{from,to}, dataset:{granularity:'Daily', aggregation:{totalCost:{name:'PreTaxCost',function:'Sum'}, usage:{name:'UsageQuantity',function:'Sum'}}, grouping:[{type:'Dimension',name:'MeterSubCategory'|'Meter'|'ResourceId'}], filter:{dimensions:{name:'ServiceName',operator:'In',values:['Cognitive Services']}}}} -> columns/rows (PreTaxCost, UsageDate, Currency, ...). Scope = /subscriptions/{id} or resource group. Auth = Entra ID bearer token (Cost Management Reader / Reader on scope), NOT an API key. Token can be obtained by the user via `az account get-access-token --resource https://management.azure.com` and pasted (about 1h validity); MSAL/implicit redirect cannot target file://. management.azure.com CORS verified * (probed).",
+          "endpointOrPath": "POST https://management.azure.com/{scope}/providers/Microsoft.CostManagement/query?api-version=2025-03-01",
+          "givesTokens": "estimated",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "yes",
+          "sourceUrl": "https://learn.microsoft.com/en-us/rest/api/cost-management/query/usage?view=rest-cost-management-2025-03-01"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "Tokens: Azure Monitor metrics REST GET https://management.azure.com/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.CognitiveServices/accounts/{name}/providers/microsoft.insights/metrics?api-version=2024-02-01&metricnames=ProcessedPromptTokens,GeneratedTokens,TokenTransaction,InputTokens,OutputTokens,AzureOpenAIRequests&timespan={start}/{end}&interval=P1D&aggregation=Total&$filter=ModelDeploymentName eq '*' -> exact per-deployment/model token totals (dimensions ModelDeploymentName, ModelName, ModelVersion, ApiName, Region). Also cache metrics (AzureOpenAIContextTokensCacheMatchRate, cacheReadInputTokens for Anthropic deployments). Same Entra bearer token (Monitoring Reader). Metric retention 93 days. CORS verified * (probed).",
+          "endpointOrPath": "GET https://management.azure.com/{resourceId}/providers/microsoft.insights/metrics?api-version=2024-02-01",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "yes",
+          "sourceUrl": "https://learn.microsoft.com/en-us/azure/foundry/openai/monitor-openai-reference"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Portal Cost Management > Cost analysis > Download (CSV/Excel), Cost Management 'Exports' (scheduled CSV to a storage account; FOCUS/actual-cost datasets), Cost Details (Generate Cost Details Report) async CSV; and Diagnostic settings can send 'Azure OpenAI Request Usage' / RequestResponse logs to Log Analytics (KQL AzureDiagnostics/AzureMetrics). Usage rows are per meter (per-1K-token meters) so tokens can be estimated from Quantity x 1000.",
+          "endpointOrPath": "Azure portal Cost analysis -> Download CSV; Cost Management Exports; Diagnostic settings -> Log Analytics",
+          "givesTokens": "estimated",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://learn.microsoft.com/en-us/rest/api/cost-management/query?view=rest-cost-management-2025-03-01"
+        }
+      ],
+      "bestMethod": "Paste an Entra access token (az CLI) -> Azure Monitor metrics for exact tokens per deployment + Cost Management Query for billed cost (both CORS-open on management.azure.com). Fallback: import Cost analysis CSV.",
+      "dataQuality": "exact",
+      "confidence": "medium",
+      "notes": "No API-key path exists; everything is Entra ID (OAuth) bearer tokens, which a file:// page cannot acquire itself (no valid redirect URI), hence paste-token UX. Cost Query is free but rate limited; Cost Management data lags ~8-24h. Filter dimension values for AOAI: ServiceName 'Cognitive Services' / MeterCategory 'Azure OpenAI' (verify per subscription with GetDimensions). Local logs: none (only ~/.azure credentials)."
+    },
+    {
+      "name": "AWS Bedrock",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "Access key + secret (SigV4 signed in-page, e.g. bundled AWS SDK for JS v3 or WebCrypto HMAC) -> CloudWatch GetMetricData/GetMetricStatistics: POST https://monitoring.{region}.amazonaws.com/ (X-Amz-Target: GraniteServiceVersion20100801.GetMetricData) namespace AWS/Bedrock, metrics InputTokenCount, OutputTokenCount, Invocations, InvocationLatency, InvocationThrottles, dimension ModelId (bedrock-mantle endpoint uses TotalInputTokens/TotalOutputTokens). Sum per day per model = exact tokens. Retention 15 months. IAM cloudwatch:GetMetricData. CORS verified: monitoring endpoint answers preflight with Access-Control-Allow-Origin: * (probed).",
+          "endpointOrPath": "POST https://monitoring.{region}.amazonaws.com/ (GetMetricData, Namespace AWS/Bedrock, Dimension ModelId)",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.aws.amazon.com/bedrock/latest/userguide/monitoring-runtime-metrics.html"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "Cost Explorer GetCostAndUsage: POST https://ce.us-east-1.amazonaws.com/ (X-Amz-Target: AWSInsightsIndexService.GetCostAndUsage, Content-Type application/x-amz-json-1.1, SigV4) body {TimePeriod:{Start,End}, Granularity:'DAILY', Metrics:['UnblendedCost','UsageQuantity'], Filter:{Dimensions:{Key:'SERVICE',Values:['Amazon Bedrock']}}, GroupBy:[{Type:'DIMENSION',Key:'USAGE_TYPE'},{Type:'DIMENSION',Key:'OPERATION'}]} -> ResultsByTime[].Groups[].Metrics.Amount. Third-party models may also appear as their own SERVICE names (e.g. 'Claude ... (Amazon Bedrock Edition)'), so also group by SERVICE. $0.01 per API request; IAM ce:GetCostAndUsage; data ~24h lag. CORS verified * (probed).",
+          "endpointOrPath": "POST https://ce.us-east-1.amazonaws.com/ (GetCostAndUsage)",
+          "givesTokens": "estimated",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_GetCostAndUsage.html"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Not local, but the closest to per-request logs: Bedrock model invocation logging (OFF by default; enable via console Settings or PutModelInvocationLoggingConfiguration) writes JSON records {timestamp, operation, modelId, identity.arn, requestMetadata, input.inputTokenCount, output.outputTokenCount} to a CloudWatch Logs group and/or S3 (gzipped JSON). Query with CloudWatch Logs Insights StartQuery/GetQueryResults or download S3 objects (SigV4). Only covers bedrock-runtime calls.",
+          "endpointOrPath": "CloudWatch Logs group / S3 prefix AWSLogs/{account}/BedrockModelInvocationLogs/",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-invocation-logging.html"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Billing console: Cost Explorer -> Download CSV; Bills -> download; AWS Data Exports (CUR 2.0 / FOCUS) to S3 as CSV/Parquet with per-usage-type line items (token usage types with quantities).",
+          "endpointOrPath": "AWS Billing console downloads / Data Exports to S3",
+          "givesTokens": "estimated",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_GetCostAndUsage.html"
+        }
+      ],
+      "bestMethod": "IAM access key (read-only policy: cloudwatch:GetMetricData + ce:GetCostAndUsage) with in-page SigV4 -> CloudWatch AWS/Bedrock token metrics + Cost Explorer daily cost.",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "AWS endpoints are CORS-open, so a static page can call them if it can sign requests (needs the secret key in-page; recommend a dedicated read-only IAM user or short-lived STS creds). No usage logs are written locally; ~/.aws holds only credentials. Cost Explorer charges $0.01/request and lags ~1 day; CloudWatch metrics are near-real-time."
+    },
+    {
+      "name": "Google Vertex AI",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "oauth",
+          "howItWorks": "Cloud Monitoring API: GET https://monitoring.googleapis.com/v3/projects/{project}/timeSeries?filter=metric.type%3D%22aiplatform.googleapis.com%2Fpublisher%2Fonline_serving%2Ftoken_count%22&interval.startTime=&interval.endTime=&aggregation.alignmentPeriod=86400s&aggregation.perSeriesAligner=ALIGN_SUM&aggregation.crossSeriesReducer=REDUCE_SUM&aggregation.groupByFields=resource.labels.model_user_id&aggregation.groupByFields=metric.labels.type -> exact input/output tokens per publisher model (resource type aiplatform.googleapis.com/PublisherModel; labels type, request_type, modality, explicit_caching, accounting_resource). Also publisher/online_serving/model_invocation_count and consumed_throughput. Auth: OAuth2 bearer with roles/monitoring.viewer (API keys are not accepted by the Monitoring API). Token via `gcloud auth print-access-token` pasted (about 1h); Google Identity Services cannot authorize a file:// / null origin. CORS verified: googleapis echo Origin (incl. null) on preflight (probed).",
+          "endpointOrPath": "GET https://monitoring.googleapis.com/v3/projects/{project}/timeSeries (metric.type aiplatform.googleapis.com/publisher/online_serving/token_count)",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.cloud.google.com/monitoring/api/metrics_gcp_a_b"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "Cost: there is NO Cloud Billing REST endpoint that returns incurred costs (cloudbilling.googleapis.com only lists billing accounts/projects/SKU prices; Budget API manages budgets). Costs come from Cloud Billing export to BigQuery (standard/detailed usage-cost tables), which the page can query with BigQuery REST POST https://bigquery.googleapis.com/bigquery/v2/projects/{project}/queries {query:'SELECT usage_start_time, sku.description, SUM(cost), SUM(usage.amount) ... WHERE service.description=\"Vertex AI\" GROUP BY ...'} using the same pasted OAuth token (roles/bigquery.jobUser + dataViewer). Token SKUs' usage.amount gives billed token/character quantities. CORS-open like other googleapis.",
+          "endpointOrPath": "POST https://bigquery.googleapis.com/bigquery/v2/projects/{project}/queries (against billing export dataset)",
+          "givesTokens": "estimated",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Cloud Console Billing > Reports (filter service Vertex AI / SKU Gemini) > Download CSV; or scheduled BigQuery export as above. Cloud Billing API (GET https://cloudbilling.googleapis.com/v1/billingAccounts) is only useful to validate the token / list accounts.",
+          "endpointOrPath": "Cloud Console Billing Reports -> Download CSV",
+          "givesTokens": "estimated",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.cloud.google.com/billing/docs/reference/rest"
+        }
+      ],
+      "bestMethod": "Paste a gcloud OAuth access token -> Monitoring timeSeries for exact Gemini/publisher-model tokens; BigQuery billing-export query (if user enabled export) or CSV import for cost.",
+      "dataQuality": "exact",
+      "confidence": "medium",
+      "notes": "Vertex differs from the Gemini Developer API (already supported): no API-key usage path, everything is IAM/OAuth. Local machine has only ~/.config/gcloud credentials, no usage logs. Monitoring data retention 6 weeks for custom, ~24 months for system metrics at coarse resolution."
+    },
+    {
+      "name": "Hugging Face Inference Providers",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "No documented usage/credits/billing endpoint. GET https://huggingface.co/api/whoami-v2 (Authorization: Bearer hf_...) validates the token and returns user/orgs/plan flags (isPro etc.). CORS verified: echoes Origin null (probed). Router responses (https://router.huggingface.co/v1/...) carry `usage` only for calls the page makes.",
+          "endpointOrPath": "GET https://huggingface.co/api/whoami-v2",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "yes",
+          "sourceUrl": "https://huggingface.co/docs/inference-providers/pricing"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Web only: https://huggingface.co/settings/inference-providers/overview (past-month usage broken down by model and provider), https://huggingface.co/settings/billing (spend, credits, auto-recharge), https://huggingface.co/settings/billing/invoices. Org equivalents under org settings. No CSV export, no API, no local usage logs (~/.cache/huggingface/token is just the credential). Requests made with a custom provider key are billed by the provider, not HF.",
+          "endpointOrPath": "https://huggingface.co/settings/inference-providers/overview",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://huggingface.co/docs/hub/en/billing"
+        }
+      ],
+      "bestMethod": "Validate-only via /api/whoami-v2. Usage is web-settings only.",
+      "dataQuality": "validate-only",
+      "confidence": "high",
+      "notes": "Monthly credits ($0.10 free / $2 PRO / $2 per seat Team-Enterprise) and pay-as-you-go are only visible in the settings UI. whoami-v2 has some undocumented billing-ish fields (e.g. periodEnd/canPay) but nothing on inference spend."
+    },
+    {
+      "name": "Replicate",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "GET https://api.replicate.com/v1/account (Bearer r8_...) -> type/username/name/github_url (validation only). GET https://api.replicate.com/v1/predictions?created_after=&created_before= (100/page) -> per-prediction model, status, metrics.predict_time/total_time and, for official language models, token metrics such as input_token_count/output_token_count/tokens_per_second; NO cost field. CORS: preflight to api.replicate.com returned 200 with no Access-Control-Allow-Origin (probed) -> not callable from file:// without a proxy.",
+          "endpointOrPath": "GET https://api.replicate.com/v1/account ; GET https://api.replicate.com/v1/predictions",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://replicate.com/docs/reference/http"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Dashboard only: https://replicate.com/account/billing (current usage, spend by model, prepaid credit or arrears, Manage billing / invoices). No documented CSV export or billing/spend API; no local logs.",
+          "endpointOrPath": "https://replicate.com/account/billing",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://replicate.com/docs/topics/billing"
+        }
+      ],
+      "bestMethod": "None from a pure file:// page (API is CORS-blocked). With a proxy: list predictions and estimate cost from predict_time x hardware rate or official-model token prices.",
+      "dataQuality": "none",
+      "confidence": "medium",
+      "notes": "Even key validation fails from the browser due to missing CORS headers (verified by preflight). Predictions list gives history but cost must be computed client-side from published prices; billing is compute-time for community models and per-token/per-output for official models."
+    },
+    {
+      "name": "Anyscale",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "none",
+          "howItWorks": "Anyscale Endpoints (the per-token OpenAI-compatible LLM API) was shut down in Aug 2024. What remains is the Anyscale Platform (managed Ray, compute credits). Usage lives in Organization Settings > Usage (credits/USD by cloud, project, user, instance type, cluster; admins can download usage reports/CSV; an 'aggregated instance usage' CLI exists). No LLM token metering, no public usage REST endpoint suitable for a browser page.",
+          "endpointOrPath": "Anyscale console: Organization Settings > Usage (CSV download for admins)",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.anyscale.com/administration/billing/usage-dashboard"
+        }
+      ],
+      "bestMethod": "None; recommend removing Anyscale from the LLM-usage tracker or treating it as compute spend via CSV import only.",
+      "dataQuality": "none",
+      "confidence": "high",
+      "notes": "Not an LLM token vendor anymore. If a user self-hosts vLLM/Ray Serve on Anyscale, token usage would have to be scraped from their own app metrics, not from Anyscale."
+    }
+  ],
+  "verifications": [
+    {
+      "name": "Gemini CLI",
+      "confirmed": true,
+      "correction": "Exact-token claim is TRUE as of Aug 2026, but the recipe needs three updates and a major context change:\n\n1) FILE FORMAT CHANGED (v0.39.0, PR #23749 merged 2026-04-09): new sessions are `session-<YYYY-MM-DDTHH-mm>-<sid8>.jsonl` (append-only JSON Lines) in `~/.gemini/tmp/<project_hash>/chats/`; legacy `session-*.json` are still read and are renamed in place to `.jsonl` when resumed. Glob must be `session-*.json` AND `session-*.jsonl`; subagent sessions live in `chats/<parentSid>/<sid>.jsonl`. JSONL layout: first line = ConversationRecord metadata (sessionId, projectHash, startTime, lastUpdated, kind), then MessageRecord lines; updates arrive as `{\"$set\":{...}}` and rewinds as `{\"$rewindTo\":id}` — dedupe by message id, last write wins. Token fields (packages/core/src/services/chatRecordingTypes.ts, TokensSummary): `tokens:{input,output,cached,thoughts?,tool?,total}` on `type:\"gemini\"` messages, plus `model` per message; sourced from the API usageMetadata of each API call (promptTokenCount/candidatesTokenCount/cachedContentTokenCount/thoughtsTokenCount/toolUsePromptTokenCount/totalTokenCount) — exact per model, no cost. Sources: https://github.com/google-gemini/gemini-cli/pull/23749 ; https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/services/chatRecordingService.ts ; https://ccusage.com/guide/gemini/ (reads *.json and *.jsonl, \"experimental while format evolves\").\n\n2) TELEMETRY: confirmed unchanged — settings `telemetry:{enabled:true,target:\"local\",outfile:\".gemini/telemetry.log\"}` / GEMINI_TELEMETRY_ENABLED / GEMINI_TELEMETRY_OUTFILE; `gemini_cli.api_response` carries input/output/cached_content/thoughts/tool/total_token_count; metrics gemini_cli.token.usage and gen_ai.client.token.usage (https://geminicli.com/docs/cli/telemetry/).\n\n3) AUTH LANDSCAPE CHANGED (2026-06-18): Google stopped serving Gemini CLI for \"Login with Google\" consumer tiers (Code Assist for individuals, Google AI Pro, AI Ultra); those users are pointed to Antigravity CLI (agy) or must use a paid Gemini API key / Vertex; Code Assist Standard/Enterprise OAuth unaffected (https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals, updated 2026-06-23; geminicli.com auth/quota pages carry the June 18 banner). So the note \"Google-account (Code Assist free/Pro) quota not exposed\" is obsolete for consumers. For remaining OAuth (Standard/Enterprise) users, quota IS fetchable programmatically via internal endpoint POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota with Bearer token from ~/.gemini/oauth_creds.json (per-model remainingFraction, resetTime) — internal, not public, cors-blocked; the CLI's `/stats model` shows token counts + quota. Antigravity CLI stores conversations elsewhere (~/.gemini/antigravity-cli/conversations/*.db) — separate connector if needed.\n\nMinor: GEMINI_CLI_HOME makes the CLI create `.gemini` INSIDE that dir ($GEMINI_CLI_HOME/.gemini/tmp/...), not a direct replacement of ~/.gemini. Docs show maxCount:50 only as an example (defaults: maxAge 30d, minRetention 1d; no default maxCount stated). Checkpoints (/resume save, /chat save alias) are documented as saved under ~/.gemini/tmp/<project_hash>/ (no separate `checkpoints\\` folder documented). Gemini CLI itself is still actively released (v0.56 nightlies, Aug 2026)."
+    },
+    {
+      "name": "LM Studio",
+      "confirmed": true,
+      "correction": "VERDICT: The exact-token claim is TRUE as of Aug 2026, with one material correction (no per-message timestamps) and a few caveats.\n\nCONFIRMED (fresh sources):\n1. Storage path: lmstudio.ai/docs/app/basics/chat (current) says conversations live at ~/.lmstudio/conversations/ (Mac/Linux) and %USERPROFILE%\\.lmstudio\\conversations (Windows), stored as JSON, and warns \"It is NOT recommended to edit them manually, nor to rely on their structure.\" Legacy ~/.cache/lm-studio is real: 0.3.6 release notes say the home dir moved to ~/.lmstudio for first-time installs only and existing data is NOT migrated.\n2. genInfo shape: lmstudio-js packages/lms-shared-types/src/llm/LLMPredictionStats.ts (main) defines `LLMGenInfo { indexedModelIdentifier, identifier, loadModelConfig, predictionConfig, stats: LLMPredictionStats }` and LLMPredictionStats with stopReason, tokensPerSecond, timeToFirstTokenSec, totalTimeSec, promptTokensCount, predictedTokensCount, totalTokensCount (+ draft-token fields); ProcessingUpdate.ts has the \"contentBlock.attachGenInfo\" update that attaches it to content blocks.\n3. On-disk proof: a real file, github.com/nithinshyam13/lmstudio-export-chat/blob/main/example.conversation.json (createdAt 1738533873461 = Feb 2025), has assistant messages at messages[i].versions[j].steps[k] with type \"contentBlock\" and `genInfo: { indexedModelIdentifier: \"Qwen/Qwen2.5-Coder-14B-Instruct-GGUF/...\", identifier: \"qwen2.5-coder-14b-instruct\", stats: { stopReason: \"eosFound\", tokensPerSecond: 12.0, numGpuLayers: -1, timeToFirstTokenSec: 1.251, promptTokensCount: 31, predictedTokensCount: 30, totalTokensCount: 61 } }`. Independent parsers (Wontfallo LMStudio_JSON_Parse.py reads steps[].genInfo.identifier; mike7seven/lmstudio-json-to-md sanitizer strips version-level \"genInfo\",\"stats\",\"senderInfo\") corroborate the layout.\n4. No built-in aggregation: lmstudio-bug-tracker issue #1840 (opened 22 Apr 2026 against v0.4.12) is an OPEN feature request asking LM Studio to store/display total and per-model token usage — i.e., no usage dashboard/export exists; the JSON files are the only history source. 0.4.0 (released 28 Jan 2026) added chat export to PDF/Markdown/plain text but those exports do not carry stats.\n5. Server: CORS is disabled by default (`lms server start --cors` docs: \"When not set, CORS is disabled\"; Server Settings has an \"Enable CORS\" switch and \"Require Authentication\" token option). /api/v0/chat/completions returns both `usage {prompt_tokens, completion_tokens, total_tokens}` and `stats {tokens_per_second, time_to_first_token, generation_time, stop_reason}` (docs now steer to v1). POST /api/v1/chat returns `stats { input_tokens, total_output_tokens, reasoning_output_tokens, tokens_per_second, time_to_first_token_seconds, model_load_time_seconds }` and `response_id`/`previous_response_id` for continuation; no list-past-chats endpoint. Server logs at ~/.lmstudio/server-logs (0.3.26 blog) and `lms log stream --source server|model --stats --json` confirmed.\n\nCORRECTIONS / CAVEATS to the best-method sentence:\nA. \"with model identifier and timestamps\" is only half right: the conversation file has NO per-message timestamp. The only time field is the root-level `createdAt` (epoch ms) of the conversation (plus what the File System Access API gives you: file.lastModified). So per-message time series must be bucketed by conversation createdAt or file mtime, not by message time.\nB. Every stats field is optional in the schema (`number | undefined`); promptTokensCount/predictedTokensCount can be absent on cancelled/failed predictions or older files — sum defensively.\nC. On disk, genInfo may omit loadModelConfig/predictionConfig (the real example only had indexedModelIdentifier, identifier, stats); and 0.4.x files add \"singleStep\"/\"multiStep\" version types and reasoning_content — parse both versions[].steps[] (contentBlock) and versions[].content[]. Root also carries `tokenCount` (current context size of the chat, not cumulative usage) and `lastUsedModel.indexedModelIdentifier`.\nD. Structure remains officially unsupported (\"nor to rely on their structure\"), so treat the parser as best-effort and version-tolerant.\n\nSources: https://lmstudio.ai/docs/app/basics/chat ; https://github.com/lmstudio-ai/lmstudio-js/blob/main/packages/lms-shared-types/src/llm/LLMPredictionStats.ts ; https://raw.githubusercontent.com/nithinshyam13/lmstudio-export-chat/main/example.conversation.json ; https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1840 ; https://lmstudio.ai/blog/0.4.0 ; https://lmstudio.ai/blog/lmstudio-v0.3.6 ; https://lmstudio.ai/docs/developer/rest/chat ; https://lmstudio.ai/docs/developer/rest/endpoints ; https://lmstudio.ai/docs/cli/serve/server-start ; https://lmstudio.ai/docs/cli/serve/log-stream ; https://lmstudio.ai/blog/lmstudio-v0.3.26 ; https://github.com/mike7seven/lmstudio-json-to-md"
+    },
+    {
+      "name": "LocalAI",
+      "confirmed": true,
+      "correction": "VERDICT: The core claim is TRUE as of 16 Aug 2026 (master @ 1e3e72e; latest release v4.8.2, published 2026-08-07). LocalAI has a real server-side, time-bucketed usage-history API returning exact server-counted tokens, plus Prometheus counters on /metrics. Verified directly against the repo (sparse-cloned master) and the GitHub API. Minor corrections/nuances below.\n\nCONFIRMED (with source):\n- core/http/routes/usage.go exists: registers GET /api/usage (own usage; falls back to synthetic \"local\" user when auth is off) and GET /api/usage/all (admin; same data as /api/usage in no-auth mode). Query param period=day|week|month|all (default month); /api/usage/all also accepts user_id. Response = {usage:[UsageBucket...], totals:{prompt_tokens,completion_tokens,total_tokens,request_count}, viewer:{id,name,role,provider}}. UsageBucket JSON tags (core/http/auth/usage.go): bucket, model, user_id, user_name, source, api_key_id, api_key_name, prompt_tokens, completion_tokens, total_tokens, request_count (snake_case, as claimed). Bucketing: day->hourly, week/month->daily, all->monthly (auth.periodToWindow; mirrored in billing/inmem.go).\n- Storage (core/application/startup.go L211-231): when authDB != nil -> billing.NewGormBackend(authDB) (durable, SQLite/Postgres via --auth-database-url, usage_records table); otherwise billing.NewMemoryBackend(0) = in-memory ring buffer of 50,000 records (\"stats: using in-memory ring buffer (no-auth single-user mode)\") — lost on restart, as claimed. GORM backend buffers up to 5k records with a 5s flush tick, so /api/usage can lag a few seconds under auth.\n- Recording (core/http/middleware/usage.go): UsageMiddleware records every OpenAI-shaped (prompt_tokens/completion_tokens) and Anthropic-shaped (input_tokens/output_tokens) response; streaming handled via handler StampUsage in openai/chat.go, completion.go, edit.go, embeddings.go, moderations.go, anthropic/messages.go. Recorder runs in every mode (auth on/off) — token tracking is not gated on auth. Feature landed in commit 6a80e237 \"feat(middleware): Model routing, PII filtering, Cloud model proxies (#9802)\" on 2026-05-25T07:28:27Z (date correct).\n- /metrics (core/http/routes/localai.go L217-219): registered unless --disable-metrics-endpoint (LOCALAI_DISABLE_METRICS_ENDPOINT); guarded by adminMiddleware which is a no-op without auth and RequireAdmin() with auth. billing/prom.go defines localai_tokens_total{user,served_model,kind}, localai_cost_usd_total{user,served_model}, localai_billed_requests_total{user,served_model,endpoint}, localai_usage_unrecorded_total{endpoint,reason}, bound to the same meter as /metrics (billing.SetMeter in startup.go).\n- CORS/CSRF (core/http/app.go L403-457): when LOCALAI_CORS is unset -> e.Use(middleware.CORS()) (Echo default, Access-Control-Allow-Origin *); LOCALAI_CORS=true with empty allowlist refuses to register wildcard and warns. CSRF (Echo Sec-Fetch-Site mode) is on by default, disabled by LOCALAI_DISABLE_CSRF=true, and skipped when Authorization / x-api-key / xi-api-key header present or Sec-Fetch-Site absent; Echo CSRF ignores safe methods, so GET /api/usage and GET /metrics are browser-callable from file:// as claimed.\n- Auth-mode endpoints exist in core/http/routes/auth.go: GET /api/auth/usage (L762), /api/auth/usage/sources (L793), /api/auth/admin/usage (L1105), /api/auth/admin/usage/sources (L1132). Discussion #9971 is the v4.3.0 (24 May 2026) release post and mentions the /api/auth/usage/sources per-key tracking.\n- Legacy API keys (--api-keys / LOCALAI_API_KEY / API_KEY) accepted as Bearer or x-api-key (core/http/auth/middleware.go), yielding a synthetic admin user; so /api/usage works with a static key when auth is off but keys are set.\n- givesCost \"none\" stands: UsageRecord has CostUSD/PricingVersionID fields and localai_cost_usd_total exists, but nothing in the codebase populates cost (no pricing wiring) — always 0.\n\nCORRECTIONS:\n1. Version: it first shipped in v4.3.2 (2026-05-27), not \"v4.4+\". The commit landed 19 s after the v4.3.1 tag (v4.3.1 has no core/http/routes/usage.go — 404 on raw.githubusercontent; v4.3.2 has it — 200). v4.4.0 was 2026-06-10.\n2. \"--disable-stats\" is NOT a real CLI flag on master. config.ApplicationConfig.DisableStats / WithDisableStats exist and code comments plus the 503 stub message reference \"--disable-stats\", but core/cli/run.go has no such kong flag or LOCALAI_DISABLE_STATS env var and WithDisableStats is never called outside tests. In a stock binary stats are always on and /api/usage never returns 503. (Could change if the flag gets wired later.)\n3. Flag names: the auth flag is --auth-enabled (env LOCALAI_AUTH), not --auth; auth is also implicitly enabled by --github-client-id / --oidc-client-id. CSRF disable is --disable-csrf / LOCALAI_DISABLE_CSRF (the localai.io CLI reference page is stale — it still lists a Fiber-era \"--csrf\" flag; the code is Echo-based).\n4. Under auth, /metrics requires an admin session/key (RequireAdmin); only in no-auth mode is it open.\n5. The comparative \"only local runner with a real server-side usage-history API\" is plausible but not exhaustively verified: llama.cpp llama-server exposes cumulative Prometheus counters (opt-in --metrics) and per-response timings, LM Studio/Ollama expose per-response usage only; none found with a time-bucketed history REST endpoint. Treat as \"no counter-example found\", not proven.\n\nSources: https://raw.githubusercontent.com/mudler/LocalAI/master/core/http/routes/usage.go ; https://raw.githubusercontent.com/mudler/LocalAI/master/core/http/auth/usage.go ; https://raw.githubusercontent.com/mudler/LocalAI/master/core/services/routing/billing/prom.go ; https://raw.githubusercontent.com/mudler/LocalAI/master/core/services/routing/billing/inmem.go ; https://raw.githubusercontent.com/mudler/LocalAI/master/core/application/startup.go ; https://raw.githubusercontent.com/mudler/LocalAI/master/core/http/app.go ; https://raw.githubusercontent.com/mudler/LocalAI/master/core/cli/run.go ; https://api.github.com/repos/mudler/LocalAI/releases ; https://api.github.com/repos/mudler/LocalAI/commits?path=core/http/routes/usage.go ; https://github.com/mudler/LocalAI/discussions/9971 ; https://localai.io/docs/reference/cli-reference/"
+    },
+    {
+      "name": "DeepSeek API",
+      "confirmed": true,
+      "correction": "Claim holds as of Aug 2026: /user/balance is balance-only (no history) and the platform monthly export gives exact per-day / per-model / per-API-key token counts. Refinements found in fresh sources: (1) Column names ARE known from a real May-2026 export sample (github.com/Weigaohan/Deepseek_usage_dashboard tests/test-samples): amount-*.csv = `user_id,utc_date,model,api_key_name,api_key(masked sk-xxx***),type,price,amount` where `type` in {output_tokens, input_cache_hit_tokens, input_cache_miss_tokens, request_count}; cost-*.csv = `user_id,utc_date,model,wallet_type(Paid/...),cost,currency(CNY|USD)`. Still sniff headers, but these are the expected ones. (2) \"Both files needed to compute cost\" is a deepseek-usage.xyz tool policy, not a data constraint: amount-*.csv already carries unit `price`, so per-key cost = sum(price*amount) is computable from it alone (github.com/shajanjp/deepseek-usage does exactly this); cost-*.csv is DeepSeek's billed figure per day/model/wallet_type (no per-key breakdown) — treat it as authoritative 'billed' and use amount-derived cost for per-key split. (3) Date formats differ between files and have changed over time (`2026/5/3` in amount, `2026-05-03` in cost; shajanjp notes YYYYMMDD vs YYYY-MM-DD) and api_key_name may be non-UTF-8 (GBK mojibake in sample) — normalize dates and detect encoding on import. (4) The export button calls an undocumented console endpoint `GET https://platform.deepseek.com/api/v0/usage/export?start=<unix>&end=<unix>&tz=0` (Authorization: Bearer <platform login token, not sk- key>) returning the ZIP, plus `GET /api/v0/users/get_user_summary` (JSON) — a possible session-token method, unofficial/fragile, browser-callability not verified. (5) Official API docs (api-docs.deepseek.com; changelog through Aug 13 2026) still list no usage-history endpoint. Sources: https://api-docs.deepseek.com/api/get-user-balance/ ; https://api-docs.deepseek.com/updates ; https://deepseek-usage.xyz/ ; https://raw.githubusercontent.com/Weigaohan/Deepseek_usage_dashboard/main/tests/test-samples/sample-amount.csv ; https://raw.githubusercontent.com/Weigaohan/Deepseek_usage_dashboard/main/tests/test-samples/sample-cost.csv ; https://raw.githubusercontent.com/shajanjp/deepseek-usage/main/lib/deepseek.js ; https://github.com/luisleineweber/usagebar/blob/main/docs/providers/deepseek.md"
+    },
+    {
+      "name": "Azure OpenAI (Microsoft Foundry)",
+      "confirmed": true,
+      "correction": "VERDICT (Aug 16 2026): The exact-token claim is TRUE. Azure Monitor platform metrics on Microsoft.CognitiveServices/accounts give exact per-deployment token totals via GET https://management.azure.com/{resourceId}/providers/microsoft.insights/metrics — verified against the current Learn reference (ms.date 2026-05-19, https://learn.microsoft.com/en-us/azure/foundry/openai/monitor-openai-reference): ProcessedPromptTokens, GeneratedTokens, TokenTransaction (legacy \"Azure OpenAI - Usage\") and InputTokens, OutputTokens, TotalTokens (newer \"Models - Usage\") all exist, unit Count, aggregation Total(Sum), PT1M, dimensions ModelDeploymentName/ModelName/ModelVersion/ApiName/Region; AzureOpenAIRequests, cacheReadInputTokens / ephemeral1h/5mInputTokens (Anthropic deployments), AudioPromptTokens etc. also exist. api-version=2024-02-01 is a real ARM metrics version (azure-rest-api-specs Microsoft.Insights/Insights/stable/2024-02-01/metrics.json; Learn REST reference defaults to 2023-10-01, both work). Retention 93 days confirmed (data-platform-metrics, ms.date 2026-08-07). CORS re-probed today: OPTIONS and GET on management.azure.com return Access-Control-Allow-Origin: *, Allow-Headers authorization,content-type, Allow-Methods GET,POST,... — so both metrics and Cost Management Query are browser-callable from file:// with a pasted bearer token. `az account get-access-token` (default audience = ARM; --resource still supported; token 5–60 min) confirmed (az account ref, 2026-08-04). Cost Management Query API 2025-03-01 still documented and body shape (type Usage/ActualCost/AmortizedCost, timeframe Custom+timePeriod, granularity Daily, up to 2 aggregations incl. PreTaxCost/UsageQuantity, up to 2 groupings, dimension filter) is correct.\n\nCORRECTIONS / UPDATES needed in the claim:\n1) Cost query filter `ServiceName In ['Cognitive Services']` is stale for 2026 usage. The Azure Retail Prices meter catalog (queried live today, prices.azure.com) now lists every Azure OpenAI meter (incl. old ones like gpt-4o-0806-Inp-glbl) under serviceName \"Foundry Models\" (productName \"Azure OpenAI\", \"Azure OpenAI GPT5\", \"Azure OpenAI Media\"...), and legacy Cognitive Services meters (Speech, Language, Vision...) under \"Foundry Tools\"; serviceName \"Cognitive Services\" returns 0 rows. Cost Management's ServiceName dimension = MeterCategory, so new usage rows will likely carry \"Foundry Models\" (older months keep \"Cognitive Services\"). Learn's manage-costs page (updated 2026-08-15) still says \"Cognitive Services\" + Service tier \"Azure OpenAI\", so docs lag. Fix: filter on ResourceType/ResourceId (Microsoft.CognitiveServices/accounts) or ServiceName In ['Cognitive Services','Foundry Models'] and/or MeterSubCategory/ServiceTier 'Azure OpenAI'; do not hard-code one name.\n2) \"Usage rows are per-1K-token meters so tokens = Quantity x 1000\" is only partly true. Live meter catalog for eastus2 shows mixed units: ~400 meters \"1K\", ~110 \"1M Tokens\" (gpt-realtime*, gpt-image-1.5, gpt-latest, gpt-4o-mini-tts/transcribe, etc.), plus \"1 Hour\" (fine-tune hosting). MS Q&A 2026-04-01 (moderator) also shows \"1M Tokens\" meters. Must read UnitOfMeasure per row (1K vs 1M) before converting; grouping by Meter and reading UnitOfMeasure is required.\n3) Newer Cost Management API version exists: 2026-06-01 is now the default doc moniker (2025-03-01 still valid).\n4) Metrics API nuances: metricnames limited to 20 per call; when using $filter (ModelDeploymentName eq '*') the `top` param defaults to 10 time series — set top explicitly or deployments >10 are silently dropped. AzureOpenAIContextTokensCacheMatchRate applies to PTU/PTU-managed only (not Standard PAYG), so cached-input discounts for Standard deployments cannot be derived from metrics; ActiveTokens is PTU-only.\n5) \"Exact\" ≠ billing-authoritative: Learn (manage-costs, 2026-04-06/08-15) says treat Cost Management meter data/invoice as source of truth and notes token charts can temporarily differ from cost because of ingestion timing; MS Q&A answers (2025-07, 2026-04) say API usage fields are not a billing contract. Metrics also don't split cached vs uncached input or batch/priority tiers, so cost cannot be reconstructed from tokens alone — keep givesCost:none for metrics and givesTokens:estimated for Cost data.\n6) Scope note: Marketplace/partner models (and Claude, which now has CCU billing) are metered separately (Marketplace \"Global\" resources / different meters), so a Cognitive-Services-only filter misses them; Azure OpenAI/MS-sold models are the ones covered by the described filter.\n\nSources: https://learn.microsoft.com/en-us/azure/foundry/openai/monitor-openai-reference ; https://learn.microsoft.com/en-us/rest/api/cost-management/query/usage (default view 2026-06-01) ; https://learn.microsoft.com/en-us/rest/api/monitor/metrics/list ; https://github.com/Azure/azure-rest-api-specs/tree/main/specification/monitor/resource-manager/Microsoft.Insights/Insights/stable/2024-02-01 ; https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/data-platform-metrics ; https://learn.microsoft.com/en-us/azure/azure-monitor/platform/rest-api-walkthrough ; https://learn.microsoft.com/en-us/azure/foundry/concepts/manage-costs ; https://learn.microsoft.com/en-us/cli/azure/account#az-account-get-access-token ; https://prices.azure.com/api/retail/prices?$filter=armRegionName eq 'eastus2' and contains(meterName,'gpt') ; https://learn.microsoft.com/en-us/answers/questions/5845915/azure-openai-realtime-api-token-usage-from-respons ; https://learn.microsoft.com/en-us/answers/questions/5488278/azure-openai-realtime-api-token-usage-vs-billing-m"
+    },
+    {
+      "name": "Google Vertex AI",
+      "confirmed": true,
+      "correction": "VERDICT (Aug 2026): the exact-token claim holds. Cloud Monitoring still lists aiplatform.googleapis.com/publisher/online_serving/token_count on monitored resource aiplatform.googleapis.com/PublisherModel (DELTA, INT64, \"Accumulated input/output token count\", launch stage BETA), with metric labels type (input/output), request_type (dedicated/shared), shared_request_type, explicit_caching, accounting_resource, modality, max_token_size, source (global/us/eu/region) — https://docs.cloud.google.com/monitoring/api/metrics_gcp_a_b . PublisherModel resource labels are resource_container, location, publisher, model_user_id, model_version_id — https://docs.cloud.google.com/monitoring/api/resources — so grouping by resource.labels.model_user_id + metric.labels.type is valid. Live probes today: OPTIONS preflight on monitoring.googleapis.com and bigquery.googleapis.com with \"Origin: null\" returns Access-Control-Allow-Origin: null (CORS confirmed); GET timeSeries with ?key= returns 401 \"API keys are not supported by this API. Expected OAuth2 access token\" (API-key claim confirmed). No Cloud Billing REST endpoint returns incurred cost — cloudbilling.googleapis.com is Account/Pricing(Catalog)/Budget only; BigQuery export remains the programmatic path (https://docs.cloud.google.com/billing/docs/apis ; https://discuss.google.dev/t/how-to-programmatically-retrieve-gcp-billing-cost-api-vs-bigquery-export/257728).\n\nRefinements to record (not falsifications):\n1) Branding: on 22 Apr 2026 Google rebranded Vertex AI as \"Gemini Enterprise Agent Platform\"; the API stays aiplatform.googleapis.com and metric names/monitoring are unchanged, but docs moved under docs.cloud.google.com/gemini-enterprise-agent-platform/ (e.g. model observability page https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/model-observability). Consider labelling the platform \"Google Vertex AI (now Gemini Enterprise Agent Platform)\". Source: https://gcpstudyhub.com/blog/vertex-ai-replaced-by-gemini-enterprise-agent-platform , https://cloud.google.com/products/gemini-enterprise-agent-platform .\n2) Scope of \"exact\": token_count is BETA, sampled every 60 s with up to 360 s visibility delay, and covers online-serving calls to model endpoints only (Gemini and partner/MaaS models incl. Anthropic). Batch prediction jobs and Vertex AI Studio console usage are not captured (model-observability doc: \"captures metrics only for API calls to a model's endpoint... Vertex AI Studio aren't added\"), so metric totals can be lower than billed totals. Wording should be \"exact for API traffic\", not \"matches invoice\".\n3) Metric name nit: publisher/online_serving/consumed_throughput is character-based (\"tokens x4\"); the token-based one is publisher/online_serving/consumed_token_throughput. Also publisher/online_serving/tokens (DISTRIBUTION) exists.\n4) Cost/BigQuery method: usage.amount on Gemini token SKUs in the billing export / Billing Reports grouped by SKU is the billed token count (forum answer shows exact per-SKU token counts), so givesTokens for that method could be \"billed\" rather than \"estimated\"; billing data lags (hours to a day). Custom metadata labels on generateContent calls (https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/add-labels-to-api-calls) allow per-label cost breakdown in reports and the export.\n5) The Firebase AI Logic doc's line that \"Google Cloud console pages ... do not include ... token count\" refers to the APIs & Services dashboards, not to the aiplatform token_count metric, so it does not contradict the claim (https://firebase.google.com/docs/ai-logic/monitoring)."
+    }
+  ]
+}
