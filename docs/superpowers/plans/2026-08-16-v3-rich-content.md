@@ -264,7 +264,9 @@ const Insights = {
 
 ### Task 3: Insights row UI + calendar heatmap
 
-**Files:** Modify `AI Usage Dashboard.html`, Create `tests/checks/92-insights-ui.mjs`
+**Files:** Modify `AI Usage Dashboard.html`, Create `tests/checks/92-insights-ui.mjs`, Modify `tests/checks/91-insights-math.mjs`
+
+- [ ] **Step 0 — projection month-start fix (from T2 review).** `Insights.projection` filters rows to the current month BEFORE building `byDay`, so the 7-day pace reads zero for the first week of every month. Fix: build `byDay` from ALL rows (no month filter) and compute `mtd` only from current-month rows. Failing check first — append inside 91-insights-math's try: today `2026-09-03`, rows $2/day Aug 25–31 and $5/day Sep 1–2 → `mtd 10`, `avgDaily` = (5+5+2+2+2+2+2)/7 = 20/7 ≈ 2.857, `projected` = 10 + 20/7 × 27. Name `'insights: projection pace spans month boundary'`. RED pre-fix (avgDaily 10/7 ≈ 1.43). Then in `projection`: replace the loop body with `for (const r of rows) { const c = costOf(r); byDay.set(r.d, (byDay.get(r.d) || 0) + c); if (r.d.startsWith(ym)) mtd += c; }`. GREEN.
 
 - [ ] **Step 1 — failing checks.** Create `tests/checks/92-insights-ui.mjs`:
 
