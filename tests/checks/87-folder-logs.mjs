@@ -467,6 +467,25 @@ export async function run({ browser, ok }) {
     ok('imports: drop zone routes both formats to their own sources (generic csv untouched); badge + srcIds + PLATFORM_ORDER list them',
       ex.srcT && ex.srcC && ex.genericCsvUntouched && /Gemini Takeout/.test(ex.notes) && /Cursor/.test(ex.notes) && /Takeout/.test(ex.badge) && /Cursor/.test(ex.badge)
       && ex.imports.includes('gemini-takeout') && ex.imports.includes('cursor-csv') && ex.order.includes('Gemini app') && ex.order.includes('Cursor'), JSON.stringify({ notes: ex.notes, badge: ex.badge, imports: ex.imports }));
+
+    // rescanFolder: a stored handle whose permission is DENIED must not fall through to the folder
+    // picker — show a status line about the permission and stop; the picker opens only with NO stored handle.
+    const denied = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const origPick = App.pickFolderFor, origScan = App.scanFolder;
+      let picks = 0, scans = 0; App.pickFolderFor = async () => { picks++; }; App.scanFolder = async () => { scans++; };
+      App._dirHandles.aider = { queryPermission: async () => 'prompt', requestPermission: async () => 'denied' };
+      await App.rescanFolder('aider');
+      const status = (App._scanStatusEl('aider') || {}).textContent || '';
+      const out = { picks, scans, status };
+      delete App._dirHandles.aider;
+      await App.rescanFolder('aider');   // no stored handle → picker IS the right path
+      out.picksNoHandle = picks;
+      App.pickFolderFor = origPick; App.scanFolder = origScan;
+      return out;
+    });
+    ok('rescanFolder: denied permission on a stored handle → no picker, no scan, status mentions the permission (picker only when no handle is stored)',
+      denied.picks === 0 && denied.scans === 0 && /permission/i.test(denied.status) && /Pick folder|Choose/i.test(denied.status) && denied.picksNoHandle === 1, JSON.stringify(denied));
   } finally {
     await page.close();
   }

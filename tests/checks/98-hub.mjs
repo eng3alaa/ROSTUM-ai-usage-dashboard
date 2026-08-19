@@ -200,6 +200,49 @@ export async function run({ browser, ok }) {
     ok('hub: failed import does not fake a connected imports card',
       failedImport.connectorsImports === undefined && /\boff\b/.test(failedImport.dot),
       JSON.stringify(failedImport));
+
+    // hub search defects: (a) hiding cards while a query is typed hides the box (≤12 rule) —
+    // the query must then be dropped, not silently keep filtering; (b) a query that matches
+    // nothing renders an honest note (textContent) instead of a blank hub; (c) Enter on a
+    // card's action button must not ALSO fire the card's drill-down.
+    const hubSearch = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load(); App._hubQuery = '';
+      App._render();
+      const box = document.getElementById('hub-search');
+      const total = document.querySelectorAll('#accounts-hub .acct').length;   // 17 registry cards → box shown
+      const boxShownBefore = !box.hidden;
+      box.value = 'e'; box.dispatchEvent(new Event('input', { bubbles: true }));
+      const matched = [...document.querySelectorAll('#accounts-hub .acct')].map(c => c.dataset.connector);
+      // hide 5 of the matching cards → 12 un-hidden → box hides → query must be dropped
+      for (const id of matched.slice(0, 5)) View.hideCard(id);
+      App._render();
+      const afterHide = { boxHidden: box.hidden, boxValue: box.value, q: App._hubQuery, n: document.querySelectorAll('#accounts-hub .acct').length,
+        unhidden: CONNECTORS.filter(c => !View.isCardHidden(c.id)).length, nomatch: !!document.querySelector('#accounts-hub .hub-nomatch') };
+      // (b) restore all, query that matches nothing → note carries the query text
+      View.showAllCards(); App._render();
+      box.value = 'zzz'; box.dispatchEvent(new Event('input', { bubbles: true }));
+      const note = document.querySelector('#accounts-hub .hub-nomatch');
+      const noMatch = { n: document.querySelectorAll('#accounts-hub .acct').length, note: note ? note.textContent : null, boxHidden: box.hidden };
+      box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true }));
+      // (c) Enter on an action button
+      const orig = App.drillDown; let drills = 0; App.drillDown = () => { drills++; };
+      const btn = document.querySelector('#accounts-hub .acct[data-connector="anthropic"] .acct-manage');
+      btn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      const card = document.querySelector('#accounts-hub .acct[data-connector="anthropic"]');
+      card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));   // control: Enter on the card itself still drills
+      App.drillDown = orig;
+      const autocomplete = box.getAttribute('autocomplete');
+      return { total, boxShownBefore, matched: matched.length, afterHide, noMatch, drills, autocomplete, restored: document.querySelectorAll('#accounts-hub .acct').length };
+    });
+    ok('hub: hiding cards down to ≤12 while a query is typed hides the box AND drops the query (all un-hidden cards render, no stale filter)',
+      hubSearch.total === 17 && hubSearch.boxShownBefore && hubSearch.matched > 5 && hubSearch.matched < 17 &&
+      hubSearch.afterHide.boxHidden && hubSearch.afterHide.unhidden === 12 && hubSearch.afterHide.n === 12 && hubSearch.afterHide.q === '' && hubSearch.afterHide.boxValue === '' && !hubSearch.afterHide.nomatch,
+      JSON.stringify(hubSearch));
+    ok('hub: a query matching nothing renders a "No accounts match" note carrying the query text (box stays visible; autocomplete off)',
+      hubSearch.noMatch.n === 0 && /No accounts match/.test(hubSearch.noMatch.note || '') && /zzz/.test(hubSearch.noMatch.note || '') && !hubSearch.noMatch.boxHidden &&
+      hubSearch.autocomplete === 'off' && hubSearch.restored === 17, JSON.stringify(hubSearch.noMatch));
+    ok('hub: Enter on a card action button does not fire the card drill-down (Enter on the card itself still does)', hubSearch.drills === 1, JSON.stringify({ drills: hubSearch.drills }));
   } finally {
     await page.close();
   }
