@@ -209,6 +209,41 @@ export async function run({ browser, ok }) {
       && cl.sid === '1786352400000' && cl.hourOk, JSON.stringify(cl));
     ok('cline/roo: one shared parser, two entries with their own platform strings and cards', cl.sameParser && cl.p1 === 'Cline' && cl.p2 === 'Roo Code' && cl.cards && cl.cats, JSON.stringify(cl));
 
+    // ---- T11b: tokensIn semantics (inclusive vs exclusive) + per-request model attribution from model_usage[] ----
+    const rooA = read('roo', 'tasks', '1786352600000', 'ui_messages.json'), rooM = read('roo', 'tasks', '1786352600000', 'task_metadata.json');
+    const clC = read('cline', 'tasks', '1786352700000', 'ui_messages.json'), clCM = read('cline', 'tasks', '1786352700000', 'task_metadata.json');
+    const cl2 = await page.evaluate(async (a, m, b, bm) => {
+      const mk = () => [
+        { path: 'tasks/1786352600000/ui_messages.json', file: new File([a], 'ui_messages.json', { lastModified: Date.parse('2026-08-12T12:00:00.000Z') }) },
+        { path: 'tasks/1786352600000/task_metadata.json', file: new File([m], 'task_metadata.json') },
+        { path: 'tasks/1786352700000/ui_messages.json', file: new File([b], 'ui_messages.json') },
+        { path: 'tasks/1786352700000/task_metadata.json', file: new File([bm], 'task_metadata.json') },
+      ];
+      const roo = await parseFolderCached(connectorById('roo'), mk(), null, new Map());
+      const cline = await parseFolderCached(connectorById('cline'), mk(), null, new Map());
+      const H = (iso) => new Date(iso).getHours();
+      const pick = (rows, sid, hour) => rows.filter(x => x.sid === sid && (hour == null ? x.hour == null : x.hour === hour)).map(x => [x.d, x.model, x.in, x.cw, x.cr, x.out, x.msgs]);
+      return {
+        rooOpus: pick(roo.rows, '1786352600000', H('2026-08-10T09:00:05.000Z')),
+        rooSonnet10: pick(roo.rows, '1786352600000', H('2026-08-10T10:00:05.000Z')),
+        rooSonnet11: pick(roo.rows, '1786352600000', H('2026-08-10T11:00:00.000Z')),
+        rooNoTs: pick(roo.rows, '1786352600000', null),
+        rooCl: pick(roo.rows, '1786352700000', H('2026-08-11T09:00:05.000Z')),
+        clineCl: pick(cline.rows, '1786352700000', H('2026-08-11T09:00:05.000Z')),
+        clineOpus: pick(cline.rows, '1786352600000', H('2026-08-10T09:00:05.000Z')),
+        n: roo.rows.length, msgs: roo.meta.msgs,
+      };
+    }, rooA, rooM, clC, clCM);
+    const J = JSON.stringify;
+    ok('cline/roo: model per request = model_usage entry with greatest ts <= request ts (sorted; first entry before any switch; last entry when ts missing)',
+      J(cl2.rooOpus.map(r => r[1])) === J(['claude-opus-4.1']) && J(cl2.rooSonnet10.map(r => r[1])) === J(['claude-sonnet-4.5']) && J(cl2.rooSonnet11.map(r => r[1])) === J(['claude-sonnet-4.5'])
+      && J(cl2.rooNoTs.map(r => [r[0], r[1]])) === J([['2026-08-12', 'claude-sonnet-4.5']]) && cl2.n === 5 && cl2.msgs === 5, J(cl2));
+    ok('roo: tokensIn is INCLUSIVE of cache → in = tokensIn - cacheReads - cacheWrites (openai proto 50000/45000 → in=5000 cr=45000; no-proto 2000/200/300 → in=1500); evidently-exclusive row (100 < 900) keeps in=100',
+      J(cl2.rooOpus) === J([['2026-08-10', 'claude-opus-4.1', 5000, 0, 45000, 100, 1]]) && J(cl2.rooSonnet10) === J([['2026-08-10', 'claude-sonnet-4.5', 1500, 200, 300, 50, 1]])
+      && J(cl2.rooSonnet11) === J([['2026-08-10', 'claude-sonnet-4.5', 100, 0, 900, 10, 1]]) && J(cl2.rooCl) === J([['2026-08-11', 'claude-sonnet-4.5', 500, 100, 400, 20, 1]]), J(cl2));
+    ok('cline: anthropic-provider rows stay additive (1000/100/400 → in=1000); apiProtocol openai rows subtract (→ in=5000)',
+      J(cl2.clineCl) === J([['2026-08-11', 'claude-sonnet-4.5', 1000, 100, 400, 20, 1]]) && J(cl2.clineOpus) === J([['2026-08-10', 'claude-opus-4.1', 5000, 0, 45000, 100, 1]]), J(cl2));
+
     // ---- T12: Aider ----
     const aiderText = read('aider', 'proj', '.aider.chat.history.md');
     const ai = await page.evaluate(async (text) => {

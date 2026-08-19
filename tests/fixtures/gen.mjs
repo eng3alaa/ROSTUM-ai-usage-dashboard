@@ -115,6 +115,28 @@ export async function generate() {
   ], null, 1));
   w('cline/tasks/1786352400000/task_metadata.json', JSON.stringify({ files_in_context: [], model_usage: [{ ts: T('2026-08-10T09:00:00.000Z'), model_id: 'claude-sonnet-4.5', model_provider_id: 'anthropic', mode: 'act' }] }));
   w('cline/tasks/1786352500000/ui_messages.json', '[{"ts":1786352500000,"type":"say","say":"api_req_started","text":"{\\"tokensIn\\":5');   // truncated file
+  // T11b — tokensIn semantics + per-request model attribution (checked in a SEPARATE file set so the T11 totals above stay put).
+  //   Roo task: model_usage deliberately out of order (sonnet@10:00 listed before opus@09:00) — parser must sort by ts and pick the
+  //   entry with the greatest ts <= request ts. Roo stores tokensIn INCLUSIVE of cache tokens → in = tokensIn - cacheReads - cacheWrites.
+  //     09:00:05 apiProtocol openai  tokensIn 50000 cacheReads 45000        → opus   in=5000  cr=45000 out=100
+  //     10:00:05 (no apiProtocol)    tokensIn 2000  cw 200 cr 300           → sonnet in=1500  cw=200 cr=300 out=50
+  //     11:00:00 apiProtocol openai  tokensIn 100   cacheReads 900          → sonnet in=100   cr=900 (evidently exclusive: never clamp to 0)
+  //     (no ts)  apiProtocol openai  tokensIn 300                           → sonnet (last entry when ts missing) in=300 out=5, day = file.lastModified
+  //   Cline task (provider anthropic, no apiProtocol): tokensIn 1000 cw 100 cr 400 → under cline in=1000 (exclusive/additive); under roo in=500.
+  w('roo/tasks/1786352600000/ui_messages.json', JSON.stringify([
+    req(T('2026-08-10T09:00:05.000Z'), { request: '…', tokensIn: 50000, tokensOut: 100, cacheWrites: 0, cacheReads: 45000, cost: 0.1, apiProtocol: 'openai' }),
+    req(T('2026-08-10T10:00:05.000Z'), { request: '…', tokensIn: 2000, tokensOut: 50, cacheWrites: 200, cacheReads: 300, cost: 0.01 }),
+    req(T('2026-08-10T11:00:00.000Z'), { request: '…', tokensIn: 100, tokensOut: 10, cacheWrites: 0, cacheReads: 900, cost: 0.001, apiProtocol: 'openai' }),
+    { type: 'say', say: 'api_req_started', text: JSON.stringify({ request: '…', tokensIn: 300, tokensOut: 5, cacheWrites: 0, cacheReads: 0, cost: 0.001, apiProtocol: 'openai' }) },
+  ], null, 1));
+  w('roo/tasks/1786352600000/task_metadata.json', JSON.stringify({ files_in_context: [], model_usage: [
+    { ts: T('2026-08-10T10:00:00.000Z'), model_id: 'claude-sonnet-4.5', model_provider_id: 'openrouter', mode: 'act' },
+    { ts: T('2026-08-10T09:00:00.000Z'), model_id: 'claude-opus-4.1', model_provider_id: 'openrouter', mode: 'plan' },
+  ] }));
+  w('cline/tasks/1786352700000/ui_messages.json', JSON.stringify([
+    req(T('2026-08-11T09:00:05.000Z'), { request: '…', tokensIn: 1000, tokensOut: 20, cacheWrites: 100, cacheReads: 400, cost: 0.005 }),
+  ], null, 1));
+  w('cline/tasks/1786352700000/task_metadata.json', JSON.stringify({ files_in_context: [], model_usage: [{ ts: T('2026-08-11T09:00:00.000Z'), model_id: 'claude-sonnet-4.5', model_provider_id: 'anthropic', mode: 'act' }] }));
 
   // T12 — Aider chat history. "sent" is the full prompt; cache write/hit are carved out. Expected (est):
   //   in = 8200 + (12000-2100-8000) + 500 = 10600 · cw=2100 · cr=8000 · out = 578+1200+50 = 1828 · msgs=3 · badLines=1 (unparseable Tokens line) · models gpt-5.4 (Aug 10) + claude-sonnet-4.5 (Aug 11)

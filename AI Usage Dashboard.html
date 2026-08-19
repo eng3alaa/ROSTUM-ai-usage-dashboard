@@ -1724,11 +1724,19 @@ async function parseContinueDevData(files, onProgress) {
 }
 
 /** Cline / Roo Code / Kilo Code — <globalStorage>/tasks/<taskId>/ui_messages.json (whole-file JSON array). Entries with
- *  say:'api_req_started' carry a JSON string in `text` {tokensIn, tokensOut, cacheWrites, cacheReads, cost}; entries
- *  still in flight have no token fields and are skipped. Model = last task_metadata.json model_usage[].model_id in the
- *  same task dir (handed in via siblingFiles — the driver's connector.siblings list, or `files` itself for direct callers).
- *  The dir→metadata index is built once per siblingFiles ARRAY (WeakMap by identity), so the driver's per-file calls
- *  do not rebuild it. Platform = connector.platform ('Cline' | 'Roo Code'). Dedupe by taskId:ts.
+ *  say:'api_req_started' carry a JSON string in `text` {tokensIn, tokensOut, cacheWrites, cacheReads, cost[, apiProtocol]};
+ *  entries still in flight have no token fields and are skipped. Model per request = the task_metadata.json
+ *  model_usage[] entry (append-on-change series {ts, model_id, model_provider_id, mode} on the same epoch-ms clock as
+ *  ui_messages ts; Plan/Act switching appends) with the greatest ts <= request ts — first entry for requests before the
+ *  first switch, last entry when the request has no ts. task_metadata.json is found in the same task dir (handed in via
+ *  siblingFiles — the driver's connector.siblings list, or `files` itself for direct callers). The dir→metadata index is
+ *  built once per siblingFiles ARRAY (WeakMap by identity), so the driver's per-file calls do not rebuild it.
+ *  tokensIn semantics: the dashboard's `in` = UNCACHED input (Pricing charges in/cw/cr separately). Roo Code stores
+ *  tokensIn INCLUSIVE of cache tokens (OpenAI-protocol rows always; both protocols since Roo PR #8954, 2025-10-31);
+ *  Cline's Anthropic-protocol rows are exclusive (additive), its OpenAI-compatible handlers store inclusive
+ *  prompt_tokens (apiProtocol 'openai', or absent with a non-Anthropic provider). Inclusive rows → in = tokensIn -
+ *  cacheReads - cacheWrites, but only when tokensIn >= cr + cw (a row that is evidently exclusive keeps its real input).
+ *  Platform = connector.platform ('Cline' | 'Roo Code'). Dedupe by taskId:ts.
  *  meta.extCost = sum of the extension's own cost estimates (informational only). */
 const _clineMetaIndex = new WeakMap();   // siblingFiles array → Map(dir → task_metadata.json File)
 async function parseClineTasks(files, onProgress, seen = new Set(), c, siblingFiles) {
@@ -1746,9 +1754,15 @@ async function parseClineTasks(files, onProgress, seen = new Set(), c, siblingFi
     const { path, file } = list[fi];
     const dir = path.slice(0, path.lastIndexOf('/') + 1);
     const taskId = dir.split('/').filter(Boolean).pop() || (path.replace(/\.json$/i, ''));
-    let model = 'unknown';
+    let usage = [];   // task_metadata.json model_usage[], sorted by ts (entries without ts sort first = "from the start")
     const mf = metaByDir.get(dir);
-    if (mf) { try { const mo = JSON.parse(await mf.text()); const mu = mo && mo.model_usage; if (Array.isArray(mu) && mu.length && mu[mu.length - 1].model_id) model = String(mu[mu.length - 1].model_id); } catch {} }
+    if (mf) { try { const mo = JSON.parse(await mf.text()); const mu = mo && mo.model_usage; if (Array.isArray(mu)) usage = mu.filter(u => u && u.model_id).map(u => ({ ts: Number.isFinite(+u.ts) ? +u.ts : -Infinity, model: String(u.model_id), provider: String(u.model_provider_id || '').toLowerCase() })).sort((x, y) => x.ts - y.ts); } catch {} }
+    const usageAt = (t) => {   // greatest ts <= t; first entry before the first switch; last entry when t is missing
+      if (!usage.length) return null;
+      if (t == null || Number.isNaN(t)) return usage[usage.length - 1];
+      let u = usage[0]; for (const e of usage) { if (e.ts <= t) u = e; else break; } return u;
+    };
+    const isRoo = c && c.id === 'roo';
     let arr; try { arr = JSON.parse(await file.text()); } catch { badLines++; continue; }
     if (!Array.isArray(arr)) { badLines++; continue; }
     lines++;
@@ -1758,8 +1772,13 @@ async function parseClineTasks(files, onProgress, seen = new Set(), c, siblingFi
       if (!info || (info.tokensIn == null && info.tokensOut == null)) continue;   // request still in flight when the file was written
       if (m.ts != null) { const id = taskId + ':' + m.ts; if (seen.has(id)) continue; seen.add(id); addedIds.push(id); }
       const ts = m.ts != null ? new Date(+m.ts) : null, okTs = ts && !isNaN(ts);
+      const u = usageAt(okTs ? +m.ts : null), model = u ? u.model : 'unknown';
+      const cw = finTok(+info.cacheWrites || 0), cr = finTok(+info.cacheReads || 0);
+      let tin = finTok(+info.tokensIn || 0);
+      const inclusive = isRoo || info.apiProtocol === 'openai' || (info.apiProtocol == null && !(u && /^(anthropic|claude-code|bedrock|vertex)$/.test(u.provider)));
+      if (inclusive && tin >= cr + cw) tin -= cr + cw;
       agg.add(dayKey(okTs ? ts : file.lastModified), platform, model,
-        { in: finTok(+info.tokensIn || 0), out: finTok(+info.tokensOut || 0), cw: finTok(+info.cacheWrites || 0), cr: finTok(+info.cacheReads || 0), msgs: 1 }, taskId, okTs ? ts.getHours() : undefined);
+        { in: tin, out: finTok(+info.tokensOut || 0), cw, cr, msgs: 1 }, taskId, okTs ? ts.getHours() : undefined);
       extCost += Number.isFinite(+info.cost) ? +info.cost : 0;
       msgs++;
     }
