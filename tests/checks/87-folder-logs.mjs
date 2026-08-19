@@ -86,6 +86,24 @@ export async function run({ browser, ok }) {
     ok('folder-log: one unreadable file does not abort the batch',
       bad.threw === null && !!bad.t && bad.t.in === 1060 && bad.t.out === 370 && bad.t.msgs === 3 && bad.meta.badFiles === 1 && bad.meta.files === 2 && bad.meta.skipped === 1
       && bad.status === 'ok' && /Connected/.test(bad.statusText) && /1 file\(s\) unreadable/.test(bad.statusText) && bad.stored === 1060, JSON.stringify(bad));
+
+    // ---- T7: OpenAI Codex CLI ----
+    const codexText = read('codex', 'sessions', '2026', '08', '10', 'rollout-2026-08-10T09-00-00-abc.jsonl');
+    const cx = await page.evaluate(async (text) => {
+      const c = connectorById('codex');
+      const res = await parseCodexRollouts([{ path: 'sessions/2026/08/10/rollout-2026-08-10T09-00-00-abc.jsonl', file: new File([text], 'rollout-2026-08-10T09-00-00-abc.jsonl') }], null, new Set(), c);
+      const t = res.rows.reduce((a, r) => ({ in: a.in + r.in, cr: a.cr + r.cr, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, cr: 0, out: 0, msgs: 0 });
+      const hours = [...new Set(res.rows.map(r => r.hour))].sort((a, b) => a - b);
+      const expHours = [...new Set([new Date('2026-08-10T09:01:00.000Z').getHours(), new Date('2026-08-10T21:10:00.000Z').getHours()])].sort((a, b) => a - b);
+      App.renderHub();
+      return { ...t, badLines: res.meta.badLines, lines: res.meta.lines, models: [...new Set(res.rows.map(r => r.model))], platforms: [...new Set(res.rows.map(r => r.platform))], hours, expHours,
+        sid: res.rows[0] && res.rows[0].sid, card: !!document.getElementById('src-codex'), cat: c && c.category, kind: c && c.kind, quality: c && c.quality,
+        hub: !!document.querySelector('#accounts-hub .hub-group[data-group="coding"] .acct[data-connector="codex"]') };
+    }, codexText);
+    ok('codex: delta-of-cumulative token_count → in=200 cr=200 out=130 msgs=3; duplicate snapshot + info:null skipped; 1 bad line; hours + sid kept',
+      cx.in === 200 && cx.cr === 200 && cx.out === 130 && cx.msgs === 3 && cx.badLines === 1 && cx.lines === 8 && cx.models.length === 1 && cx.models[0] === 'gpt-5.4-codex'
+      && cx.platforms.length === 1 && cx.platforms[0] === 'OpenAI Codex CLI' && JSON.stringify(cx.hours) === JSON.stringify(cx.expHours) && cx.sid === 'rollout-2026-08-10T09-00-00-abc', JSON.stringify(cx));
+    ok('codex: registry entry is a folder-log coding tool with an exact-quality generic card in the Coding group', cx.card && cx.cat === 'coding' && cx.kind === 'folder-log' && cx.quality === 'exact' && cx.hub, JSON.stringify(cx));
   } finally {
     await page.close();
   }

@@ -1112,6 +1112,14 @@ const CONNECTORS = [
     statusEl: 'copilot-status',  brand: '#8957e5', mark: 'Cp', srcIds: ['copilot'], keyLS: 'key:copilot', fetchMethod: 'fetchCopilot' },
   { id: 'openrouter', platform: 'OpenRouter',          name: 'OpenRouter',            category: 'api', kind: 'api-key',
     statusEl: 'openrouter-status', brand: '#6467f2', mark: 'Or', srcIds: ['openrouter'], keyLS: 'key:openrouter', fetchMethod: 'fetchOpenrouter' },
+  // ---- Wave 1 folder-log connectors (generic driver; one parser each) ----
+  { id: 'codex', platform: 'OpenAI Codex CLI', name: 'OpenAI Codex CLI', category: 'coding', kind: 'folder-log',
+    statusEl: 'codex-status', brand: '#10a37f', mark: 'Cx', srcIds: ['codex'],
+    patterns: [/(^|\/)rollout-[^/]*\.jsonl$/i], parser: 'parseCodexRollouts', hint: 'rollout-*.jsonl session files (sessions/YYYY/MM/DD/)',
+    quality: 'exact',
+    qualityNote: 'Exact tokens from Codex CLI session rollouts: token_count events carry cumulative input / cached-input / output / reasoning totals per session — the parser takes deltas, so re-scans never double count. Cache-write tokens are not recorded by Codex; ChatGPT-plan usage has no dollar value, so cost here is API-equivalent at list prices. Pick ~/.codex (sessions + archived_sessions are both read).',
+    paths: ['%USERPROFILE%\\.codex\\sessions\\YYYY\\MM\\DD\\rollout-*.jsonl (Windows)', '~/.codex/sessions/… (macOS/Linux)', 'CODEX_HOME overrides ~/.codex'],
+    links: { get: 'https://github.com/openai/codex', docs: 'https://ccusage.com/guide/codex/', usage: 'https://platform.openai.com/usage' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv'] },
 ];
@@ -1499,6 +1507,42 @@ async function parseUsageLoggerJsonl(files, onProgress, seen = new Set(), c) {
       const okTs = ts && !isNaN(ts);
       agg.add(dayKey(okTs ? ts : file.lastModified), String(o.platform || (c && c.platform) || 'Other'), String(o.model || 'unknown'),
         { in: tin, out: tout, cw: pick(o, 'cw', 'cache_write_tokens'), cr: pick(o, 'cr', 'cache_read_tokens'), msgs: o.msgs != null ? finTok(+o.msgs || 0) : 1 }, undefined, okTs ? ts.getHours() : undefined);
+      msgs++;
+    }, k);
+    if (onProgress) onProgress(fi + 1, list.length);
+  }
+  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds: [] } };
+}
+
+/* =================================================================
+ * Folder-log parsers (Wave 1). Contract: async (files, onProgress, seen, connector, siblingFiles)
+ *   → { rows, projects, meta: { files, msgs, lines, badLines, addedIds } }   (parseClaudeLogs' shape)
+ * Whole-file JSON formats count files as `lines` and unparseable files as `badLines`.
+ * ================================================================= */
+/** OpenAI Codex CLI — ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl. token_count events are CUMULATIVE per
+ *  session: rows are the deltas between consecutive snapshots (a repeated/identical snapshot → delta 0 → skipped;
+ *  a counter that goes backwards = new session/reset → counted from zero). cached_input_tokens ⊂ input_tokens,
+ *  reasoning_output_tokens ⊂ output_tokens. Model = latest turn_context/session_meta model. */
+async function parseCodexRollouts(files, onProgress, seen = new Set()) {
+  const agg = makeAgg(); let msgs = 0; const k = { lines: 0, badLines: 0 };
+  const list = files.filter(f => /(^|\/)rollout-[^/]*\.jsonl$/i.test(f.path));
+  for (let fi = 0; fi < list.length; fi++) {
+    const { path, file } = list[fi];
+    const sid = (path.split('/').pop() || '').replace(/\.jsonl$/i, '');
+    let model = 'codex', prev = null;
+    await eachJsonl(file, (o) => {
+      const p = o.payload || {};
+      if (o.type === 'session_meta' || o.type === 'turn_context') { if (p.model) model = String(p.model); return; }
+      if (o.type !== 'event_msg' || p.type !== 'token_count' || !p.info || !p.info.total_token_usage) return;
+      const u = p.info.total_token_usage;
+      const cur = { in: finTok(+u.input_tokens || 0), cr: finTok(+u.cached_input_tokens || 0), out: finTok(+u.output_tokens || 0) };
+      const base = prev && cur.in >= prev.in && cur.out >= prev.out ? prev : { in: 0, cr: 0, out: 0 };
+      const d = { in: cur.in - base.in, cr: Math.max(0, cur.cr - base.cr), out: cur.out - base.out };
+      prev = cur;
+      if (d.in <= 0 && d.out <= 0) return;   // no new usage since the last snapshot (duplicate line / heartbeat)
+      const ts = o.timestamp ? new Date(o.timestamp) : null, okTs = ts && !isNaN(ts);
+      agg.add(dayKey(okTs ? ts : file.lastModified), 'OpenAI Codex CLI', model,
+        { in: Math.max(0, d.in - d.cr), cr: d.cr, out: Math.max(0, d.out), msgs: 1 }, sid, okTs ? ts.getHours() : undefined);
       msgs++;
     }, k);
     if (onProgress) onProgress(fi + 1, list.length);
