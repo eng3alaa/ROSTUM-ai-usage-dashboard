@@ -182,6 +182,21 @@ export async function run({ browser, ok }) {
       cl.in === 1700 && cl.out === 380 && cl.cw === 100 && cl.cr === 900 && cl.msgs === 2 && cl.files === 2 && cl.badLines === 1 && cl.model === 'claude-sonnet-4.5' && Math.abs(cl.extCost - 0.016) < 1e-9
       && cl.sid === '1786352400000' && cl.hourOk, JSON.stringify(cl));
     ok('cline/roo: one shared parser, two entries with their own platform strings and cards', cl.sameParser && cl.p1 === 'Cline' && cl.p2 === 'Roo Code' && cl.cards && cl.cats, JSON.stringify(cl));
+
+    // ---- T12: Aider ----
+    const aiderText = read('aider', 'proj', '.aider.chat.history.md');
+    const ai = await page.evaluate(async (text) => {
+      const c = connectorById('aider');
+      const res = await parseAiderHistory([{ path: 'proj/.aider.chat.history.md', file: new File([text], '.aider.chat.history.md') }], null, new Set(), c);
+      const t = res.rows.reduce((x, r) => ({ in: x.in + r.in, cw: x.cw + r.cw, cr: x.cr + r.cr, out: x.out + r.out, msgs: x.msgs + r.msgs }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
+      const byModel = Object.fromEntries(res.rows.map(r => [r.model, r.d]));
+      return { ...t, badLines: res.meta.badLines, lines: res.meta.lines, allEst: res.rows.every(r => r.est === 1), noHour: res.rows.every(r => r.hour == null), byModel, platform: res.rows[0].platform,
+        quality: c.quality, kind: c.kind, cat: c.category, card: !!document.getElementById('src-aider'), badge: document.querySelector('#src-aider .badge').textContent };
+    }, aiderText);
+    ok('aider: "Tokens:" lines → est. in=10600 cw=2100 cr=8000 out=1828 msgs=3; k-rounding honored; unparseable line = badLines; per-session model + day; no hour',
+      ai.in === 10600 && ai.cw === 2100 && ai.cr === 8000 && ai.out === 1828 && ai.msgs === 3 && ai.badLines === 1 && ai.lines === 4 && ai.allEst && ai.noHour
+      && ai.byModel['gpt-5.4'] === '2026-08-10' && ai.byModel['claude-sonnet-4.5'] === '2026-08-11' && ai.platform === 'Aider', JSON.stringify(ai));
+    ok('aider: card is honest — estimated badge, folder-log coding tool', ai.quality === 'estimated' && /estimated/i.test(ai.badge) && ai.kind === 'folder-log' && ai.cat === 'coding' && ai.card, JSON.stringify(ai));
   } finally {
     await page.close();
   }

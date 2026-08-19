@@ -115,6 +115,21 @@ export async function generate() {
   ], null, 1));
   w('cline/tasks/1786352400000/task_metadata.json', JSON.stringify({ files_in_context: [], model_usage: [{ ts: T('2026-08-10T09:00:00.000Z'), model_id: 'claude-sonnet-4.5', model_provider_id: 'anthropic', mode: 'act' }] }));
   w('cline/tasks/1786352500000/ui_messages.json', '[{"ts":1786352500000,"type":"say","say":"api_req_started","text":"{\\"tokensIn\\":5');   // truncated file
+
+  // T12 — Aider chat history. "sent" is the full prompt; cache write/hit are carved out. Expected (est):
+  //   in = 8200 + (12000-2100-8000) + 500 = 10600 · cw=2100 · cr=8000 · out = 578+1200+50 = 1828 · msgs=3 · badLines=1 (unparseable Tokens line) · models gpt-5.4 (Aug 10) + claude-sonnet-4.5 (Aug 11)
+  w('aider/proj/.aider.chat.history.md', [
+    '# aider chat started at 2026-08-10 09:12:33', '',
+    '> Aider v0.86.1', '> Model: gpt-5.4 with diff edit format', '> Git repo: .git with 12 files', '',
+    '#### make it faster', '',
+    'I will change the loop.', '',
+    '> Tokens: 8.2k sent, 578 received. Cost: $0.03 message, $0.05 session.',
+    '> Tokens: 12k sent, 2.1k cache write, 8k cache hit, 1.2k received. Cost: $0.02 message, $0.07 session.',
+    '> Tokens: lots sent, some received.', '',
+    '# aider chat started at 2026-08-11 14:00:00', '',
+    '> Model: claude-sonnet-4.5 with diff edit format',
+    '> Tokens: 500 sent, 50 received. Cost: $0.01 message, $0.01 session.', '',
+  ].join('\n'));
 }
 
 if (process.argv[1] === import.meta.filename) await generate();

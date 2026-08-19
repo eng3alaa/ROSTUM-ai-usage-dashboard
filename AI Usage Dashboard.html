@@ -1155,6 +1155,13 @@ const CONNECTORS = [
     qualityNote: 'Roo Code is a Cline fork with the same task-file format: exact tokens from tasks/<taskId>/ui_messages.json api_req_started entries (tokensIn / tokensOut / cacheWrites / cacheReads / cost). Cost is the extension\'s own estimate, not a bill (status line only). Kilo Code (kilocode.kilo-code) uses the same layout — pick that globalStorage folder here instead.',
     paths: ['%APPDATA%\\Code\\User\\globalStorage\\rooveterinaryinc.roo-cline\\tasks (Windows)', '~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks (Linux)', '~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks (macOS)'],
     links: { get: 'https://roocode.com', docs: 'https://deepwiki.com/RooCodeInc/Roo-Code/2.3-state-management-and-storage' } },
+  { id: 'aider', platform: 'Aider', name: 'Aider', category: 'coding', kind: 'folder-log',
+    statusEl: 'aider-status', brand: '#14b8a6', mark: 'Ai', srcIds: ['aider'],
+    patterns: [/(^|\/)\.aider\.chat\.history\.md$/i], parser: 'parseAiderHistory', hint: '.aider.chat.history.md files (pick a project folder, or a parent folder that holds several repos)',
+    quality: 'estimated',
+    qualityNote: 'Estimated: aider\'s chat history (.aider.chat.history.md, per repo) prints rounded "Tokens: 8.2k sent, 578 received" lines per message — parsed with k-rounding, so totals are approximate and rows are marked est. Cache write/hit tokens are carved out of "sent" when printed; the model comes from each session\'s "Model:" line; messages carry the session\'s date but no reliable hour. Aider has no account or server — usage is billed by the underlying provider key. For exact numbers run aider with --analytics-log <file>.jsonl (message_send events; Wave 2 parser).',
+    paths: ['<repo>\\.aider.chat.history.md (per project; AIDER_CHAT_HISTORY_FILE overrides)', 'optional: --llm-history-file, --analytics-log <file>.jsonl'],
+    links: { get: 'https://aider.chat', docs: 'https://aider.chat/docs/config/options.html' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv'] },
 ];
@@ -1717,6 +1724,37 @@ async function parseClineTasks(files, onProgress, seen = new Set(), c, siblingFi
     if (onProgress) onProgress(fi + 1, list.length);
   }
   return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines, addedIds, extCost } };
+}
+
+/** Aider — .aider.chat.history.md. Lines: '# aider chat started at YYYY-MM-DD HH:MM:SS' (session day),
+ *  '> Model: <name> with <fmt> edit format', '> Tokens: 8.2k sent[, 2.1k cache write][, 8k cache hit], 578 received. Cost: …'.
+ *  k-rounded → est:1. `lines` = Tokens lines seen, `badLines` = Tokens lines that did not parse. No hour (session start only). */
+async function parseAiderHistory(files, onProgress) {
+  const agg = makeAgg(); let msgs = 0, lines = 0, badLines = 0;
+  const list = files.filter(f => /(^|\/)\.aider\.chat\.history\.md$/i.test(f.path));
+  const reStart = /^#\s*aider chat started at\s+(\d{4}-\d{2}-\d{2})/i;
+  const reModel = /^>?\s*Model:\s*(\S+)/;
+  const reTok = /Tokens:\s*([\d.,]+k?)\s*sent(?:,\s*([\d.,]+k?)\s*cache write)?(?:,\s*([\d.,]+k?)\s*cache hit)?,\s*([\d.,]+k?)\s*received/i;
+  const num = (s) => { if (!s) return 0; const k = /k$/i.test(s); const v = parseFloat(s.replace(/,/g, '')); return Number.isFinite(v) ? Math.round(k ? v * 1000 : v) : NaN; };
+  for (let fi = 0; fi < list.length; fi++) {
+    const { file } = list[fi];
+    let day = dayKey(file.lastModified), model = 'aider';
+    for (const line of (await file.text()).split(/\r?\n/)) {
+      let m;
+      if ((m = reStart.exec(line))) { day = m[1]; continue; }
+      if ((m = reModel.exec(line))) { model = m[1]; continue; }
+      if (!/Tokens:/.test(line)) continue;
+      lines++;
+      m = reTok.exec(line);
+      if (!m) { badLines++; continue; }
+      const sent = num(m[1]), cw = num(m[2]), cr = num(m[3]), out = num(m[4]);
+      if ([sent, cw, cr, out].some(Number.isNaN)) { badLines++; continue; }
+      agg.add(day, 'Aider', model, { in: Math.max(0, sent - cw - cr), cw, cr, out, msgs: 1, est: 1 });
+      msgs++;
+    }
+    if (onProgress) onProgress(fi + 1, list.length);
+  }
+  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines, addedIds: [] } };
 }
 
 const ScanCache = {
