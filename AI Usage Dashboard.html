@@ -170,6 +170,12 @@ input[type="date"], input[type="text"], input[type="password"], select {
 .acct .acct-hide { border: 0; background: transparent; color: var(--muted); font-size: 12px; line-height: 1; padding: 2px 5px; border-radius: 4px; cursor: pointer; opacity: 0; flex: none; }
 .acct:hover .acct-hide, .acct:focus-within .acct-hide, .acct .acct-hide:focus-visible { opacity: 1; }
 .acct .acct-hide:hover { color: var(--ink); background: var(--wash); }
+/* ============ Collapsible sections (View.collapsed) ============ */
+.collapse-btn { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 12px; line-height: 1; flex: none; }
+.collapse-btn:hover { color: var(--ink); }
+.row-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; }
+.row-head h2 { font-size: 13px; color: var(--ink-2); font-weight: 650; margin: 0; }
+@media screen { .sec-collapsed { display: none !important; } }   /* screen-only: print ignores collapse by construction */
 
 /* ============ Insights row ============ */
 #insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 0 0 16px; }
@@ -202,7 +208,7 @@ input[type="date"], input[type="text"], input[type="password"], select {
 /* ============ Print report ============ */
 .report-meta { font-size: 12px; color: var(--ink-2); margin: 0 0 12px; }
 @media print {
-  .topbar .top-actions, .filterbar, #accounts-hub, #sources, .sources, #card-budgets, #card-pricing, #alerts, #storage-warning, .toggle, .btn, #hub-bar, .acct-hide { display: none !important; }
+  .topbar .top-actions, .filterbar, #accounts-hub, #sources, .sources, #card-budgets, #card-pricing, #alerts, #storage-warning, .toggle, .btn, #hub-bar, .acct-hide, .collapse-btn { display: none !important; }
   /* an open <dialog> renders in the top layer, above the normal document flow — hiding its
      ancestors via the print stylesheet does not hide it, so it needs its own rule */
   dialog { display: none !important; }
@@ -446,6 +452,7 @@ progress { width: 160px; height: 8px; }
   </div>
 
   <!-- ================= Insights row ================= -->
+  <div class="row-head" id="insights-head"><h2>Insights</h2><span id="insights-chips"></span></div>
   <div id="insights" aria-label="Insights">
     <div class="insight" data-insight="projection"><div class="label">Month-end projection <span class="badge" title="MTD + average of the last 7 full days × days left">projection</span></div><div class="value" id="ins-projection-value">—</div><div class="note" id="ins-projection-note"></div></div>
     <div class="insight span2" data-insight="heatmap"><div class="label">Activity — last 13 weeks</div><div id="ins-heatmap"></div></div>
@@ -470,7 +477,7 @@ progress { width: 160px; height: 8px; }
           <button data-view="table" aria-pressed="false">Table</button>
         </div>
       </div>
-      <figure>
+      <figure id="daily-body">
         <div class="chartbox" id="daily-chart" aria-describedby="daily-title"></div>
         <div class="tbl-wrap" id="daily-table" hidden></div>
         <div class="legend" id="daily-legend"></div>
@@ -487,7 +494,7 @@ progress { width: 160px; height: 8px; }
           <button data-view="table" aria-pressed="false">Table</button>
         </div>
       </div>
-      <figure>
+      <figure id="models-body">
         <div class="chartbox" id="models-chart" aria-describedby="models-title"></div>
         <div class="tbl-wrap" id="models-table" hidden></div>
         <figcaption>Totals per model for the selected range.</figcaption>
@@ -503,7 +510,7 @@ progress { width: 160px; height: 8px; }
           <button data-view="table" aria-pressed="false">Table</button>
         </div>
       </div>
-      <figure>
+      <figure id="share-body">
         <div class="chartbox" id="share-chart" aria-describedby="share-title"></div>
         <div class="tbl-wrap" id="share-table" hidden></div>
         <div class="legend" id="share-legend"></div>
@@ -529,7 +536,7 @@ progress { width: 160px; height: 8px; }
   </div>
 
   <!-- ================= Sources ================= -->
-  <div class="section-title">
+  <div class="section-title" id="sources-title">
     <h2>Data sources</h2>
     <span class="hint">everything is parsed and stored in your browser only — nothing is uploaded anywhere</span>
   </div>
@@ -666,7 +673,7 @@ progress { width: 160px; height: 8px; }
   </div>
 
   <!-- ================= Pricing ================= -->
-  <div class="section-title">
+  <div class="section-title" id="pricing-title">
     <h2>API price list</h2>
     <span class="hint">USD per million tokens — list prices as of Aug 2026, editable; first matching pattern wins</span>
     <span class="spacer" style="flex:1"></span>
@@ -845,6 +852,20 @@ const View = {
   setLegacySources(on) { this.prefs.showLegacySources = !!on; this.save(); },
   onConnectorChange(id, status) { if (status !== 'off' && this.isCardHidden(id)) this.revealCard(id); },
 };
+
+/* Sections with a ▾/▸ toggle. head = element that IS (or contains) the .card-head/.section-title/.row-head; body = ids hidden when collapsed. */
+const SECTIONS = [
+  { id: 'insights',  label: 'Insights',        head: 'insights-head',  body: ['insights'] },
+  { id: 'narrative', label: 'Narrative',       head: 'card-narrative', body: ['narrative'] },
+  { id: 'daily',     label: 'Daily usage',     head: 'card-daily',     body: ['daily-body'] },
+  { id: 'models',    label: 'By model',        head: 'card-models',    body: ['models-body'] },
+  { id: 'share',     label: 'Platform share',  head: 'card-share',     body: ['share-body'] },
+  { id: 'breakdown', label: 'Model breakdown', head: 'card-breakdown', body: ['breakdown-table'] },
+  { id: 'projects',  label: 'Projects',        head: 'card-projects',  body: ['projects-table'] },
+  { id: 'budgets',   label: 'Budgets',         head: 'card-budgets',   body: ['budget-editor'] },
+  { id: 'pricing',   label: 'API price list',  head: 'pricing-title',  body: ['card-pricing'] },
+  { id: 'sources',   label: 'Data sources',    head: 'sources-title',  body: ['sources'] },
+];
 
 /* ---------- theme ---------- */
 function initTheme() {
@@ -2412,6 +2433,27 @@ const App = {
     for (const s of S) box.appendChild(el('p', { text: s }));
   },
 
+  /* ---------- collapsible sections ---------- */
+  wireCollapsibles() {
+    for (const s of SECTIONS) {
+      const host = $(s.head); if (!host) continue;
+      const head = host.matches('.card-head, .section-title, .row-head') ? host : host.querySelector('.card-head, .section-title, .row-head');
+      if (!head || head.querySelector('.collapse-btn')) continue;
+      const btn = el('button', { class: 'collapse-btn', type: 'button', 'data-section': s.id });
+      btn.addEventListener('click', () => { View.toggleCollapse(s.id); this.applyCollapse(); this.render(); });   // re-render: charts measure a hidden (0-width) container otherwise
+      head.insertBefore(btn, head.firstChild);
+    }
+    this.applyCollapse();
+  },
+  applyCollapse() {
+    for (const s of SECTIONS) {
+      const on = View.isCollapsed(s.id);
+      const btn = document.querySelector(`.collapse-btn[data-section="${s.id}"]`);
+      if (btn) { btn.textContent = on ? '▸' : '▾'; btn.setAttribute('aria-expanded', String(!on)); btn.title = (on ? 'Expand ' : 'Collapse ') + s.label; }
+      for (const id of s.body) { const b = $(id); if (b) b.classList.toggle('sec-collapsed', on); }
+    }
+  },
+
   /* ---------- accounts hub ---------- */
   renderHub() {
     const hub = $('accounts-hub');
@@ -3258,6 +3300,7 @@ const App = {
     View.load(); Pricing.load(); ColorMap.load(); Store.load(); Budgets.load();
     initTheme(); Tooltip.init();
     this.renderPricing();
+    this.wireCollapsibles();
 
     // range presets
     $('range-presets').querySelectorAll('button').forEach(b => {

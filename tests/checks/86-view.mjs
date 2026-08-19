@@ -38,6 +38,33 @@ export async function run({ browser, ok }) {
       return { hiddenFirst, back: !!document.querySelector('#accounts-hub .acct[data-connector="openrouter"]'), pref: View.isCardHidden('openrouter') };
     });
     ok('view: connecting a hidden card auto-reveals it', reveal.hiddenFirst && reveal.back && reveal.pref === false, JSON.stringify(reveal));
+
+    // ---- T2: section collapse ----
+    const col = await page.evaluate(() => {
+      LS.del('view'); View.load(); App.applyCollapse();
+      const heads = SECTIONS.map(s => !!document.querySelector(`.collapse-btn[data-section="${s.id}"]`));
+      const btn = document.querySelector('.collapse-btn[data-section="narrative"]');
+      btn.click();
+      return { allHeads: heads.every(Boolean), n: heads.length,
+        collapsedDisplay: getComputedStyle(document.getElementById('narrative')).display,
+        pref: View.isCollapsed('narrative'), glyph: btn.textContent, expanded: btn.getAttribute('aria-expanded') };
+    });
+    ok('view: every major section header has a collapse toggle; collapsing hides the body and persists',
+      col.allHeads && col.n >= 10 && col.collapsedDisplay === 'none' && col.pref === true && col.glyph === '▸' && col.expanded === 'false', JSON.stringify(col));
+    await page.emulateMediaType('print');
+    const printed = await page.evaluate(() => getComputedStyle(document.getElementById('narrative')).display);
+    await page.emulateMediaType('screen');
+    ok('view: print ignores collapse (collapsed body renders in print media)', printed !== 'none', printed);
+
+    const { page: p2 } = await openDashboard(browser, { keepStorage: true });   // reload with the same localStorage
+    try {
+      const again = await p2.evaluate(async () => {
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        return { pref: View.isCollapsed('narrative'), display: getComputedStyle(document.getElementById('narrative')).display };
+      });
+      ok('view: collapse survives reload', again.pref && again.display === 'none', JSON.stringify(again));
+    } finally { await p2.close(); }
+    await page.evaluate(() => { LS.del('view'); View.load(); App.applyCollapse(); });   // leave page 1 expanded for the next blocks
   } finally {
     await page.close();
   }
