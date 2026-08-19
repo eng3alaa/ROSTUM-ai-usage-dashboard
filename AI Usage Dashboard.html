@@ -153,7 +153,7 @@ input[type="date"], input[type="text"], input[type="password"], input[type="sear
 .hub-group-head .hint { color: var(--muted); font-size: 11.5px; }
 .hub-group-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
 .acct .badge { font-size: 9.5px; padding: 0 5px; }
-.badge.q-exact { color: var(--good-text); } .badge.q-estimated { color: var(--serious); } .badge.q-none { color: var(--muted); } .src.generic .links a { white-space: nowrap; }
+.badge.q-exact { color: var(--good-text); } .badge.q-estimated { color: var(--serious); } .badge.q-validate { color: var(--muted); font-style: italic; } .badge.q-none { color: var(--muted); } .src.generic .links a { white-space: nowrap; }
 .acct { background: var(--surface-1); border: 1px solid var(--border); border-left: 3px solid var(--acct-brand, var(--border));
         border-radius: 8px; padding: 10px 12px; cursor: pointer; }
 .acct:hover { border-color: var(--baseline); border-left-color: var(--acct-brand, var(--baseline)); }
@@ -1095,6 +1095,7 @@ const Budgets = {
  * Adding a platform = adding one entry here + one parser function (folder-log/local-server cards are rendered from the entry by App.ensureSourceCard).
  * folder-log fields: patterns [RegExp] (files to read) · siblings [RegExp] (extra files handed to the parser, e.g. task_metadata.json) · exclude RegExp (tested against '/' + path)
  *                    · parser 'globalFnName' · hint · quality exact|estimated|validate|none · qualityNote · paths [] · links {get,docs,usage}
+ *                    · folder-log entries: srcIds must include the entry's own id (scanFiles stores rows under c.id)
  * local-server fields: baseUrl · validate 'globalFnName' (async (base) → {label, detail}) · corsHint · optional patterns/parser for a usage-logger folder
  * ================================================================= */
 const CONNECTORS = [
@@ -1396,7 +1397,7 @@ async function collectFilesFromHandle(dirHandle, patterns, path = '', out = [], 
   const dirs = [];
   for await (const [name, h] of dirHandle.entries()) {
     if (h.kind === 'directory') { if (!GENERIC_SKIP_DIRS.test(name)) dirs.push([name, h]); }
-    else if (patterns.some(re => re.test(path + name))) { try { out.push({ path: path + name, file: await h.getFile() }); } catch {} }
+    else if (patterns.some(re => re.test(path + name))) { try { out.push({ path: path + name, file: await h.getFile() }); } catch { out.unreadable = (out.unreadable || 0) + 1; } }   // locked/vanished file: counted, never fatal
   }
   for (const [name, h] of dirs) await collectFilesFromHandle(h, patterns, path + name + '/', out, depth + 1);
   return out;
@@ -1420,7 +1421,7 @@ async function parseFolderCached(connector, files, onProgress, cache) {
   const main = files.filter(f => keep(f) && pats.some(re => re.test(f.path))).sort((a, b) => a.path < b.path ? -1 : 1);
   const siblingFiles = sibPats.length ? files.filter(f => keep(f) && sibPats.some(re => re.test(f.path))) : [];   // one filter per scan — handed to every per-file parser call by reference
   const rows = [], projects = [];
-  let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0, lines = 0, badLines = 0;
+  let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0, lines = 0, badLines = 0, badFiles = 0;
   const runningSeen = new Set();
   const seen = new Set();   // signatures present in THIS scan — stale entries for absent files get pruned below
   const prefix = connector.id + '\u0001';
@@ -1431,7 +1432,12 @@ async function parseFolderCached(connector, files, onProgress, cache) {
     // an entry without `ids`, or whose ids collide with what's already been counted this scan, is a miss (re-parse)
     const isMiss = !entry || !entry.ids || entry.ids.some(id => runningSeen.has(id));
     if (isMiss) {
-      const res = await parser([f], null, runningSeen, connector, siblingFiles);
+      let res;
+      // one unreadable file (Chrome throws NotReadableError when an FSA file changed after getFile() — a CLI
+      // appending to its live session log mid-scan) or one throwing parser must NEVER abort the batch:
+      // count it, don't cache it, move on. Surfaced as meta.badFiles → "N file(s) unreadable" in the status line.
+      try { res = await parser([f], null, runningSeen, connector, siblingFiles); }
+      catch (e) { badFiles++; done++; if (onProgress) onProgress(done, main.length); continue; }
       entry = { rows: res.rows, projects: res.projects || [], msgs: res.meta.msgs || 0, ids: res.meta.addedIds || [], lines: res.meta.lines || 0, badLines: res.meta.badLines || 0 };
       if (cache) await cache.set(sig, entry);
       parsedFiles++;
@@ -1454,7 +1460,10 @@ async function parseFolderCached(connector, files, onProgress, cache) {
     let b = pm.get(k);
     if (!b) { b = { ...p }; pm.set(k, b); } else { b.in += p.in; b.cw += p.cw; b.cr += p.cr; b.out += p.out; b.msgs += p.msgs; }
   }
-  return { rows, projects: [...pm.values()], meta: { files: main.length, msgs, parsedFiles, cachedFiles, lines, badLines } };
+  // badFiles also folds in the walker's getFile() failures (collectFilesFromHandle tags the list with .unreadable);
+  // skipped = files handed in that matched neither patterns nor siblings (not this connector's — never an error)
+  return { rows, projects: [...pm.values()], meta: { files: main.length, msgs, parsedFiles, cachedFiles, lines, badLines,
+    badFiles: badFiles + (files.unreadable || 0), skipped: Math.max(0, files.length - main.length - siblingFiles.length) } };
 }
 /** Claude-logs wrapper kept for its callers and the 96/88 checks: identical behavior, now routed through
  *  the generic driver (signature gains the 'local' prefix → one-time re-parse of existing caches). */
@@ -2708,8 +2717,10 @@ const App = {
     const keyInput = document.getElementById(id + '-key'); if (keyInput) keyInput.value = '';
     delete Store.connectors[id];
     if (id === 'local') { IDB.del('claudeDir'); this.dirHandle = null; }
-    if (this._dirHandles[id]) { delete this._dirHandles[id]; IDB.del('dir:' + id); }
-    if (c.kind === 'folder-log' || c.kind === 'local-server') { const rs = $(id + '-rescan'); if (rs) rs.hidden = true; const s = $(c.statusEl); if (s) s.textContent = 'Not connected.'; }
+    if (c.kind === 'folder-log' || c.kind === 'local-server') {
+      delete this._dirHandles[id]; IDB.del('dir:' + id);   // unconditional: a handle may be persisted in IDB without being restored into memory (denied permission, early disconnect)
+      const rs = $(id + '-rescan'); if (rs) rs.hidden = true; const s = $(c.statusEl); if (s) s.textContent = 'Not connected.';
+    }
     if (confirm(`Also delete ${c.name}'s stored usage data? OK = delete, Cancel = keep the data.`)) {
       for (const sid of c.srcIds) delete Store.sources[sid];
       for (const sid of c.srcIds) delete Store.billed[sid];
@@ -3166,7 +3177,8 @@ const App = {
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
       const nf = res.meta.files, nm = res.meta.msgs;
       status.appendChild(document.createTextNode(`${nf} file${nf === 1 ? '' : 's'} · ${fmtInt(nm)} message${nm === 1 ? '' : 's'} · scanned ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
-        + (res.meta.badLines ? ` · ${fmtInt(res.meta.badLines)} unreadable line(s) skipped` : '')));
+        + (res.meta.badLines ? ` · ${fmtInt(res.meta.badLines)} unreadable line(s) skipped` : '')
+        + (res.meta.badFiles ? ` · ${fmtInt(res.meta.badFiles)} file(s) unreadable` : '')));
       this.render();
     } catch (e) {
       if (gen !== this._gen[c.id]) return;

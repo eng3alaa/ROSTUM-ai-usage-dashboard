@@ -52,6 +52,40 @@ export async function run({ browser, ok }) {
     ok('folder-log: cache is keyed per connector (same connector hits, other connector misses) and pruning is connector-scoped',
       drv.files === 1 && drv.aParsed === 1 && drv.bCached === 1 && drv.c2Parsed === 1 && drv.sigs.length === 2 && drv.sigs.every(k => /^tmp-log2?\u0001/.test(k))
       && drv.afterPrune.tmp === 1 && drv.afterPrune.tmp2 === 0, JSON.stringify({ sigs: drv.sigs, afterPrune: drv.afterPrune }));
+
+    // ---- T6 follow-up: one unreadable file (Chrome NotReadableError on a live log, or a throwing parser) must not abort the batch ----
+    const bad = await page.evaluate(async (text) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      const tmp = { id: 'tmp-bad', platform: 'TmpBad', name: 'Temp bad', category: 'local', kind: 'folder-log', statusEl: 'tmp-bad-status', brand: '#888888', mark: 'Tb', srcIds: ['tmp-bad'],
+        patterns: [/\.jsonl$/i], parser: 'parseUsageLoggerJsonl', hint: 'usage JSONL', quality: 'exact', qualityNote: 'temp', paths: [], links: {} };
+      CONNECTORS.push(tmp); App.ensureSourceCard(tmp);
+      const mk = () => {
+        const good = new File([text], 'good.jsonl', { lastModified: 1754000000000 });
+        const broken = new File([text], 'live.jsonl', { lastModified: 1754000000001 });
+        const boom = () => { throw new DOMException('The requested file could not be read', 'NotReadableError'); };
+        broken.stream = boom; broken.text = boom; broken.arrayBuffer = boom;   // what Chrome does when an FSA file changed after getFile()
+        return [
+          { path: 'logs/good.jsonl', file: good },
+          { path: 'logs/live.jsonl', file: broken },
+          { path: 'logs/readme.txt', file: new File(['x'], 'readme.txt', { lastModified: 1754000000000 }) },   // not matched → skipped
+        ];
+      };
+      let threw = null, res = null;
+      try { res = await parseFolderCached(tmp, mk(), null, new Map()); } catch (e) { threw = e.message || String(e); }
+      const t = res ? res.rows.reduce((a, r) => ({ in: a.in + r.in, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, out: 0, msgs: 0 }) : null;
+      await App.scanFiles(tmp, mk());
+      const status = Store.connectorStatus(tmp);
+      const statusText = document.getElementById('tmp-bad-status').textContent;
+      const stored = Store.sources['tmp-bad'] ? Store.sources['tmp-bad'].rows.reduce((a, r) => a + r.in, 0) : -1;
+      // cleanup
+      CONNECTORS.splice(CONNECTORS.indexOf(tmp), 1);
+      document.getElementById('src-tmp-bad').remove();
+      delete Store.sources['tmp-bad']; delete Store.connectors['tmp-bad']; Store.persist(); App._render();
+      return { threw, t, meta: res && res.meta, status, statusText, stored };
+    }, logText);
+    ok('folder-log: one unreadable file does not abort the batch',
+      bad.threw === null && !!bad.t && bad.t.in === 1060 && bad.t.out === 370 && bad.t.msgs === 3 && bad.meta.badFiles === 1 && bad.meta.files === 2 && bad.meta.skipped === 1
+      && bad.status === 'ok' && /Connected/.test(bad.statusText) && /1 file\(s\) unreadable/.test(bad.statusText) && bad.stored === 1060, JSON.stringify(bad));
   } finally {
     await page.close();
   }
