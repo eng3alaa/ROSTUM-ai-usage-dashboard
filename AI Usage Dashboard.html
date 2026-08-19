@@ -129,7 +129,7 @@ button { font: inherit; color: inherit; }
 .filterbar label.inline { font-size: 12px; color: var(--ink-2); display: inline-flex; gap: 6px; align-items: center; }
 .custom-range { display: none; gap: 6px; align-items: center; }
 .custom-range.show { display: inline-flex; }
-input[type="date"], input[type="text"], input[type="password"], select {
+input[type="date"], input[type="text"], input[type="password"], input[type="search"], select {
   font: inherit; font-size: 12.5px; color: var(--ink);
   background: var(--page); border: 1px solid var(--border); border-radius: 5px;
   padding: 5px 8px;
@@ -146,7 +146,13 @@ input[type="date"], input[type="text"], input[type="password"], select {
 .chip.drill-pill { color: var(--ink); border-color: var(--accent); background: var(--wash); font-weight: 600; }
 
 /* ============ Accounts hub ============ */
-#accounts-hub { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-bottom: 16px; }
+#accounts-hub { display: block; margin-bottom: 16px; }   /* groups own the grid now */
+.hub-group { margin-bottom: 12px; }
+.hub-group-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; }
+.hub-group-head h3 { font-size: 12px; font-weight: 650; margin: 0; color: var(--ink-2); text-transform: uppercase; letter-spacing: .05em; }
+.hub-group-head .hint { color: var(--muted); font-size: 11.5px; }
+.hub-group-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.acct .badge { font-size: 9.5px; padding: 0 5px; }
 .acct { background: var(--surface-1); border: 1px solid var(--border); border-left: 3px solid var(--acct-brand, var(--border));
         border-radius: 8px; padding: 10px 12px; cursor: pointer; }
 .acct:hover { border-color: var(--baseline); border-left-color: var(--acct-brand, var(--baseline)); }
@@ -167,6 +173,7 @@ input[type="date"], input[type="text"], input[type="password"], select {
 #connector-modal .card.src { border: 0; padding: 0; background: transparent; }
 #hub-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; min-height: 0; }
 #hub-bar label.inline { font-size: 12px; color: var(--ink-2); display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
+#hub-bar input[type="search"] { min-width: 220px; }
 .acct .acct-hide { border: 0; background: transparent; color: var(--muted); font-size: 12px; line-height: 1; padding: 2px 5px; border-radius: 4px; cursor: pointer; opacity: 0; flex: none; }
 .acct:hover .acct-hide, .acct:focus-within .acct-hide, .acct .acct-hide:focus-visible { opacity: 1; }
 .acct .acct-hide:hover { color: var(--ink); background: var(--wash); }
@@ -411,7 +418,7 @@ progress { width: 160px; height: 8px; }
   </div>
 
   <!-- ================= Accounts hub ================= -->
-  <div id="hub-bar"><span id="hub-chips"></span><label class="inline" title="The legacy per-source cards below the charts — the accounts hub above hosts the same cards in its Manage dialog"><input type="checkbox" id="show-legacy-sources"> Show legacy source cards</label></div>
+  <div id="hub-bar"><input type="search" id="hub-search" placeholder="Search accounts…" aria-label="Search accounts" hidden><span id="hub-chips"></span><label class="inline" title="The legacy per-source cards below the charts — the accounts hub above hosts the same cards in its Manage dialog"><input type="checkbox" id="show-legacy-sources"> Show legacy source cards</label></div>
   <div id="accounts-hub" aria-label="AI accounts"></div>
   <dialog id="connector-modal">
     <div class="modal-head">
@@ -1087,22 +1094,32 @@ const Budgets = {
  * Adding a platform = adding one entry here (+ its card body HTML).
  * ================================================================= */
 const CONNECTORS = [
-  { id: 'local',      platform: 'Claude Code/Desktop', name: 'Claude Code / Desktop', kind: 'folder',
+  { id: 'local',      platform: 'Claude Code/Desktop', name: 'Claude Code / Desktop', category: 'coding', kind: 'folder',
     statusEl: 'local-status',    brand: '#d97748', mark: 'CC', srcIds: ['local', 'local-import'] },
-  { id: 'anthropic',  platform: 'Anthropic API',       name: 'Anthropic API',         kind: 'admin-key',
+  { id: 'anthropic',  platform: 'Anthropic API',       name: 'Anthropic API',         category: 'api', kind: 'admin-key',
     statusEl: 'anthropic-status', brand: '#d4a27f', mark: 'An', srcIds: ['anthropic'], keyLS: 'key:anthropic', fetchMethod: 'fetchAnthropic' },
-  { id: 'openai',     platform: 'OpenAI API',          name: 'OpenAI API',            kind: 'admin-key',
+  { id: 'openai',     platform: 'OpenAI API',          name: 'OpenAI API',            category: 'api', kind: 'admin-key',
     statusEl: 'openai-status',   brand: '#10a37f', mark: 'Oa', srcIds: ['openai'], keyLS: 'key:openai', fetchMethod: 'fetchOpenAI' },
-  { id: 'gemini',     platform: 'Gemini',              name: 'Gemini (Google AI)',    kind: 'api-key',
+  { id: 'gemini',     platform: 'Gemini',              name: 'Gemini (Google AI)',    category: 'api', kind: 'api-key',
     statusEl: 'gemini-status',   brand: '#4285f4', mark: 'Ge', srcIds: ['gemini'], keyLS: 'key:gemini', fetchMethod: 'fetchGemini' },
-  { id: 'copilot',    platform: 'GitHub Copilot',      name: 'GitHub Copilot',        kind: 'token',
+  { id: 'copilot',    platform: 'GitHub Copilot',      name: 'GitHub Copilot',        category: 'coding', kind: 'token',
     statusEl: 'copilot-status',  brand: '#8957e5', mark: 'Cp', srcIds: ['copilot'], keyLS: 'key:copilot', fetchMethod: 'fetchCopilot' },
-  { id: 'openrouter', platform: 'OpenRouter',          name: 'OpenRouter',            kind: 'api-key',
+  { id: 'openrouter', platform: 'OpenRouter',          name: 'OpenRouter',            category: 'api', kind: 'api-key',
     statusEl: 'openrouter-status', brand: '#6467f2', mark: 'Or', srcIds: ['openrouter'], keyLS: 'key:openrouter', fetchMethod: 'fetchOpenrouter' },
-  { id: 'imports',    platform: null,                  name: 'Imports',               kind: 'files',
+  { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv'] },
 ];
 const connectorById = (id) => CONNECTORS.find(c => c.id === id);
+/* Hub groups (spec order). Within a group: connected → attention → disconnected, then registry order. */
+const HUB_GROUPS = [
+  { id: 'coding', label: 'Coding tools' },
+  { id: 'chat',   label: 'Chat apps' },
+  { id: 'local',  label: 'Local runners' },
+  { id: 'api',    label: 'API vendors' },
+  { id: 'cloud',  label: 'Cloud' },
+];
+/* Data-quality badge copy (honesty rule: quality first). */
+const QUALITY_LABEL = { exact: 'exact', estimated: 'estimated', validate: 'validate-only', none: 'no data' };
 
 const PLATFORM_ORDER = CONNECTORS.map(c => c.platform).filter(Boolean)
   .concat(['ChatGPT', 'Claude.ai', 'Other']);
@@ -2239,6 +2256,7 @@ const App = {
   dirHandle: null,
   _renderQueued: false,
   _drill: null,   // ephemeral platform drill-down (from an accounts-hub card click) — never persisted, never touches filters.hiddenPlatforms
+  _hubQuery: '',   // hub search box text (never persisted)
 
   window() {
     const t = todayKey();
@@ -2339,7 +2357,15 @@ const App = {
       return el('div', { class: 'budget-row' }, el('div', { text: label }), inp, el('div', {}, bar, note));
     };
     box.appendChild(rowFor('total', 'Total (all platforms)'));
-    for (const c of CONNECTORS) if (c.platform) box.appendChild(rowFor(c.platform, c.name));
+    // the registry is large now — list Total + platforms you actually use (connected, budgeted, or with data), once per platform
+    const seenP = new Set(), hasData = new Set(Store.allRows().map(r => r.platform));
+    for (const c of CONNECTORS) {
+      if (!c.platform || seenP.has(c.platform)) continue;
+      seenP.add(c.platform);
+      if (Budgets.limits[c.platform] == null && !hasData.has(c.platform) && Store.connectorStatus(c) === 'off') continue;
+      box.appendChild(rowFor(c.platform, c.name));
+    }
+    box.appendChild(el('div', { class: 'note', text: 'Platforms appear here once connected, budgeted, or once they have data.' }));
   },
 
   /* ---------- print report ---------- */
@@ -2488,6 +2514,43 @@ const App = {
   },
 
   /* ---------- accounts hub ---------- */
+  hubCard(c, allRows, win30, bst) {
+    const st = Store.connectors[c.id] || {};
+    const status = Store.connectorStatus(c);
+    let rows;
+    // membership by SOURCE (not platform) for imports, null-platform connectors, and any connector
+    // that shares its platform with another (e.g. GitHub Copilot billing vs. Copilot CLI logs) —
+    // otherwise both cards would show the same aggregate. Set built once from the card's own rows.
+    const shared = CONNECTORS.some(x => x !== c && x.platform && x.platform === c.platform);
+    if (c.srcIds.includes('csv') || !c.platform || shared) {
+      const own = new Set(c.srcIds.flatMap(sid => (Store.sources[sid]?.rows) || []));
+      rows = allRows.filter(r => own.has(r) && r.d >= win30.from && r.d <= win30.to);
+    } else {
+      rows = allRows.filter(r => r.platform === c.platform && r.d >= win30.from && r.d <= win30.to);
+    }
+    let tok = 0, cost = 0;
+    for (const r of rows) { tok += (r.in||0)+(r.cw||0)+(r.cr||0)+(r.out||0); cost += Pricing.cost(r.model, r); }
+    const card = el('div', { class: 'acct', 'data-connector': c.id, style: { '--acct-brand': c.brand }, tabindex: 0, role: 'button',
+      'aria-label': `${c.name}: ${status === 'ok' ? 'connected' : status === 'warn' ? 'needs attention' : 'not connected'}` },
+      el('div', { class: 'acct-head' },
+        el('span', { class: 'mark', text: c.mark }),
+        el('span', { class: 'acct-name', text: c.name }),
+        c.quality ? el('span', { class: 'badge q-' + c.quality, text: QUALITY_LABEL[c.quality] || c.quality, title: c.qualityNote || '' }) : null,
+        el('span', { class: 'dot ' + status }),
+        el('button', { class: 'acct-hide', type: 'button', text: '✕', title: 'Hide this card', 'aria-label': 'Hide ' + c.name,
+          onclick: (e) => { e.stopPropagation(); View.hideCard(c.id); this.render(); }, onkeydown: (e) => e.stopPropagation() })),
+      el('div', { class: 'acct-label', text: st.err ? ('⚠ ' + st.err) : (st.label || (status === 'off' ? 'Not connected' : '')) }),
+      el('div', { class: 'acct-sync', text: st.lastSync ? ('Synced ' + new Date(st.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : '' }),
+      el('div', { class: 'acct-stats', text: rows.length ? `${fmtCompact(tok)} tokens · ${fmtUSD(cost)} (30d)` : '' }),
+      (c.platform && Budgets.limits[c.platform]) ? (() => { const s = bst.byPlatform[c.platform]; return el('div', { class: 'budget-bar' + (s.pct >= 100 ? ' over' : s.pct >= 80 ? ' warn' : ''), title: `${fmtUSD(s.spent)} of ${fmtUSD(s.limit)} this month` }, el('div', { class: 'fill', style: { width: Math.min(100, s.pct) + '%' } })); })() : null,
+      el('div', { class: 'acct-actions' },
+        el('button', { class: 'btn small acct-manage', text: status === 'off' ? 'Connect' : 'Manage', onclick: (e) => { e.stopPropagation(); this.openConnectorModal(c.id); } }),
+        status !== 'off' && c.id !== 'imports' ? el('button', { class: 'btn small acct-sync-btn', text: 'Sync', onclick: (e) => { e.stopPropagation(); this.syncConnector(c.id); } }) : null,
+        status !== 'off' ? el('button', { class: 'btn small', text: 'Disconnect', onclick: (e) => { e.stopPropagation(); this.disconnectConnector(c.id); } }) : null));
+    card.addEventListener('click', () => this.drillDown(c));
+    card.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.drillDown(c); });
+    return card;
+  },
   renderHub() {
     const hub = $('accounts-hub');
     clear(hub);
@@ -2498,44 +2561,30 @@ const App = {
     const win30 = { from: addDays(t2, -29), to: u2 > t2 ? u2 : t2 };
     const allRows = Store.allRows();   // computed once — avoid O(connectors × N) rebuilds
     const bst = Budgets.status();      // computed once — avoid O(connectors) status rebuilds
+    const q = (this._hubQuery || '').trim().toLowerCase();
+    const visible = CONNECTORS.filter(c => !View.isCardHidden(c.id));
+    const hiddenN = CONNECTORS.length - visible.length;
+    $('hub-search').hidden = visible.length <= 12;   // rule is on un-hidden cards, NOT on the query result — the box must not vanish while typing
     const chips = clear($('hub-chips'));
-    const hiddenN = CONNECTORS.filter(c => View.isCardHidden(c.id)).length;
     if (hiddenN) chips.appendChild(el('button', { class: 'chip hub-hidden-chip', type: 'button', text: `${hiddenN} hidden — show`, title: 'Show hidden account cards',
       onclick: () => { View.showAllCards(); this.render(); } }));
-    for (const c of CONNECTORS) {
-      if (View.isCardHidden(c.id)) continue;
-      const st = Store.connectors[c.id] || {};
-      const status = Store.connectorStatus(c);
-      let rows;
-      if (c.srcIds.includes('csv') || !c.platform) {
-        // imports (and any future null-platform connector): membership via a Set built
-        // once from its source rows, instead of an O(M) .includes scan per row.
-        const importRows = new Set(c.srcIds.flatMap(sid => (Store.sources[sid]?.rows) || []));
-        rows = allRows.filter(r => importRows.has(r) && r.d >= win30.from && r.d <= win30.to);
-      } else {
-        rows = allRows.filter(r => r.platform === c.platform && r.d >= win30.from && r.d <= win30.to);
-      }
-      let tok = 0, cost = 0;
-      for (const r of rows) { tok += (r.in||0)+(r.cw||0)+(r.cr||0)+(r.out||0); cost += Pricing.cost(r.model, r); }
-      const card = el('div', { class: 'acct', 'data-connector': c.id, style: { '--acct-brand': c.brand }, tabindex: 0, role: 'button',
-        'aria-label': `${c.name}: ${status === 'ok' ? 'connected' : status === 'warn' ? 'needs attention' : 'not connected'}` },
-        el('div', { class: 'acct-head' },
-          el('span', { class: 'mark', text: c.mark }),
-          el('span', { class: 'acct-name', text: c.name }),
-          el('span', { class: 'dot ' + status }),
-          el('button', { class: 'acct-hide', type: 'button', text: '✕', title: 'Hide this card', 'aria-label': 'Hide ' + c.name,
-            onclick: (e) => { e.stopPropagation(); View.hideCard(c.id); this.render(); }, onkeydown: (e) => e.stopPropagation() })),
-        el('div', { class: 'acct-label', text: st.err ? ('⚠ ' + st.err) : (st.label || (status === 'off' ? 'Not connected' : '')) }),
-        el('div', { class: 'acct-sync', text: st.lastSync ? ('Synced ' + new Date(st.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : '' }),
-        el('div', { class: 'acct-stats', text: rows.length ? `${fmtCompact(tok)} tokens · ${fmtUSD(cost)} (30d)` : '' }),
-        (c.platform && Budgets.limits[c.platform]) ? (() => { const s = bst.byPlatform[c.platform]; return el('div', { class: 'budget-bar' + (s.pct >= 100 ? ' over' : s.pct >= 80 ? ' warn' : ''), title: `${fmtUSD(s.spent)} of ${fmtUSD(s.limit)} this month` }, el('div', { class: 'fill', style: { width: Math.min(100, s.pct) + '%' } })); })() : null,
-        el('div', { class: 'acct-actions' },
-          el('button', { class: 'btn small acct-manage', text: status === 'off' ? 'Connect' : 'Manage', onclick: (e) => { e.stopPropagation(); this.openConnectorModal(c.id); } }),
-          status !== 'off' && c.id !== 'imports' ? el('button', { class: 'btn small acct-sync-btn', text: 'Sync', onclick: (e) => { e.stopPropagation(); this.syncConnector(c.id); } }) : null,
-          status !== 'off' ? el('button', { class: 'btn small', text: 'Disconnect', onclick: (e) => { e.stopPropagation(); this.disconnectConnector(c.id); } }) : null));
-      card.addEventListener('click', () => this.drillDown(c));
-      card.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.drillDown(c); });
-      hub.appendChild(card);
+    const rank = { ok: 0, warn: 1, off: 2 };
+    for (const g of HUB_GROUPS) {
+      const members = visible.filter(c => (c.category || 'api') === g.id && (!q || c.name.toLowerCase().includes(q)));
+      if (!members.length) continue;
+      const stat = new Map(members.map(c => [c.id, Store.connectorStatus(c)]));
+      members.sort((a, b) => (rank[stat.get(a.id)] - rank[stat.get(b.id)]) || (CONNECTORS.indexOf(a) - CONNECTORS.indexOf(b)));
+      const collapsed = View.isCollapsed('hub:' + g.id);
+      const body = el('div', { class: 'hub-group-body' + (collapsed ? ' sec-collapsed' : '') });
+      for (const c of members) body.appendChild(this.hubCard(c, allRows, win30, bst));
+      const nConn = members.filter(c => stat.get(c.id) !== 'off').length;
+      hub.appendChild(el('section', { class: 'hub-group', 'data-group': g.id, 'aria-label': g.label },
+        el('div', { class: 'hub-group-head' },
+          el('button', { class: 'collapse-btn', type: 'button', text: collapsed ? '▸' : '▾', 'aria-expanded': String(!collapsed), title: (collapsed ? 'Expand ' : 'Collapse ') + g.label,
+            onclick: () => { View.toggleCollapse('hub:' + g.id); this.renderHub(); } }),
+          el('h3', { text: g.label }),
+          el('span', { class: 'hint', text: `${nConn} of ${members.length} connected` })),
+        body));
     }
     // reveal Data-sources cards for newly-connected platforms that start hidden in the HTML
     // (consistent with _restoreModalCard's re-hide-if-unconnected rule on modal close) — but
@@ -3337,6 +3386,7 @@ const App = {
     this.wireCollapsibles();
     this.wireInsightHides();
     this.wireLegacyToggle();
+    $('hub-search').addEventListener('input', () => { this._hubQuery = $('hub-search').value; this.renderHub(); });
 
     // range presets
     $('range-presets').querySelectorAll('button').forEach(b => {
