@@ -471,7 +471,7 @@ progress { width: 160px; height: 8px; }
     <div class="insight span2" data-insight="heatmap"><div class="label">Activity — last 13 weeks</div><div id="ins-heatmap"></div></div>
     <div class="insight" data-insight="wow"><div class="label">Week to date vs same days last week</div><div id="ins-wow"></div></div>
     <div class="insight" data-insight="cache"><div class="label">Cache savings</div><div class="value" id="ins-cache-value">—</div><div class="note" id="ins-cache-note"></div></div>
-    <div class="insight" data-insight="hours"><div class="label">Busiest hours</div><div id="ins-hours"></div></div>
+    <div class="insight" data-insight="hours"><div class="label">Busiest hours <span class="badge" title="Per-hour detail is kept for 90 days; older rows are compacted to day totals, so this histogram reflects only the last 90 days of the selected range">last 90 days</span></div><div id="ins-hours"></div></div>
     <div class="insight span2" data-insight="efficiency"><div class="label">Model efficiency <span class="badge">≥20 msgs</span></div><div id="ins-efficiency"></div></div>
     <div class="insight" data-insight="movers"><div class="label">Top project movers <span class="badge" title="vs the previous equal-length period">Δ</span></div><div id="ins-movers"></div></div>
   </div>
@@ -1925,19 +1925,22 @@ async function parseLmStudioConversations(files, onProgress) {
   return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines, addedIds: [] } };
 }
 
+/** ScanCache key prefix — bump whenever a parser's OUTPUT changes for unchanged bytes (cached per-file entries
+ *  would otherwise serve pre-fix rows forever for finished files). History: 'scan:' → v3 (per-hour granularity,
+ *  connector-prefixed signatures) → v4 (Roo/Cline inclusive tokensIn + per-request model, local:1 flags, Gemini CLI
+ *  tool tokens). prune() sweeps EVERY older-version key so IDB keeps no dead entries. */
+const SCAN_CACHE_VER = 'scan:v4:';
 const ScanCache = {
-  // v3: bumped from 'scan:' — invalidates every pre-v3 entry outright (schema/granularity
-  // changed) rather than risk serving a stale shape back out.
-  async get(sig) { try { return await IDB.get('scan:v3:' + sig); } catch { return null; } },
-  async set(sig, entry) { try { await IDB.set('scan:v3:' + sig, entry); } catch {} },
-  // deletes stale keys for ONE connector (prefix = '<connectorId>\u0001'): legacy pre-v3 keys and
-  // v3 keys with the old 3-field signature (no connector prefix) are swept regardless; other
-  // connectors' entries are left alone.
+  async get(sig) { try { return await IDB.get(SCAN_CACHE_VER + sig); } catch { return null; } },
+  async set(sig, entry) { try { await IDB.set(SCAN_CACHE_VER + sig, entry); } catch {} },
+  // deletes stale keys for ONE connector (prefix = '<connectorId>\u0001'): keys from any OLDER cache version
+  // (legacy 'scan:', 'scan:v3:', …) and current-version keys with the old 3-field signature (no connector
+  // prefix) are swept regardless; other connectors' current entries are left alone.
   async prune(keep, prefix) {
     try {
       const keys = await IDB.keys('scan:');
       for (const k of keys) {
-        const sig = k.startsWith('scan:v3:') ? k.slice(8) : null;
+        const sig = k.startsWith(SCAN_CACHE_VER) ? k.slice(SCAN_CACHE_VER.length) : null;   // any older version ('scan:', 'scan:v3:', …) → deleted below
         if (sig === null || sig.split('\u0001').length < 4) { await IDB.del(k); continue; }
         if (prefix && !sig.startsWith(prefix)) continue;
         if (!keep.has(sig)) await IDB.del(k);
@@ -2187,7 +2190,8 @@ function parseCursorUsageCSV(text) {
     n++;
     if (iCost >= 0 && String(c[iCost] ?? '').trim() !== '') { const v = Number(String(c[iCost]).replace(/[,$\s]/g, '')); if (Number.isFinite(v)) billed.set(d, (billed.get(d) || 0) + v); }
   }
-  return { rows: agg.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })), meta: { rows: n, rejected, unreconciled } };
+  // splitInput: both "Input (w/ Cache Write)" and "Input (w/o Cache Write)" present (the four-additive-column shape); hasTotal: a Total Tokens column to reconcile against
+  return { rows: agg.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })), meta: { rows: n, rejected, unreconciled, splitInput: iInCw >= 0 && iInNoCw >= 0, hasTotal: iTotal >= 0 } };
 }
 
 /* =================================================================
@@ -3002,7 +3006,7 @@ const App = {
     const hb = Insights.busiestHours(rows);
     const hoursBox = clear($('ins-hours'));
     if (!hb.total) hoursBox.appendChild(el('div', { class: 'note', text: 'No timestamped events in range (local Claude logs carry hours; API buckets do not).' }));
-    else { renderHourBars(hoursBox, hb); hoursBox.appendChild(el('div', { class: 'note', text: `peak ${hb.peak}:00 · ${fmtCompact(hb.total)} msgs with timestamps` })); }
+    else { renderHourBars(hoursBox, hb); hoursBox.appendChild(el('div', { class: 'note', text: `peak ${hb.peak}:00 · ${fmtCompact(hb.total)} msgs with timestamps (hour detail kept 90 days)` })); }   // Store.compactRows drops the hour on rows older than 90 days
     // 6) efficiency
     const eff = Insights.efficiency(rows, costOf, 20);
     const effBox = clear($('ins-efficiency'));
@@ -3232,9 +3236,12 @@ const App = {
     // an in-flight scan / fetch / server validation for this connector must NOT commit after the disconnect and resurrect it
     this._gen[id] = (this._gen[id] || 0) + 1; this._gen[id + ':server'] = (this._gen[id + ':server'] || 0) + 1;
     if (id === 'local') { IDB.del('claudeDir'); this.dirHandle = null; }
+    // 'Not connected.' must survive an in-flight fetch/validation that bails on the gen bump: those clear the status only while
+    // status.dataset.gen is still theirs, so reset it here (the scan-status line carries no gen)
+    if (c.keyLS) { const s = $(c.statusEl); if (s) { s.textContent = 'Not connected.'; s.dataset.gen = ''; } }
     if (c.kind === 'folder-log' || c.kind === 'local-server') {
       delete this._dirHandles[id]; IDB.del('dir:' + id);   // unconditional: a handle may be persisted in IDB without being restored into memory (denied permission, early disconnect)
-      const rs = $(id + '-rescan'); if (rs) rs.hidden = true; const s = $(c.statusEl); if (s) s.textContent = 'Not connected.';
+      const rs = $(id + '-rescan'); if (rs) rs.hidden = true; const s = $(c.statusEl); if (s) { s.textContent = 'Not connected.'; s.dataset.gen = ''; }
       const ss = $(id + '-scan-status'); if (ss) ss.textContent = 'No usage-log folder chosen.';   // dual-driver cards: reset the folder line too
     }
     if (confirm(`Also delete ${c.name}'s stored usage data? OK = delete, Cancel = keep the data.`)) {
@@ -3691,6 +3698,12 @@ const App = {
     const st = { ...(Store.connectors[id] || {}), ...patch };
     return [st.serverLabel, st.filesLabel].filter(Boolean).join(' · ');
   },
+  /** Data-based ownership for dual-driver cards: the folder half is genuinely connected only when a scan landed rows AND the
+   *  connector entry carries its filesLabel. A directory handle alone (stored before any scan succeeds) never counts. */
+  _folderOwns(id) {
+    const st = Store.connectors[id], src = Store.sources[id];
+    return !!(st && st.filesLabel && src && Array.isArray(src.rows) && src.rows.length);
+  },
   /** Single scan entry point for folder-log connectors (folder pick, classic chooser, tests). files: [{path, file}]. */
   async scanFiles(c, files) {
     const status = this._scanStatusEl(c.id), prog = $(c.id + '-progress');
@@ -3704,7 +3717,9 @@ const App = {
       if (!res.meta.files) { status.textContent = `No matching files found — expected ${c.hint || 'log files'}.`; return; }
       Store.setSource(c.id, res.rows, { files: res.meta.files, msgs: res.meta.msgs, lines: res.meta.lines, badLines: res.meta.badLines });
       const filesLabel = `${res.meta.files} file${res.meta.files === 1 ? '' : 's'}`;
-      Store.setConnector(c.id, { filesLabel, label: this._dualLabel(c.id, { filesLabel }), lastSync: Date.now(), err: null });
+      // per-half errors (dual-driver cards): this driver owns scanErr, connectServer owns serverErr; hub err = serverErr || scanErr
+      // merged from the previous entry, so a CORS-blocked server keeps its hint even when the folder scan settles last
+      Store.setConnector(c.id, { filesLabel, label: this._dualLabel(c.id, { filesLabel }), lastSync: Date.now(), scanErr: null, err: (Store.connectors[c.id] || {}).serverErr || null });
       const rs = $(c.id + '-rescan'); if (rs) rs.hidden = !this._dirHandles[c.id];
       status.textContent = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
@@ -3715,7 +3730,8 @@ const App = {
       this.render();
     } catch (e) {
       if (gen !== this._gen[c.id]) return;
-      Store.setConnector(c.id, { err: (e.message || String(e)).slice(0, 80) });
+      const scanErr = (e.message || String(e)).slice(0, 80);
+      Store.setConnector(c.id, { scanErr, err: (Store.connectors[c.id] || {}).serverErr || scanErr });
       status.textContent = '';
       status.appendChild(el('span', { class: 'err', text: 'Scan failed: ' }));
       status.appendChild(document.createTextNode(e.message || String(e)));
@@ -3791,7 +3807,9 @@ const App = {
       if (typeof fn !== 'function') throw new Error('No validator registered: ' + c.validate);
       const res = await fn(base);
       if (gen !== this._gen[slot]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
-      Store.setConnector(c.id, { serverLabel: res.label, label: this._dualLabel(c.id, { serverLabel: res.label }), lastSync: Date.now(), err: null });
+      // per-half errors: this driver owns serverErr, scanFiles owns scanErr; the hub's err = serverErr || scanErr (merged from the
+      // previous entry) so whichever half settles last never wipes the other half's message (CORS hint vs. a working usage-log folder)
+      Store.setConnector(c.id, { serverLabel: res.label, label: this._dualLabel(c.id, { serverLabel: res.label }), lastSync: Date.now(), serverErr: null, err: (Store.connectors[c.id] || {}).scanErr || null });
       status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
       status.appendChild(document.createTextNode(res.detail || ''));
@@ -3807,17 +3825,18 @@ const App = {
         const name = c.name || 'the server';
         const msg = c.corsHint ? c.corsHint.replace(/\{base\}/g, base)
           : `Something answered at ${base} but this page could not read it — most likely ${name} blocking the origin (CORS). Allow this page's origin on the server, then validate again.`;
-        Store.setConnector(c.id, { err: `Could not read ${name} at ${base} — likely CORS (see card)`.slice(0, 80), serverLabel: null, label: this._dualLabel(c.id, { serverLabel: null }) });
+        const serverErr = `Could not read ${name} at ${base} — likely CORS (see card)`.slice(0, 80);
+        Store.setConnector(c.id, { serverErr, err: serverErr, serverLabel: null, label: this._dualLabel(c.id, { serverLabel: null }) });   // server half's error wins the hub line
         status.appendChild(el('span', { class: 'err', text: 'Blocked: ' }));
         status.appendChild(document.createTextNode(msg + (e && e.message && !/Failed to fetch/i.test(e.message) ? ` (${e.message})` : '')));
-      } else if (this._dirHandles[c.id] || (Store.sources[c.id] && Store.connectors[c.id])) {
-        // unreachable, but the usage-log folder still owns this entry (a folder handle is attached, or logged rows are stored and the
-        // card is still connected — a keep-data disconnect leaves rows but no entry, so it stays off): keep it CONNECTED on the folder
-        // half only. Deleting here would flip the card to "Not connected" while its rows still count, and the next scan would
-        // re-create the entry off→ok — which View.onConnectorChange reads as a fresh connection and would auto-reveal a hidden card.
-        const nf = ((Store.sources[c.id] || {}).meta || {}).files;
-        const filesLabel = (Store.connectors[c.id] || {}).filesLabel || (nf ? `${nf} file${nf === 1 ? '' : 's'}` : 'usage-log folder');
-        Store.setConnector(c.id, { serverLabel: null, filesLabel, label: filesLabel, err: null });
+      } else if (this._folderOwns(c.id)) {
+        // unreachable, but the usage-log folder half is GENUINELY connected (a scan landed rows and its filesLabel is on the entry): keep it
+        // CONNECTED on the folder half only. Deleting here would flip the card to "Not connected" while its rows still count, and the
+        // next scan would re-create the entry off→ok — which View.onConnectorChange reads as a fresh connection and would auto-reveal
+        // a hidden card. A bare directory handle is NOT ownership: pickFolderFor/restoreFolderHandles store _dirHandles before any scan
+        // succeeds (0 matching files, denied permission) — fabricating an entry from it would be exactly that false off→ok flip.
+        const filesLabel = Store.connectors[c.id].filesLabel;
+        Store.setConnector(c.id, { serverLabel: null, filesLabel, label: filesLabel, serverErr: null, err: Store.connectors[c.id].scanErr || null });   // not running ≠ error: only the scan half may still carry one
         status.textContent = `Server not running at ${base} — usage log still connected. Start the server and validate again for the live check.`;
       } else {
         // unreachable = not running → truly off, not an error state
@@ -4026,7 +4045,8 @@ const App = {
             const res = parseCursorUsageCSV(csvText);
             Store.setSource('cursor-csv', res.rows, res.meta);   // re-import replaces (one export = the full window)
             Store.setBilled('cursor-csv', res.billed);   // always — [] is a truthful empty: an export without a Cost column must not leave stale dollars behind replaced rows
-            notes.push(`${f.name}: Cursor usage-events CSV — ${res.meta.rows} events (exact tokens from the four additive columns${res.billed.length ? ' + cost column' : '; no cost column in this export'})`
+            const how = res.meta.splitInput ? ` from the four additive columns${res.meta.hasTotal ? ', reconciled with Total Tokens' : ''}` : '';   // Input / Cache Read / Output only → plain "exact tokens"
+            notes.push(`${f.name}: Cursor usage-events CSV — ${res.meta.rows} events (exact tokens${how}${res.billed.length ? ' + cost column' : '; no cost column in this export'})`
               + (res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric or negative)` : '')
               + (res.meta.unreconciled ? ` — ${res.meta.unreconciled} row${res.meta.unreconciled === 1 ? '' : 's'} did not reconcile with Total Tokens (additive reading kept)` : ''));
             imported++;

@@ -418,6 +418,36 @@ export async function run({ browser, ok }) {
       window.probeServer = async () => false;
       await App.connectServer(c);
       out.bare = { has: !!Store.connectors.ollama, status: Store.connectorStatus(c), text: st() };
+      // (4) a bare directory handle is NOT ownership: pickFolderFor/restoreFolderHandles store _dirHandles BEFORE any scan succeeds
+      // (0 matching files, denied permission). No source + no entry + hidden card + unreachable server → nothing may be fabricated
+      // (a 'usage-log folder' entry would flip off→ok and auto-reveal the hidden card via View.onConnectorChange).
+      Store.sources = {}; Store.connectors = {}; LS.del('view'); View.load();
+      View.hideCard('ollama');
+      App._dirHandles.ollama = { kind: 'directory', name: 'stub' };
+      await App.connectServer(c);
+      out.bareHandle = { has: !!Store.connectors.ollama, status: Store.connectorStatus(c), hidden: View.isCardHidden('ollama'), text: st() };
+      delete App._dirHandles.ollama;
+      // (5) per-half errors: a CORS-blocked server + a working usage-log folder → the CORS hint must survive the scan (err = serverErr || scanErr),
+      // a later successful validate clears it; symmetrically a failed scan survives a successful validate until the next good scan.
+      Store.sources = {}; Store.connectors = {}; LS.del('view'); View.load();
+      window.probeServer = async () => true;    // fetchJSON still throws → CORS branch
+      await App.connectServer(c);
+      const corsErr = (Store.connectors.ollama || {}).err || null;
+      await App.scanFiles(c, files());
+      out.corsThenScan = { corsErr, err: (Store.connectors.ollama || {}).err || null, status: Store.connectorStatus(c), label: (Store.connectors.ollama || {}).label || '', scanText: scanSt(), text: st() };
+      window.fetchJSON = origFetch; window.probeServer = origProbe;
+      window.validateOllama = async () => ({ label: '3 models installed', detail: '3 models installed · 1 loaded now' });
+      await App.connectServer(c);
+      out.corsCleared = { err: (Store.connectors.ollama || {}).err || null, status: Store.connectorStatus(c), label: (Store.connectors.ollama || {}).label || '' };
+      window.parseFolderCached = async () => { throw new Error('disk gone'); };
+      await App.scanFiles(c, files());
+      out.scanFailed = { err: (Store.connectors.ollama || {}).err || null, status: Store.connectorStatus(c) };
+      await App.connectServer(c);   // a good validate must NOT wipe the scan half's error
+      out.scanFailedThenValidate = { err: (Store.connectors.ollama || {}).err || null, status: Store.connectorStatus(c) };
+      window.parseFolderCached = origParse;
+      await App.scanFiles(c, files());
+      out.scanRecovered = { err: (Store.connectors.ollama || {}).err || null, status: Store.connectorStatus(c), label: (Store.connectors.ollama || {}).label || '' };
+      window.validateOllama = origValidate;
       window.fetchJSON = origFetch; window.probeServer = origProbe;
       Store.sources = {}; Store.connectors = {}; Store.persist(); LS.del('view'); View.load();
       return out;
@@ -432,6 +462,16 @@ export async function run({ browser, ok }) {
       JSON.stringify({ slowServer: dual.slowServer, slowScan: dual.slowScan }));
     ok('ollama dual: no folder attached + unreachable → entry deleted, off, "not running" (unchanged)',
       !dual.bare.has && dual.bare.status === 'off' && /not running/i.test(dual.bare.text), JSON.stringify(dual.bare));
+    ok('ollama dual: a bare directory handle (no source, no entry) + unreachable → NOT owned: no fabricated entry, off, hidden card stays hidden, "not running"',
+      !dual.bareHandle.has && dual.bareHandle.status === 'off' && dual.bareHandle.hidden === true && /not running/i.test(dual.bareHandle.text) && !/still connected/i.test(dual.bareHandle.text),
+      JSON.stringify(dual.bareHandle));
+    ok('ollama dual: per-half errors — CORS-blocked server + successful scan keeps err (CORS) / warn; a good validate clears it; a failed scan survives a good validate and clears on the next good scan',
+      /CORS/.test(dual.corsThenScan.corsErr || '') && /CORS/.test(dual.corsThenScan.err || '') && dual.corsThenScan.status === 'warn' && /1 file/.test(dual.corsThenScan.label) && /1 file/.test(dual.corsThenScan.scanText)
+        && dual.corsCleared.err === null && dual.corsCleared.status === 'ok' && /3 models installed/.test(dual.corsCleared.label) && /1 file/.test(dual.corsCleared.label)
+        && /disk gone/.test(dual.scanFailed.err || '') && dual.scanFailed.status === 'warn'
+        && /disk gone/.test(dual.scanFailedThenValidate.err || '') && dual.scanFailedThenValidate.status === 'warn'
+        && dual.scanRecovered.err === null && dual.scanRecovered.status === 'ok' && /3 models installed/.test(dual.scanRecovered.label) && /1 file/.test(dual.scanRecovered.label),
+      JSON.stringify({ corsThenScan: dual.corsThenScan, corsCleared: dual.corsCleared, scanFailed: dual.scanFailed, scanFailedThenValidate: dual.scanFailedThenValidate, scanRecovered: dual.scanRecovered }));
 
     // ---- T16: exports (Gemini Takeout + Cursor CSV) ----
     const takeout = read('takeout', 'MyActivity.json'), cursorCsv = read('cursor', 'usage-events.csv');

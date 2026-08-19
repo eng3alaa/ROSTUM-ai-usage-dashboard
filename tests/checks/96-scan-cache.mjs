@@ -83,6 +83,35 @@ export async function run({ browser, ok }) {
     });
     ok('scan-cache: v3 key prefix invalidates pre-hour entries', v3.got == null, JSON.stringify(v3));
 
+    // v4: several parsers changed OUTPUT for unchanged bytes (Roo/Cline inclusive tokensIn + per-request model, local:1 flags,
+    // Gemini CLI tool tokens) → the key prefix is bumped again. A 'scan:v3:' entry must (a) MISS under ScanCache.get, (b) be
+    // re-parsed (not served) by parseFolderCached, and (c) be DELETED by prune so IDB keeps no dead entries — while an entry
+    // under the CURRENT prefix with the same signature survives the prune.
+    const usageLog = fs.readFileSync(path.join(OUT, 'usage-log', 'ollama-usage.jsonl'), 'utf8');
+    const v4 = await page.evaluate(async (text) => {
+      const tmp = { id: 'tmp-v4', platform: 'TmpV4', parser: 'parseUsageLoggerJsonl', patterns: [/\.jsonl$/i] };
+      const file = new File([text], 'ollama-usage.jsonl', { lastModified: 1754000000000 });
+      const files = () => [{ path: 'logs/ollama-usage.jsonl', file }];
+      const sig = 'tmp-v4\u0001logs/ollama-usage.jsonl\u0001' + file.size + '\u00011754000000000';   // exactly what parseFolderCached computes
+      const stale = { rows: [{ d: '2026-01-01', platform: 'TmpV4', model: 'stale', in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }], projects: [], msgs: 1, ids: [] };
+      await IDB.set('scan:v3:' + sig, stale);
+      const getMiss = (await ScanCache.get(sig)) == null;                       // (a) v3 entry not served under the current prefix
+      const res = await parseFolderCached(tmp, files(), null, ScanCache);      // (b) parser runs; (c) prune sweeps the v3 key
+      const keys = await IDB.keys('scan:');
+      const cur = keys.filter(k => k.endsWith(sig));
+      const out = { getMiss, parsed: res.meta.parsedFiles, cached: res.meta.cachedFiles, msgs: res.meta.msgs, v3Gone: !keys.includes('scan:v3:' + sig),
+        curKeys: cur, curKept: cur.length === 1 && !cur[0].startsWith('scan:v3:') };
+      // and prune alone (the public sweep) with the current key in `keep`: v3 twin deleted, current twin kept
+      await IDB.set('scan:v3:' + sig, stale);
+      await ScanCache.prune(new Set([sig]), 'tmp-v4\u0001');
+      const keys2 = await IDB.keys('scan:');
+      out.pruneV3Gone = !keys2.includes('scan:v3:' + sig); out.pruneCurKept = cur.length === 1 && keys2.includes(cur[0]);
+      for (const k of keys2) if (k.endsWith(sig)) await IDB.del(k);   // cleanup
+      return out;
+    }, usageLog);
+    ok('scan-cache: v4 prefix — a v3 entry misses, is re-parsed (parsedFiles=1, cachedFiles=0) and swept from IDB; the current-prefix twin is kept',
+      v4.getMiss && v4.parsed === 1 && v4.cached === 0 && v4.msgs === 3 && v4.v3Gone && v4.curKept && v4.pruneV3Gone && v4.pruneCurKept, JSON.stringify(v4));
+
     // Cline/Roo: the model comes from the SIBLING task_metadata.json, so a changed sibling must invalidate the
     // cached ui_messages.json rows (signature = main file + same-dir sibling size/lastModified), while an
     // unchanged pair is still a cache hit.
