@@ -1306,16 +1306,20 @@ const Store = {
     catch (e) { console.warn('persist failed', e); }
   },
   compactRows(rows) {
+    // Compact by AGE regardless of sid: rows older than 90 days (sid-bearing Claude logs AND sid-less hour-granular
+    // parsers — Takeout, Continue.dev, usage-logger JSONL, Cursor CSV) merge into day/platform/model[/local] buckets
+    // (hour dropped). `sids` is only emitted when at least one merged row carried a sid (allRows dedupe contract).
     const cutoff = addDays(todayKey(), -90);
     const keep = [], merge = new Map();
     for (const r of rows) {
-      if (!r.sid || r.d >= cutoff) { keep.push(r); continue; }
+      if (!r.d || r.d >= cutoff) { keep.push(r); continue; }
       const k = r.d + '\u0001' + r.platform + '\u0001' + r.model + '\u0001' + (r.local ? '1' : '');
       let b = merge.get(k);
-      if (!b) { b = { d: r.d, platform: r.platform, model: r.model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0, sids: [] }; if (r.est) b.est = 1; if (r.local) b.local = 1; merge.set(k, b); }
+      if (!b) { b = { d: r.d, platform: r.platform, model: r.model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0 }; if (r.est) b.est = 1; if (r.local) b.local = 1; merge.set(k, b); }
       b.in += r.in || 0; b.cw += r.cw || 0; b.cr += r.cr || 0; b.out += r.out || 0; b.msgs += r.msgs || 0;
       if (r.est) b.est = 1;
-      if (r.sid && !b.sids.includes(r.sid)) b.sids.push(r.sid);
+      const sids = r.sid ? [r.sid] : (Array.isArray(r.sids) ? r.sids : null);
+      if (sids) { if (!b.sids) b.sids = []; for (const sd of sids) if (!b.sids.includes(sd)) b.sids.push(sd); }
     }
     return keep.concat([...merge.values()]);
   },

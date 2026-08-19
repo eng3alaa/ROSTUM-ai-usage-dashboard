@@ -91,6 +91,29 @@ export async function run({ browser, ok }) {
       loc.n === 2 && loc.localN === 1 && loc.localIn === 200 && loc.localMsgs === 2 && JSON.stringify(loc.localSids) === JSON.stringify(['s1', 's2']) && loc.hostedN === 1 && loc.hostedIn === 100 && loc.localCost === 0 && loc.hostedCost > 0, JSON.stringify(loc));
     ok('makeAgg: local:1 is in the bundle key and copied onto the bundle (2 local adds → one local bundle in=20; 1 hosted add → separate bundle in=10)',
       loc.aggN === 2 && JSON.stringify(loc.aggLocal) === JSON.stringify([[20, 2]]) && JSON.stringify(loc.aggHosted) === JSON.stringify([[10, 1]]), JSON.stringify(loc));
+
+    // Compaction must be by AGE, not by the presence of a sid: sid-less hour-granular parsers (Gemini Takeout, Continue.dev,
+    // usage-logger JSONL, Cursor CSV) emit up to 24 rows/day/model — past 90 days they must merge into one day/platform/model
+    // bucket (hour dropped, no sids array emitted), while recent sid-less hour rows stay untouched.
+    const age = await page.evaluate(async () => {
+      localStorage.removeItem('aiusage:data');
+      Store.sources = {}; Store.billed = {}; Store.projects = [];
+      const agedDay = addDays(todayKey(), -200), recentDay = addDays(todayKey(), -5);
+      const base = { platform: 'Gemini', model: 'gemini-2.5-pro', cw: 0, cr: 0, msgs: 1 };
+      Store.setSource('gemini-takeout', [
+        { ...base, d: agedDay, hour: 9, in: 100, out: 10, est: 1 },
+        { ...base, d: agedDay, hour: 17, in: 200, out: 20, est: 1 },
+        { ...base, d: recentDay, hour: 8, in: 5, out: 1, est: 1 },
+      ], {});
+      const rows = Store.sources['gemini-takeout'].rows;
+      const old = rows.filter(r => r.d === agedDay), rec = rows.filter(r => r.d === recentDay);
+      return { n: rows.length, oldN: old.length, old: old[0], recN: rec.length, rec: rec[0] };
+    });
+    ok('compactRows: sid-less hour rows older than 90d merge into one day/platform/model bucket (in=300 out=30 msgs=2, hour dropped, est kept, no sids array)',
+      age.n === 2 && age.oldN === 1 && age.old.in === 300 && age.old.out === 30 && age.old.msgs === 2 && age.old.hour === undefined && age.old.est === 1 && !('sids' in age.old) && !('sid' in age.old),
+      JSON.stringify(age));
+    ok('compactRows: a recent sid-less hour row is kept as-is (hour=8, in=5)',
+      age.recN === 1 && age.rec.hour === 8 && age.rec.in === 5 && age.rec.est === 1, JSON.stringify(age.rec));
   } finally {
     await page.close();
   }
