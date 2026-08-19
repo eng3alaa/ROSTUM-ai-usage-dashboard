@@ -199,6 +199,30 @@ export async function run({ browser, ok }) {
       return { lines: res.meta.lines, badLines: res.meta.badLines, msgs: res.meta.msgs };
     });
     ok('scan: blank/whitespace/CR-only lines are not malformed', crlf.badLines === 0 && crlf.lines === 1 && crlf.msgs === 1, JSON.stringify(crlf));
+
+    // Pricing.resolve normalizes vendor-native Claude ids (Copilot CLI dotted, Cursor family-last, Claude Code dated)
+    // before matching DEFAULT_PRICES; rows/UI keep the vendor id, only pricing resolution normalizes.
+    const norm = await page.evaluate(() => {
+      LS.del('prices'); Pricing.load();
+      const ids = ['claude-opus-4.1', 'claude-haiku-4.5', 'claude-sonnet-4.5', 'claude-4.1-opus', 'claude-4-opus', 'claude-4.5-sonnet', 'claude-3.5-sonnet',
+        'claude-opus-4-1-20250805', 'claude-opus-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-sonnet-3.5', 'claude-4-opus-thinking',
+        'claude-opus-4-5', 'claude-sonnet-4-5-20250929', 'anthropic/claude-opus-4.1', 'gpt-5.4', 'gemini-2.5-pro'];
+      const out = {};
+      for (const id of ids) out[id] = Pricing.resolve(id).label;
+      out._noRawCacheLeak = Pricing.resolve('CLAUDE-OPUS-4.1').label;
+      return out;
+    });
+    const OPUS4 = 'Claude Opus 4 / 4.1', SON = 'Claude Sonnet 4.x / 3.x';
+    ok('pricing-norm: Copilot CLI dotted ids resolve to family rows (opus-4.1 / haiku-4.5 / sonnet-4.5)',
+      norm['claude-opus-4.1'] === OPUS4 && norm['claude-haiku-4.5'] === 'Claude Haiku 4.5' && norm['claude-sonnet-4.5'] === SON, JSON.stringify(norm));
+    ok('pricing-norm: Cursor family-last ids resolve (4.1-opus / 4-opus / 4.5-sonnet / 3.5-sonnet / 4-opus-thinking)',
+      norm['claude-4.1-opus'] === OPUS4 && norm['claude-4-opus'] === OPUS4 && norm['claude-4.5-sonnet'] === SON && norm['claude-3.5-sonnet'] === SON && norm['claude-4-opus-thinking'] === OPUS4, JSON.stringify(norm));
+    ok('pricing-norm: Claude Code dated ids resolve (opus-4-1-20250805 / opus-4-20250514) and 3.x dated ids keep matching',
+      norm['claude-opus-4-1-20250805'] === OPUS4 && norm['claude-opus-4-20250514'] === OPUS4 && norm['claude-3-5-sonnet-20241022'] === SON && norm['claude-3-5-haiku-20241022'] === 'Claude Haiku 3.5', JSON.stringify(norm));
+    ok('pricing-norm: unchanged — opus-4-5 stays Opus 5/4.5+, sonnet-4-5 dated stays Sonnet, OpenRouter prefix ok, gpt-5.4 / gemini-2.5-pro untouched, family-first 3.5 canonicalizes',
+      norm['claude-opus-4-5'] === 'Claude Opus 5 / 4.5+' && norm['claude-sonnet-4-5-20250929'] === SON && norm['anthropic/claude-opus-4.1'] === OPUS4 && norm['gpt-5.4'] === 'GPT-5.4' && norm['gemini-2.5-pro'] === 'Gemini 2.5 Pro' && norm['claude-sonnet-3.5'] === SON && norm._noRawCacheLeak === OPUS4, JSON.stringify(norm));
+    const hint = await page.evaluate(() => document.querySelector('#pricing-title .hint').textContent);
+    ok('pricing-norm: price editor hint says patterns match the normalized id', /normali[sz]ed/i.test(hint) && /date/i.test(hint), hint);
   } finally {
     await page.close();
   }

@@ -690,7 +690,7 @@ progress { width: 160px; height: 8px; }
   <!-- ================= Pricing ================= -->
   <div class="section-title" id="pricing-title">
     <h2>API price list</h2>
-    <span class="hint">USD per million tokens — list prices as of Aug 2026, editable; first matching pattern wins</span>
+    <span class="hint">USD per million tokens — list prices as of Aug 2026, editable; first matching pattern wins. Patterns also match a normalized Claude id (dots→hyphens, family-first for 4+, trailing date stripped), so vendor spellings like claude-opus-4.1 / claude-4.1-opus / claude-opus-4-1-20250805 all hit the same row.</span>
     <span class="spacer" style="flex:1"></span>
     <button class="btn small" id="add-price">+ Add model</button>
     <button class="btn small" id="reset-prices">Reset to defaults</button>
@@ -943,6 +943,21 @@ const DEFAULT_PRICES = [
   { pat: '.*',                             label: 'Unknown model',         in: 3,    out: 15,  cw: 3.75, cr: 0.3 },
 ];
 
+/** Canonical Claude id for PRICE MATCHING ONLY (rows/UI keep the vendor's id). Vendors spell the same model
+ *  three ways: Copilot CLI dotted ('claude-opus-4.1'), Cursor family-last ('claude-4.1-opus', 'claude-3.5-sonnet'),
+ *  Claude Code dated ('claude-opus-4-1-20250805'). Anthropic's own scheme is family-FIRST for 4+ ('claude-opus-4-1')
+ *  and family-LAST for 3.x ('claude-3-5-sonnet'), which is how DEFAULT_PRICES is written — so: dots→hyphens,
+ *  reorder to that scheme, strip a trailing -YYYYMMDD date and Cursor's '-thinking' suffix. Non-Claude ids pass through. */
+function normalizeModelId(model) {
+  const m = String(model || '').toLowerCase();
+  if (!m.includes('claude')) return m;
+  return m.replace(/\./g, '-')
+    .replace(/claude-([4-9](?:-\d+)?)-(opus|sonnet|haiku)/, 'claude-$2-$1')      // 4+: family-last → family-first
+    .replace(/claude-(opus|sonnet|haiku)-(3(?:-\d+)?)(?=$|-)/, 'claude-$2-$1')  // 3.x: family-first → family-last
+    .replace(/-\d{8}$/, '')
+    .replace(/-thinking$/, '');
+}
+
 const Pricing = {
   rows: [],
   _cache: new Map(),
@@ -952,10 +967,11 @@ const Pricing = {
   resolve(model) {
     const m = String(model || '').toLowerCase();
     if (this._cache.has(m)) return this._cache.get(m);
+    const n = normalizeModelId(m);   // patterns are tried against the raw id AND its canonical form; first row that matches either wins
     let hit = null;
     for (const r of this.rows) {
       let re; try { re = new RegExp(r.pat, 'i'); } catch { re = new RegExp(escRe(r.pat), 'i'); }
-      if (re.test(m)) { hit = r; break; }
+      if (re.test(m) || (n !== m && re.test(n))) { hit = r; break; }
     }
     if (!hit) hit = this.rows[this.rows.length - 1] || { in: 3, out: 15, cw: 3.75, cr: 0.3, label: 'Unknown' };
     this._cache.set(m, hit);
