@@ -104,6 +104,21 @@ export async function run({ browser, ok }) {
       cx.in === 200 && cx.cr === 200 && cx.out === 130 && cx.msgs === 3 && cx.badLines === 1 && cx.lines === 8 && cx.models.length === 1 && cx.models[0] === 'gpt-5.4-codex'
       && cx.platforms.length === 1 && cx.platforms[0] === 'OpenAI Codex CLI' && JSON.stringify(cx.hours) === JSON.stringify(cx.expHours) && cx.sid === 'rollout-2026-08-10T09-00-00-abc', JSON.stringify(cx));
     ok('codex: registry entry is a folder-log coding tool with an exact-quality generic card in the Coding group', cx.card && cx.cat === 'coding' && cx.kind === 'folder-log' && cx.quality === 'exact' && cx.hub, JSON.stringify(cx));
+
+    // ---- T8: Gemini CLI ----
+    const gemA = read('gemini', 'tmp', 'abc123', 'chats', 'session-2026-08-10T09-00-aaaa.json'), gemB = read('gemini', 'tmp', 'abc123', 'chats', 'session-bad.json');
+    const gc = await page.evaluate(async (a, b) => {
+      const c = connectorById('gemini-cli');
+      const res = await parseGeminiCliSessions([
+        { path: 'tmp/abc123/chats/session-2026-08-10T09-00-aaaa.json', file: new File([a], 'session-2026-08-10T09-00-aaaa.json') },
+        { path: 'tmp/abc123/chats/session-bad.json', file: new File([b], 'session-bad.json') }], null, new Set(), c);
+      const t = res.rows.reduce((x, r) => ({ in: x.in + r.in, cr: x.cr + r.cr, out: x.out + r.out, msgs: x.msgs + r.msgs }), { in: 0, cr: 0, out: 0, msgs: 0 });
+      return { ...t, files: res.meta.files, badLines: res.meta.badLines, models: [...new Set(res.rows.map(r => r.model))].sort(), platform: res.rows[0].platform,
+        hourOk: res.rows.some(r => r.hour === new Date('2026-08-10T09:00:05.000Z').getHours()), sid: res.rows[0].sid, ids: res.meta.addedIds.length, kind: c.kind, cat: c.category, card: !!document.getElementById('src-gemini-cli') };
+    }, gemA, gemB);
+    ok('gemini-cli: session JSON → in=1800 cr=1700 out=470 msgs=3 (dup id + token-less message skipped); malformed file counted as badLines',
+      gc.in === 1800 && gc.cr === 1700 && gc.out === 470 && gc.msgs === 3 && gc.files === 2 && gc.badLines === 1 && JSON.stringify(gc.models) === JSON.stringify(['gemini-3-flash', 'gemini-3-pro'])
+      && gc.platform === 'Gemini CLI' && gc.hourOk && gc.sid === 'aaaa' && gc.ids === 3 && gc.kind === 'folder-log' && gc.cat === 'coding' && gc.card, JSON.stringify(gc));
   } finally {
     await page.close();
   }

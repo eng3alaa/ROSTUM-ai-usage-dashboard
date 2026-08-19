@@ -1120,6 +1120,13 @@ const CONNECTORS = [
     qualityNote: 'Exact tokens from Codex CLI session rollouts: token_count events carry cumulative input / cached-input / output / reasoning totals per session — the parser takes deltas, so re-scans never double count. Cache-write tokens are not recorded by Codex; ChatGPT-plan usage has no dollar value, so cost here is API-equivalent at list prices. Pick ~/.codex (sessions + archived_sessions are both read).',
     paths: ['%USERPROFILE%\\.codex\\sessions\\YYYY\\MM\\DD\\rollout-*.jsonl (Windows)', '~/.codex/sessions/… (macOS/Linux)', 'CODEX_HOME overrides ~/.codex'],
     links: { get: 'https://github.com/openai/codex', docs: 'https://ccusage.com/guide/codex/', usage: 'https://platform.openai.com/usage' } },
+  { id: 'gemini-cli', platform: 'Gemini CLI', name: 'Gemini CLI', category: 'coding', kind: 'folder-log',
+    statusEl: 'gemini-cli-status', brand: '#4285f4', mark: 'Gc', srcIds: ['gemini-cli'],
+    patterns: [/(^|\/)session-[^/]*\.json$/i], parser: 'parseGeminiCliSessions', hint: 'chats/session-*.json files (pick ~/.gemini or ~/.gemini/tmp)',
+    quality: 'exact',
+    qualityNote: 'Exact tokens from Gemini CLI\'s auto-recorded sessions (session-*.json: per-response input / output / cached / thoughts counts and model). Google\'s docs do not publish the field names, so the parser sniffs tokens{} (and usageMetadata{}) defensively. Sessions auto-prune after 30 days / 50 files by default — import regularly. Cost is API-equivalent at list prices (Code Assist quota is not exposed).',
+    paths: ['%USERPROFILE%\\.gemini\\tmp\\<project_hash>\\chats\\session-*.json (Windows)', '~/.gemini/tmp/<hash>/chats/ (macOS/Linux)', 'GEMINI_CLI_HOME overrides ~/.gemini'],
+    links: { get: 'https://github.com/google-gemini/gemini-cli', docs: 'https://geminicli.com/docs/cli/session-management/' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv'] },
 ];
@@ -1548,6 +1555,36 @@ async function parseCodexRollouts(files, onProgress, seen = new Set()) {
     if (onProgress) onProgress(fi + 1, list.length);
   }
   return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds: [] } };
+}
+
+/** Gemini CLI — ~/.gemini/tmp/<hash>/chats/session-*.json (whole-file JSON). messages[] of type 'gemini' carry
+ *  tokens {input, output, cached, thoughts, tool, total} (input includes cached; thoughts bill as output) — or,
+ *  defensively, usageMetadata {promptTokenCount, candidatesTokenCount, cachedContentTokenCount, thoughtsTokenCount}.
+ *  Dedupe by sessionId:messageId. */
+async function parseGeminiCliSessions(files, onProgress, seen = new Set()) {
+  const agg = makeAgg(); const addedIds = []; let msgs = 0, lines = 0, badLines = 0;
+  const list = files.filter(f => /(^|\/)session-[^/]*\.json$/i.test(f.path));
+  for (let fi = 0; fi < list.length; fi++) {
+    const { path, file } = list[fi];
+    let obj; try { obj = JSON.parse(await file.text()); } catch { badLines++; continue; }
+    if (!obj || typeof obj !== 'object' || !Array.isArray(obj.messages)) { badLines++; continue; }
+    lines++;
+    const sid = String(obj.sessionId || (path.split('/').pop() || '').replace(/\.json$/i, ''));
+    for (const m of obj.messages) {
+      if (!m || m.type === 'user') continue;
+      const um = m.usageMetadata;
+      const t = m.tokens || (um ? { input: um.promptTokenCount, output: um.candidatesTokenCount, cached: um.cachedContentTokenCount, thoughts: um.thoughtsTokenCount } : null);
+      if (!t) continue;
+      if (m.id != null) { const id = sid + ':' + m.id; if (seen.has(id)) continue; seen.add(id); addedIds.push(id); }
+      const input = finTok(+t.input || 0), cached = finTok(+t.cached || 0), output = finTok(+t.output || 0), thoughts = finTok(+t.thoughts || 0);
+      const ts = m.timestamp ? new Date(m.timestamp) : null, okTs = ts && !isNaN(ts);
+      agg.add(dayKey(okTs ? ts : file.lastModified), 'Gemini CLI', String(m.model || obj.model || 'gemini'),
+        { in: Math.max(0, input - cached), cr: cached, out: output + thoughts, msgs: 1 }, sid, okTs ? ts.getHours() : undefined);
+      msgs++;
+    }
+    if (onProgress) onProgress(fi + 1, list.length);
+  }
+  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines, addedIds } };
 }
 
 const ScanCache = {
