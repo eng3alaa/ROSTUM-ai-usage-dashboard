@@ -304,6 +304,59 @@ export async function run({ browser, ok }) {
     ok('ollama: one card = local-server validate + usage-logger folder (exact, honest note); logger rows land under the ollama source',
       ol.kind === 'local-server' && ol.cat === 'local' && ol.quality === 'exact' && ol.card && ol.note && ol.logged === 1060, JSON.stringify(ol));
 
+    // ---- T15b: Ollama dual driver (server validate + usage-log folder) — separate gen slots, separate status lines, no delete while the folder owns the entry ----
+    const dual = await page.evaluate(async (text) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const c = connectorById('ollama');
+      const origFetch = fetchJSON, origProbe = probeServer, origValidate = validateOllama, origParse = parseFolderCached;
+      const files = () => [{ path: 'ollama-usage.jsonl', file: new File([text], 'ollama-usage.jsonl') }];
+      const st = () => (document.getElementById('ollama-status') || {}).textContent || '';
+      const scanSt = () => (document.getElementById('ollama-scan-status') || {}).textContent || '';
+      const out = {};
+      // (1) hidden + folder-connected, then the server is unreachable → the folder still owns the entry: stays connected, stays hidden, rows intact
+      await App.scanFiles(c, files());
+      View.hideCard('ollama');
+      window.fetchJSON = async () => { throw new TypeError('Failed to fetch'); };
+      window.probeServer = async () => false;
+      await App.connectServer(c);
+      out.down = { has: !!Store.connectors.ollama, status: Store.connectorStatus(c), hidden: View.isCardHidden('ollama'), label: (Store.connectors.ollama || {}).label || '', err: (Store.connectors.ollama || {}).err || null,
+        rows: Store.sources.ollama ? Store.sources.ollama.rows.reduce((a, r) => a + r.in, 0) : 0, text: st(), scanText: scanSt() };
+      await App.scanFiles(c, files());   // a later re-scan must NOT read as a fresh off→ok connection (no auto-reveal)
+      out.rescan = { hidden: View.isCardHidden('ollama'), status: Store.connectorStatus(c), label: (Store.connectors.ollama || {}).label || '' };
+      // (2) concurrent: slow validator + fast scan → both outcomes land (label carries both halves, neither status line blank)
+      Store.sources = {}; Store.connectors = {}; LS.del('view'); View.load();
+      window.fetchJSON = origFetch; window.probeServer = origProbe;
+      window.validateOllama = async () => { await new Promise(r => setTimeout(r, 120)); return { label: '3 models installed', detail: '3 models installed · 1 loaded now' }; };
+      await Promise.all([App.connectServer(c), App.scanFiles(c, files())]);
+      out.slowServer = { label: (Store.connectors.ollama || {}).label || '', status: Store.connectorStatus(c), text: st(), scanText: scanSt() };
+      // reverse order: fast validator + slow scan
+      Store.sources = {}; Store.connectors = {};
+      window.validateOllama = async () => ({ label: '3 models installed', detail: '3 models installed · 1 loaded now' });
+      window.parseFolderCached = async (...a) => { await new Promise(r => setTimeout(r, 120)); return origParse(...a); };
+      await Promise.all([App.connectServer(c), App.scanFiles(c, files())]);
+      out.slowScan = { label: (Store.connectors.ollama || {}).label || '', status: Store.connectorStatus(c), text: st(), scanText: scanSt(), rows: Store.sources.ollama ? Store.sources.ollama.rows.reduce((a, r) => a + r.in, 0) : 0 };
+      // (3) unchanged: nothing else owns the entry + unreachable → deleted, off
+      Store.sources = {}; Store.connectors = {};
+      window.parseFolderCached = origParse; window.validateOllama = origValidate;
+      window.fetchJSON = async () => { throw new TypeError('Failed to fetch'); };
+      window.probeServer = async () => false;
+      await App.connectServer(c);
+      out.bare = { has: !!Store.connectors.ollama, status: Store.connectorStatus(c), text: st() };
+      window.fetchJSON = origFetch; window.probeServer = origProbe;
+      Store.sources = {}; Store.connectors = {}; Store.persist(); LS.del('view'); View.load();
+      return out;
+    }, logText);
+    ok('ollama dual: server unreachable while the usage-log folder is connected → entry kept (folder label, no err), hidden card stays hidden, rows intact, status says "still connected"; a later re-scan does not auto-reveal',
+      dual.down.has && dual.down.status === 'ok' && dual.down.hidden === true && /1 file/.test(dual.down.label) && dual.down.err === null && dual.down.rows === 1060
+        && /not running/i.test(dual.down.text) && /still connected/i.test(dual.down.text) && /1 file/.test(dual.down.scanText)
+        && dual.rescan.hidden === true && dual.rescan.status === 'ok' && /1 file/.test(dual.rescan.label), JSON.stringify({ down: dual.down, rescan: dual.rescan }));
+    ok('ollama dual: connectServer and scanFiles run concurrently (either order) → both outcomes land: label = server half + file count, both status lines non-blank',
+      /3 models installed/.test(dual.slowServer.label) && /1 file/.test(dual.slowServer.label) && dual.slowServer.status === 'ok' && /Connected/.test(dual.slowServer.text) && /1 file/.test(dual.slowServer.scanText)
+        && /3 models installed/.test(dual.slowScan.label) && /1 file/.test(dual.slowScan.label) && dual.slowScan.status === 'ok' && /Connected/.test(dual.slowScan.text) && /1 file/.test(dual.slowScan.scanText) && dual.slowScan.rows === 1060,
+      JSON.stringify({ slowServer: dual.slowServer, slowScan: dual.slowScan }));
+    ok('ollama dual: no folder attached + unreachable → entry deleted, off, "not running" (unchanged)',
+      !dual.bare.has && dual.bare.status === 'off' && /not running/i.test(dual.bare.text), JSON.stringify(dual.bare));
+
     // ---- T16: exports (Gemini Takeout + Cursor CSV) ----
     const takeout = read('takeout', 'MyActivity.json'), cursorCsv = read('cursor', 'usage-events.csv');
     const ex = await page.evaluate(async (tk, cs) => {
