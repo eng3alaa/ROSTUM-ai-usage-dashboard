@@ -12,7 +12,9 @@ const browser = await launch();
 try {
   const dir = path.join(import.meta.dirname, 'checks');
   fs.mkdirSync(dir, { recursive: true });
-  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')).sort()) {
+  // ONLY=87,94 node tests/run.mjs → run just the check files whose name contains one of the tokens (dev loop; the gate is the full suite)
+  const only = (process.env.ONLY || '').split(',').map((s) => s.trim()).filter(Boolean);
+  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.mjs') && (!only.length || only.some((t) => f.includes(t)))).sort()) {
     const mod = await import(pathToFileURL(path.join(dir, f)).href);
     try {
       await mod.run({ browser, ok });
