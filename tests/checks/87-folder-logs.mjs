@@ -129,8 +129,8 @@ export async function run({ browser, ok }) {
       return { ...t, files: res.meta.files, badLines: res.meta.badLines, models: [...new Set(res.rows.map(r => r.model))].sort(), platform: res.rows[0].platform,
         hourOk: res.rows.some(r => r.hour === new Date('2026-08-10T09:00:05.000Z').getHours()), sid: res.rows[0].sid, ids: res.meta.addedIds.length, kind: c.kind, cat: c.category, card: !!document.getElementById('src-gemini-cli') };
     }, gemA, gemB);
-    ok('gemini-cli: session JSON → in=1800 cr=1700 out=470 msgs=3 (dup id + token-less message skipped); malformed file counted as badLines',
-      gc.in === 1800 && gc.cr === 1700 && gc.out === 470 && gc.msgs === 3 && gc.files === 2 && gc.badLines === 1 && JSON.stringify(gc.models) === JSON.stringify(['gemini-3-flash', 'gemini-3-pro'])
+    ok('gemini-cli: session JSON → in=1825 (incl. 25 tool-use prompt tokens) cr=1700 out=470 msgs=3 (dup id + token-less message skipped); malformed file counted as badLines',
+      gc.in === 1825 && gc.cr === 1700 && gc.out === 470 && gc.msgs === 3 && gc.files === 2 && gc.badLines === 1 && JSON.stringify(gc.models) === JSON.stringify(['gemini-3-flash', 'gemini-3-pro'])
       && gc.platform === 'Gemini CLI' && gc.hourOk && gc.sid === 'aaaa' && gc.ids === 3 && gc.kind === 'folder-log' && gc.cat === 'coding' && gc.card, JSON.stringify(gc));
 
     // ---- T9: GitHub Copilot CLI ----
@@ -375,8 +375,8 @@ export async function run({ browser, ok }) {
     }, logText);
     ok('ollama: validates via stubbed /api/tags + /api/ps (label = models installed, detail = loaded now); URL persisted',
       /2 models installed/.test(ol.okState.label || '') && ol.okState.status === 'ok' && /1 loaded/.test(ol.okState.text) && ol.okState.url === 'http://localhost:11434', JSON.stringify(ol.okState));
-    ok('ollama: CORS-blocked → attention with the OLLAMA_ORIGINS fix; unreachable → off ("not running")',
-      /OLLAMA_ORIGINS/.test(ol.cors.err || '') && ol.cors.status === 'warn' && /OLLAMA_ORIGINS/.test(ol.cors.text) && !ol.down.has && ol.down.status === 'off' && /not running/i.test(ol.down.text), JSON.stringify({ cors: ol.cors, down: ol.down }));
+    ok('ollama: CORS-blocked → attention (err names CORS; status = "something answered … could not read it — most likely Ollama … (CORS)" + the OLLAMA_ORIGINS fix); unreachable → off ("not running")',
+      /CORS/.test(ol.cors.err || '') && ol.cors.status === 'warn' && /OLLAMA_ORIGINS/.test(ol.cors.text) && /Something answered at http:\/\/localhost:11434 but this page could not read it/.test(ol.cors.text) && /most likely Ollama blocking the origin \(CORS\)/.test(ol.cors.text) && !/Ollama is running but blocked/.test(ol.cors.text) && !ol.down.has && ol.down.status === 'off' && /not running/i.test(ol.down.text), JSON.stringify({ cors: ol.cors, down: ol.down }));
     ok('ollama: one card = local-server validate + usage-logger folder (exact, honest note); logger rows land under the ollama source',
       ol.kind === 'local-server' && ol.cat === 'local' && ol.quality === 'exact' && ol.card && ol.note && ol.logged === 1060, JSON.stringify(ol));
 
@@ -486,6 +486,76 @@ export async function run({ browser, ok }) {
     });
     ok('rescanFolder: denied permission on a stored handle → no picker, no scan, status mentions the permission (picker only when no handle is stored)',
       denied.picks === 0 && denied.scans === 0 && /permission/i.test(denied.status) && /Pick folder|Choose/i.test(denied.status) && denied.picksNoHandle === 1, JSON.stringify(denied));
+
+    // ---- copy corrections: card notes must state data quality honestly ----
+    const copy = await page.evaluate(() => {
+      const n = (id) => (connectorById(id) || {}).qualityNote || '';
+      return { ollama: n('ollama'), lmstudio: n('lmstudio'), copilotCli: n('copilot-cli'), geminiCli: n('gemini-cli') };
+    });
+    ok('copy: Ollama / LM Studio notes say $0 on your hardware and never point at the removed "Local open-weight" price row',
+      /\$0/.test(copy.ollama) && /\$0/.test(copy.lmstudio) && !/Local open-weight/i.test(copy.ollama) && !/Local open-weight/i.test(copy.lmstudio) && /hosted-equivalent/i.test(copy.ollama) && /hosted-equivalent/i.test(copy.lmstudio),
+      JSON.stringify(copy));
+    ok('copy: Copilot CLI note states the $ is the API list-price equivalent of a flat-rate plan, not GitHub\'s bill',
+      /flat-rate plan/.test(copy.copilotCli) && /list-price equivalent/.test(copy.copilotCli) && /not what GitHub charges you/.test(copy.copilotCli), copy.copilotCli);
+    ok('copy: Gemini CLI note says a re-scan only counts sessions still on disk (no "import regularly" as if history accumulated)',
+      /still on disk/.test(copy.geminiCli) && /retention|keep copies/i.test(copy.geminiCli) && !/import regularly/.test(copy.geminiCli), copy.geminiCli);
+
+    // ---- generic local-server CORS diagnosis (no corsHint on the connector) must not over-claim either ----
+    const genericCors = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const tmp = { id: 'tmp-srv', platform: 'TmpSrv', name: 'Temp server', category: 'local', kind: 'local-server', statusEl: 'tmp-srv-status', brand: '#888888', mark: 'Ts', srcIds: ['tmp-srv'],
+        baseUrl: 'http://localhost:9999', validate: 'validateTmpSrv', quality: 'none', qualityNote: 'temp', paths: [], links: {} };
+      CONNECTORS.push(tmp); App.ensureSourceCard(tmp);
+      const origProbe = probeServer;
+      window.validateTmpSrv = async () => { throw new TypeError('Failed to fetch'); };
+      window.probeServer = async () => true;
+      await App.connectServer(tmp);
+      const out = { err: (Store.connectors['tmp-srv'] || {}).err || '', text: document.getElementById('tmp-srv-status').textContent };
+      window.probeServer = origProbe; delete window.validateTmpSrv;
+      CONNECTORS.splice(CONNECTORS.indexOf(tmp), 1); document.getElementById('src-tmp-srv').remove();
+      delete Store.connectors['tmp-srv']; Store.persist(); LS.del('url:tmp-srv');
+      return out;
+    });
+    ok('local-server generic CORS text: "Something answered at <base> but this page could not read it — most likely <name> blocking the origin (CORS)", err names CORS',
+      /Something answered at http:\/\/localhost:9999 but this page could not read it/.test(genericCors.text) && /most likely Temp server blocking the origin \(CORS\)/.test(genericCors.text)
+      && !/is running at/.test(genericCors.text) && /CORS/.test(genericCors.err), JSON.stringify(genericCors));
+
+    // ---- disconnect / clear-all during an in-flight folder scan: the scan must bail, not resurrect the connector ----
+    const race = await page.evaluate(async (text) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const c = connectorById('aider');
+      const origParse = parseFolderCached, origConfirm = window.confirm;
+      const files = () => [{ path: 'proj/.aider.chat.history.md', file: new File([text], '.aider.chat.history.md') }];
+      const out = {};
+      // (a) disconnect + delete data mid-scan
+      await App.scanFiles(c, files());   // connected first
+      out.before = { src: !!Store.sources.aider, conn: !!Store.connectors.aider };
+      window.parseFolderCached = async (...a) => { await new Promise(r => setTimeout(r, 150)); return origParse(...a); };
+      const p = App.scanFiles(c, files());
+      await new Promise(r => setTimeout(r, 20));
+      window.confirm = () => true;   // OK = delete the data too
+      App.disconnectConnector('aider');
+      await p;
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      out.afterDisconnect = { src: !!Store.sources.aider, conn: !!Store.connectors.aider, status: Store.connectorStatus(c), text: (App._scanStatusEl('aider') || {}).textContent || '' };
+      // (b) clear-all mid-scan
+      window.parseFolderCached = origParse;
+      await App.scanFiles(c, files());
+      window.parseFolderCached = async (...a) => { await new Promise(r => setTimeout(r, 150)); return origParse(...a); };
+      const p2 = App.scanFiles(c, files());
+      await new Promise(r => setTimeout(r, 20));
+      document.getElementById('clear-data').click();   // confirm() still stubbed → OK
+      await p2;
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      out.afterClear = { src: !!Store.sources.aider, conn: !!Store.connectors.aider, status: Store.connectorStatus(c) };
+      window.parseFolderCached = origParse; window.confirm = origConfirm;
+      Store.sources = {}; Store.connectors = {}; Store.persist(); LS.del('view'); View.load();
+      return out;
+    }, read('aider', 'proj', '.aider.chat.history.md'));
+    ok('scan race: Disconnect (delete data) during an in-flight folder scan → the scan bails: no source, no connector entry, card off, no "Connected" status',
+      race.before.src && race.before.conn && !race.afterDisconnect.src && !race.afterDisconnect.conn && race.afterDisconnect.status === 'off' && !/Connected/.test(race.afterDisconnect.text), JSON.stringify(race));
+    ok('scan race: Clear-all during an in-flight folder scan → the scan bails: no source, no connector entry',
+      !race.afterClear.src && !race.afterClear.conn && race.afterClear.status === 'off', JSON.stringify(race.afterClear));
   } finally {
     await page.close();
   }

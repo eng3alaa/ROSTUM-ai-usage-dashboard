@@ -1122,7 +1122,7 @@ const Budgets = {
  * folder-log fields: patterns [RegExp] (files to read) · siblings [RegExp] (extra files handed to the parser, e.g. task_metadata.json) · exclude RegExp (tested against '/' + path)
  *                    · parser 'globalFnName' · hint · quality exact|estimated|validate|none · qualityNote · paths [] · links {get,docs,usage}
  *                    · folder-log entries: srcIds must include the entry's own id (scanFiles stores rows under c.id)
- * local-server fields: baseUrl · validate 'globalFnName' (async (base) → {label, detail}) · corsHint · optional patterns/parser for a usage-logger folder
+ * local-server fields: baseUrl · validate 'globalFnName' (async (base) → {label, detail}) · corsHint ({base} = server URL) · optional patterns/parser for a usage-logger folder
  * ================================================================= */
 const CONNECTORS = [
   { id: 'local',      platform: 'Claude Code/Desktop', name: 'Claude Code / Desktop', category: 'coding', kind: 'folder',
@@ -1150,14 +1150,14 @@ const CONNECTORS = [
     statusEl: 'gemini-cli-status', brand: '#4285f4', mark: 'Gc', srcIds: ['gemini-cli'],
     patterns: [/(^|\/)session-[^/]*\.json$/i], parser: 'parseGeminiCliSessions', hint: 'chats/session-*.json files (pick ~/.gemini or ~/.gemini/tmp)',
     quality: 'exact',
-    qualityNote: 'Exact tokens from Gemini CLI\'s auto-recorded sessions (session-*.json: per-response input / output / cached / thoughts counts and model). Google\'s docs do not publish the field names, so the parser sniffs tokens{} (and usageMetadata{}) defensively. Sessions auto-prune after 30 days / 50 files by default — import regularly. Cost is API-equivalent at list prices (Code Assist quota is not exposed).',
+    qualityNote: 'Exact tokens from Gemini CLI\'s auto-recorded sessions (session-*.json: per-response input / output / cached / thoughts counts and model). Google\'s docs do not publish the field names, so the parser sniffs tokens{} (and usageMetadata{}) defensively. The CLI prunes sessions after 30 days / 50 files by default; a re-scan only counts what is still on disk — raise the CLI\'s retention or keep copies if you want history. Cost is API-equivalent at list prices (Code Assist quota is not exposed).',
     paths: ['%USERPROFILE%\\.gemini\\tmp\\<project_hash>\\chats\\session-*.json (Windows)', '~/.gemini/tmp/<hash>/chats/ (macOS/Linux)', 'GEMINI_CLI_HOME overrides ~/.gemini'],
     links: { get: 'https://github.com/google-gemini/gemini-cli', docs: 'https://geminicli.com/docs/cli/session-management/' } },
   { id: 'copilot-cli', platform: 'GitHub Copilot', name: 'GitHub Copilot CLI (logs)', category: 'coding', kind: 'folder-log',
     statusEl: 'copilot-cli-status', brand: '#8957e5', mark: 'Cl', srcIds: ['copilot-cli'],
     patterns: [/(^|\/)events\.jsonl$/i], exclude: /\/\.junie\//, parser: 'parseCopilotCliEvents', hint: 'session-state/<session-id>/events.jsonl (pick ~/.copilot)',
     quality: 'exact',
-    qualityNote: 'Exact tokens from Copilot CLI session events (events.jsonl: assistant.usage carries server-reported input / output / cache-read / cache-write tokens and model; session.shutdown holds per-model totals, used only when a session has no per-request events). Documented by GitHub; the exact field paths were verified against third-party parsers, so the parser is tolerant. This is separate from the GitHub Copilot billing card (PAT) — both roll up under the GitHub Copilot platform. VS Code Copilot Chat has no local token log unless you enable its OTel file export (Wave 2 parser).',
+    qualityNote: 'Exact tokens from Copilot CLI session events (events.jsonl: assistant.usage carries server-reported input / output / cache-read / cache-write tokens and model; session.shutdown holds per-model totals, used only when a session has no per-request events). Documented by GitHub; the exact field paths were verified against third-party parsers, so the parser is tolerant. This is separate from the GitHub Copilot billing card (PAT) — both roll up under the GitHub Copilot platform. Copilot is a flat-rate plan; the $ shown for these rows is the API list-price equivalent, not what GitHub charges you (the PAT card carries GitHub\'s own billed dollars). VS Code Copilot Chat has no local token log unless you enable its OTel file export (Wave 2 parser).',
     paths: ['%USERPROFILE%\\.copilot\\session-state\\<session-id>\\events.jsonl (Windows)', '~/.copilot/session-state/… (macOS/Linux)'],
     links: { get: 'https://github.com/github/copilot-cli', docs: 'https://docs.github.com/en/copilot/concepts/agents/copilot-cli/chronicle', usage: 'https://github.com/settings/billing' } },
   { id: 'continue', platform: 'Continue.dev', name: 'Continue.dev', category: 'coding', kind: 'folder-log',
@@ -1199,17 +1199,17 @@ const CONNECTORS = [
     statusEl: 'lmstudio-status', brand: '#6d5dfc', mark: 'LM', srcIds: ['lmstudio'],
     patterns: [/\.conversation\.json$/i], parser: 'parseLmStudioConversations', hint: '*.conversation.json chat files (pick ~/.lmstudio/conversations)',
     quality: 'exact',
-    qualityNote: 'Exact tokens from LM Studio chat files (~/.lmstudio/conversations/**/*.conversation.json): each assistant message\'s genInfo.stats carries promptTokensCount / predictedTokensCount and the model\'s load identifier. Only the currently selected version of a regenerated message is counted. Messages carry no timestamps — a whole chat lands on its createdAt/file date. LM Studio warns this structure is undocumented and may change, so the parser is defensive. Chats made through the API server are not written to this folder (no usage-history endpoint exists; the server\'s CORS toggle is off by default). LM Studio rows are priced $0 — runs on your hardware (the zero price is gated on this platform, not on model name, so a hosted model with the same base name elsewhere is priced normally).',
+    qualityNote: 'Exact tokens from LM Studio chat files (~/.lmstudio/conversations/**/*.conversation.json): each assistant message\'s genInfo.stats carries promptTokensCount / predictedTokensCount and the model\'s load identifier. Only the currently selected version of a regenerated message is counted. Messages carry no timestamps — a whole chat lands on its createdAt/file date. LM Studio warns this structure is undocumented and may change, so the parser is defensive. Chats made through the API server are not written to this folder (no usage-history endpoint exists; the server\'s CORS toggle is off by default). LM Studio rows are priced $0 — runs on your hardware (the zero price is gated on this platform, not on model name, so a hosted model with the same base name elsewhere is priced normally). To see a hosted-equivalent figure, compare the same tokens against a hosted model\'s row in the price list.',
     paths: ['%USERPROFILE%\\.lmstudio\\conversations\\ (Windows)', '~/.lmstudio/conversations/ (macOS/Linux)', 'older installs: ~/.cache/lm-studio/conversations'],
     links: { get: 'https://lmstudio.ai', docs: 'https://lmstudio.ai/docs/app/basics/chat' } },
   // ---- Wave 1 local-server connector (generic driver + optional usage-logger folder) ----
   { id: 'ollama', platform: 'Ollama', name: 'Ollama', category: 'local', kind: 'local-server',
     statusEl: 'ollama-status', brand: '#5b6472', mark: 'Ol', srcIds: ['ollama'],
     baseUrl: 'http://localhost:11434', validate: 'validateOllama',
-    corsHint: 'Ollama is running but blocked this page (CORS). Set OLLAMA_ORIGINS="*" (or your page origin), restart Ollama, then validate again.',
+    corsHint: 'Something answered at {base} but this page could not read it — most likely Ollama blocking the origin (CORS). Set OLLAMA_ORIGINS="*" (or your page origin), restart Ollama, then validate again.',
     patterns: [/usage[^/]*\.jsonl$/i], parser: 'parseUsageLoggerJsonl', hint: 'usage-logger JSONL files (ollama-usage.jsonl — see docs/tools/ollama-usage-logger.mjs)',
     quality: 'exact',
-    qualityNote: 'Live check only: Ollama keeps no usage history and no per-request log — exact token counts (prompt_eval_count / eval_count) exist only inside each API response. This card verifies the server (GET /api/tags, /api/ps) and shows what is installed and loaded now. For history, run the one-file proxy docs/tools/ollama-usage-logger.mjs (it forwards requests to Ollama and appends exact per-request JSONL) and pick its output folder below. Desktop-app chats live in db.sqlite (SQLite, no token counts) — not read in this version. If validation says CORS: set OLLAMA_ORIGINS="*" and restart Ollama. Logged models are priced $0 — they run on your hardware (gated on the Ollama platform, not on model name). Ollama used THROUGH a coding tool (Continue.dev, Cline, Aider, Codex --oss) is also $0 when that tool\'s log names the provider.',
+    qualityNote: 'Live check only: Ollama keeps no usage history and no per-request log — exact token counts (prompt_eval_count / eval_count) exist only inside each API response. This card verifies the server (GET /api/tags, /api/ps) and shows what is installed and loaded now. For history, run the one-file proxy docs/tools/ollama-usage-logger.mjs (it forwards requests to Ollama and appends exact per-request JSONL) and pick its output folder below. Desktop-app chats live in db.sqlite (SQLite, no token counts) — not read in this version. If validation says CORS: set OLLAMA_ORIGINS="*" and restart Ollama. Logged models are priced $0 — they run on your hardware (gated on the Ollama platform, not on model name). To see a hosted-equivalent figure, compare the same tokens against a hosted model\'s row in the price list. Ollama used THROUGH a coding tool (Continue.dev, Cline, Aider, Codex --oss) is also $0 when that tool\'s log names the provider.',
     paths: ['server: http://localhost:11434 (OLLAMA_HOST)', 'usage log: ~/.ai-usage/ollama-usage.jsonl (written by the proxy)', 'server.log has request lines but no tokens; db.sqlite has chats but no tokens'],
     links: { get: 'https://ollama.com/download', docs: 'https://docs.ollama.com/api' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
@@ -1535,13 +1535,17 @@ async function parseFolderCached(connector, files, onProgress, cache) {
   const sibPats = connector.siblings || [];
   const main = files.filter(f => keep(f) && pats.some(re => re.test(f.path))).sort((a, b) => a.path < b.path ? -1 : 1);
   const siblingFiles = sibPats.length ? files.filter(f => keep(f) && sibPats.some(re => re.test(f.path))) : [];   // one filter per scan — handed to every per-file parser call by reference
+  // siblings feed the parser's output for the main file in the SAME directory (Cline: task_metadata.json → model), so their
+  // size+lastModified join that file's signature — an edited sibling is a cache miss even when the main file is untouched
+  const sibSig = new Map();   // dir → 'size\u0001lastModified' per sibling, path-sorted so the string is stable across scans
+  for (const s of [...siblingFiles].sort((a, b) => a.path < b.path ? -1 : 1)) { const dir = s.path.slice(0, s.path.lastIndexOf('/') + 1); sibSig.set(dir, (sibSig.get(dir) || '') + '\u0001' + s.file.size + '\u0001' + s.file.lastModified); }
   const rows = [], projects = [];
   let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0, lines = 0, badLines = 0, badFiles = 0;
   const runningSeen = new Set();
   const seen = new Set();   // signatures present in THIS scan — stale entries for absent files get pruned below
   const prefix = connector.id + '\u0001';
   for (const f of main) {
-    const sig = prefix + f.path + '\u0001' + f.file.size + '\u0001' + f.file.lastModified;
+    const sig = prefix + f.path + '\u0001' + f.file.size + '\u0001' + f.file.lastModified + (sibSig.get(f.path.slice(0, f.path.lastIndexOf('/') + 1)) || '');
     seen.add(sig);
     let entry = cache ? await cache.get(sig) : null;
     // an entry without `ids`, or whose ids collide with what's already been counted this scan, is a miss (re-parse)
@@ -1679,13 +1683,13 @@ async function parseGeminiCliSessions(files, onProgress, seen = new Set()) {
     for (const m of obj.messages) {
       if (!m || m.type === 'user') continue;
       const um = m.usageMetadata;
-      const t = m.tokens || (um ? { input: um.promptTokenCount, output: um.candidatesTokenCount, cached: um.cachedContentTokenCount, thoughts: um.thoughtsTokenCount } : null);
+      const t = m.tokens || (um ? { input: um.promptTokenCount, output: um.candidatesTokenCount, cached: um.cachedContentTokenCount, thoughts: um.thoughtsTokenCount, tool: um.toolUsePromptTokenCount } : null);
       if (!t) continue;
       if (m.id != null) { const id = sid + ':' + m.id; if (seen.has(id)) continue; seen.add(id); addedIds.push(id); }
-      const input = finTok(+t.input || 0), cached = finTok(+t.cached || 0), output = finTok(+t.output || 0), thoughts = finTok(+t.thoughts || 0);
+      const input = finTok(+t.input || 0), cached = finTok(+t.cached || 0), output = finTok(+t.output || 0), thoughts = finTok(+t.thoughts || 0), tool = finTok(+t.tool || 0);   // tool = toolUsePromptTokenCount: billed (uncached) input for built-in tools, not part of promptTokenCount
       const ts = m.timestamp ? new Date(m.timestamp) : null, okTs = ts && !isNaN(ts);
       agg.add(dayKey(okTs ? ts : file.lastModified), 'Gemini CLI', String(m.model || obj.model || 'gemini'),
-        { in: Math.max(0, input - cached), cr: cached, out: output + thoughts, msgs: 1 }, sid, okTs ? ts.getHours() : undefined);
+        { in: Math.max(0, input - cached) + tool, cr: cached, out: output + thoughts, msgs: 1 }, sid, okTs ? ts.getHours() : undefined);
       msgs++;
     }
     if (onProgress) onProgress(fi + 1, list.length);
@@ -3225,6 +3229,8 @@ const App = {
     if (c.keyLS) LS.del(c.keyLS);
     const keyInput = document.getElementById(id + '-key'); if (keyInput) keyInput.value = '';
     delete Store.connectors[id];
+    // an in-flight scan / fetch / server validation for this connector must NOT commit after the disconnect and resurrect it
+    this._gen[id] = (this._gen[id] || 0) + 1; this._gen[id + ':server'] = (this._gen[id + ':server'] || 0) + 1;
     if (id === 'local') { IDB.del('claudeDir'); this.dirHandle = null; }
     if (c.kind === 'folder-log' || c.kind === 'local-server') {
       delete this._dirHandles[id]; IDB.del('dir:' + id);   // unconditional: a handle may be persisted in IDB without being restored into memory (denied permission, early disconnect)
@@ -3796,8 +3802,12 @@ const App = {
       if (gen !== this._gen[slot]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }
       status.textContent = ''; status.dataset.gen = '';
       if (up) {
-        const msg = c.corsHint || ('Server is running at ' + base + ' but blocked this page (CORS) — allow this origin on the server, then validate again.');
-        Store.setConnector(c.id, { err: msg.slice(0, 80), serverLabel: null, label: this._dualLabel(c.id, { serverLabel: null }) });
+        // the probe only proves SOMETHING answered at base (any HTTP server, a proxy, another app on the port) — a CORS block by
+        // this server is the likely reason the validator failed, not a certainty: say so, keep the fix instruction
+        const name = c.name || 'the server';
+        const msg = c.corsHint ? c.corsHint.replace(/\{base\}/g, base)
+          : `Something answered at ${base} but this page could not read it — most likely ${name} blocking the origin (CORS). Allow this page's origin on the server, then validate again.`;
+        Store.setConnector(c.id, { err: `Could not read ${name} at ${base} — likely CORS (see card)`.slice(0, 80), serverLabel: null, label: this._dualLabel(c.id, { serverLabel: null }) });
         status.appendChild(el('span', { class: 'err', text: 'Blocked: ' }));
         status.appendChild(document.createTextNode(msg + (e && e.message && !/Failed to fetch/i.test(e.message) ? ` (${e.message})` : '')));
       } else if (this._dirHandles[c.id] || (Store.sources[c.id] && Store.connectors[c.id])) {
@@ -4315,6 +4325,7 @@ const App = {
     $('clear-data').addEventListener('click', () => {
       if (confirm('Clear all stored usage data from this browser? (Price edits and keys are kept.)')) {
         Store.clearAll(); IDB.del('claudeDir'); this.dirHandle = null;
+        for (const k of Object.keys(this._gen)) this._gen[k]++;   // every in-flight scan / fetch bails instead of re-committing the data just cleared
         for (const id of Object.keys(this._dirHandles)) IDB.del('dir:' + id); this._dirHandles = {}; document.querySelectorAll('.src.generic .rescan').forEach(b => { b.hidden = true; });
         $('rescan-local').hidden = true;
         for (const c of CONNECTORS) { const s = document.getElementById(c.statusEl); if (s) s.textContent = ''; }

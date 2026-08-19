@@ -82,6 +82,28 @@ export async function run({ browser, ok }) {
       return { got };
     });
     ok('scan-cache: v3 key prefix invalidates pre-hour entries', v3.got == null, JSON.stringify(v3));
+
+    // Cline/Roo: the model comes from the SIBLING task_metadata.json, so a changed sibling must invalidate the
+    // cached ui_messages.json rows (signature = main file + same-dir sibling size/lastModified), while an
+    // unchanged pair is still a cache hit.
+    const clA = fs.readFileSync(path.join(OUT, 'cline', 'tasks', '1786352400000', 'ui_messages.json'), 'utf8');
+    const clM = fs.readFileSync(path.join(OUT, 'cline', 'tasks', '1786352400000', 'task_metadata.json'), 'utf8');
+    const sib = await page.evaluate(async (a, m) => {
+      const c = connectorById('cline');
+      const ui = () => ({ path: 'tasks/1786352400000/ui_messages.json', file: new File([a], 'ui_messages.json', { lastModified: 1754000000000 }) });
+      const meta = (txt, lm) => ({ path: 'tasks/1786352400000/task_metadata.json', file: new File([txt], 'task_metadata.json', { lastModified: lm }) });
+      const m2 = m.replace('claude-sonnet-4.5', 'claude-opus-4.1-changed');   // different content → different size
+      const cache = new Map();
+      const r1 = await parseFolderCached(c, [ui(), meta(m, 1754000000000)], null, cache);
+      const r2 = await parseFolderCached(c, [ui(), meta(m, 1754000000000)], null, cache);        // unchanged pair → hit
+      const r3 = await parseFolderCached(c, [ui(), meta(m2, 1754000000001)], null, cache);       // sibling changed → miss, new model
+      const r4 = await parseFolderCached(c, [ui(), meta(m2, 1754000000001)], null, cache);       // and cached again
+      return { p1: r1.meta.parsedFiles, c2: r2.meta.cachedFiles, p2: r2.meta.parsedFiles, p3: r3.meta.parsedFiles, c4: r4.meta.cachedFiles,
+        m1: r1.rows[0] && r1.rows[0].model, m3: r3.rows[0] && r3.rows[0].model, m4: r4.rows[0] && r4.rows[0].model, files: r3.meta.files };
+    }, clA, clM);
+    ok('scan-cache: cline sibling task_metadata.json change invalidates the cached ui_messages rows (miss → new model); unchanged pair still hits',
+      sib.p1 === 1 && sib.c2 === 1 && sib.p2 === 0 && sib.p3 === 1 && sib.c4 === 1 && sib.m1 === 'claude-sonnet-4.5' && sib.m3 === 'claude-opus-4.1-changed' && sib.m4 === 'claude-opus-4.1-changed' && sib.files === 1,
+      JSON.stringify(sib));
   } finally {
     await page.close();
   }
