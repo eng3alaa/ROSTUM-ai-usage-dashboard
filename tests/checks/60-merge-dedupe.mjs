@@ -25,6 +25,28 @@ export async function run({ browser, ok }) {
       totals.n === 2 && totals.in === 300 && totals.out === 130, JSON.stringify(totals));
     ok('merge: re-dropping the same CSV does not double billed', Math.abs(totals.billed - 3.0) < 1e-9, totals.billed);
 
+    // Cursor usage-events CSV: a re-import REPLACES rows (one export = the full window), so it must replace the billed
+    // envelope too — a second export WITHOUT a Cost column must leave a truthful empty billed set (not stale dollars
+    // behind rows that no longer exist), and the import note must say whether the export carried a cost column.
+    const cursorRe = await page.evaluate(async () => {
+      localStorage.removeItem('aiusage:data');
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      const head = 'Date,Kind,Model,Max Mode,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens,Total Tokens';
+      const withCost = head + ',Cost\n2026-08-10T09:00:00.000Z,Usage-based,gpt-5.4,No,100,500,0,80,680,1.25\n';
+      const noCost = head + '\n2026-08-12T09:00:00.000Z,Included,gpt-5.4,No,100,500,0,80,680\n';
+      await App.handleImportFiles([new File([withCost], 'usage-events.csv', { type: 'text/csv' })]);
+      const first = { billed: Store.billedRows('cursor-csv').map(b => [b.d, b.amount]), note: document.getElementById('import-status').textContent };
+      await App.handleImportFiles([new File([noCost], 'usage-events (1).csv', { type: 'text/csv' })]);
+      const env = Store.billed['cursor-csv'];
+      const second = { billed: Store.billedRows('cursor-csv').map(b => [b.d, b.amount]), stale: env ? env.stale : null, days: Store.sources['cursor-csv'].rows.map(r => r.d), note: document.getElementById('import-status').textContent };
+      Store.sources = {}; Store.billed = {}; Store.persist();
+      return { first, second };
+    });
+    ok('cursor re-import: first export with a Cost column → billed [2026-08-10, 1.25]; note says "+ cost column"',
+      JSON.stringify(cursorRe.first.billed) === JSON.stringify([['2026-08-10', 1.25]]) && /\+ cost column/.test(cursorRe.first.note), JSON.stringify(cursorRe.first));
+    ok('cursor re-import: second export WITHOUT a Cost column replaces rows AND billed (billed empty, fresh not stale, rows = [2026-08-12]); note says "no cost column"',
+      cursorRe.second.billed.length === 0 && cursorRe.second.stale === false && JSON.stringify(cursorRe.second.days) === JSON.stringify(['2026-08-12']) && /no cost column/.test(cursorRe.second.note), JSON.stringify(cursorRe.second));
+
     const fs2 = await import('node:fs');
     const path2 = await import('node:path');
     const { OUT } = await import('../lib/harness.mjs');

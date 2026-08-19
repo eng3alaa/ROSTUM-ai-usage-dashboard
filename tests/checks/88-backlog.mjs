@@ -1,4 +1,6 @@
-import { openDashboard } from '../lib/harness.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { openDashboard, OUT } from '../lib/harness.mjs';
 
 export async function run({ browser, ok }) {
   const { page } = await openDashboard(browser);
@@ -223,6 +225,23 @@ export async function run({ browser, ok }) {
       norm['claude-opus-4-5'] === 'Claude Opus 5 / 4.5+' && norm['claude-sonnet-4-5-20250929'] === SON && norm['anthropic/claude-opus-4.1'] === OPUS4 && norm['gpt-5.4'] === 'GPT-5.4' && norm['gemini-2.5-pro'] === 'Gemini 2.5 Pro' && norm['claude-sonnet-3.5'] === SON && norm._noRawCacheLeak === OPUS4, JSON.stringify(norm));
     const hint = await page.evaluate(() => document.querySelector('#pricing-title .hint').textContent);
     ok('pricing-norm: price editor hint says patterns match the normalized id', /normali[sz]ed/i.test(hint) && /date/i.test(hint), hint);
+
+    // Dropping a non-Claude .jsonl (Codex rollout / Copilot CLI events / Continue / Junie / usage-logger) on the Imports
+    // dropzone routes to parseClaudeLogs, which finds 0 messages without throwing. That batch must NOT wipe prior
+    // local-import rows with an empty set, must NOT mark the Imports card connected, and the note must point at the
+    // tool's own hub card (sniff-routing of foreign .jsonl is backlog).
+    const codexText = fs.readFileSync(path.join(OUT, 'codex', 'sessions', '2026', '08', '10', 'rollout-2026-08-10T09-00-00-abc.jsonl'), 'utf8');
+    const foreign = await page.evaluate(async (text) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set();
+      Store.setSource('local-import', [{ d: todayKey(), platform: 'Claude Code/Desktop', model: 'claude-sonnet-5', in: 100, cw: 0, cr: 0, out: 50, msgs: 1, sid: 'prior-sess' }], {});
+      await App.handleImportFiles([new File([text], 'rollout-2026-08-10T09-00-00-abc.jsonl')]);
+      const src = Store.sources['local-import'];
+      const out = { rows: src ? src.rows.length : null, in: src && src.rows[0] ? src.rows[0].in : null, imports: Store.connectors.imports === undefined ? 'unset' : 'set', note: document.getElementById('import-status').textContent };
+      Store.sources = {}; Store.connectors = {}; Store.persist();
+      return out;
+    }, codexText);
+    ok('imports: a Codex-shaped .jsonl on the dropzone leaves prior local-import rows intact (1 row, in=100), does not connect the Imports card, note says no Claude Code messages + points at the hub',
+      foreign.rows === 1 && foreign.in === 100 && foreign.imports === 'unset' && /No Claude Code messages found in 1 \.jsonl file/.test(foreign.note) && /accounts hub/.test(foreign.note) && /Codex/.test(foreign.note), JSON.stringify(foreign));
   } finally {
     await page.close();
   }

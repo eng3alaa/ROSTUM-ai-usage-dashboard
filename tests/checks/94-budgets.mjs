@@ -74,6 +74,31 @@ export async function run({ browser, ok }) {
       floorPct.pct === 99 && /have used 99%/.test(floorPct.narrative) && !/are over/.test(floorPct.narrative),
       JSON.stringify(floorPct));
 
+    // The editor footer says "Platforms appear here once connected, budgeted, or once they have data" — that must hold for
+    // import-only platforms (Cursor / Gemini app / ChatGPT / Claude.ai have NO CONNECTORS entry, so the connector loop never
+    // reaches them) and for a platform shared by two connectors (GitHub Copilot: PAT card + CLI logs) when only the second is connected.
+    const editorRows = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; Budgets.limits = {}; LS.del('budgets');
+      const plats = () => [...document.querySelectorAll('#budget-editor .budget-row')].map(r => r.dataset.platform);
+      Store.setSource('cursor-csv', [{ d: todayKey(), platform: 'Cursor', model: 'gpt-5.4', in: 10, cw: 0, cr: 0, out: 5, msgs: 1 }], {});
+      App.renderBudgets();
+      const cursor = plats();
+      Store.sources = {};
+      Store.setConnector('copilot-cli', { label: '2 files', lastSync: Date.now() });   // only the SECOND GitHub Copilot connector is connected
+      App.renderBudgets();
+      const copilot = plats();
+      Store.connectors = {};
+      Budgets.set('Gemini app', 20);   // budgeted import-only platform, no data, no connector
+      App.renderBudgets();
+      const budgeted = plats();
+      Budgets.limits = {}; LS.del('budgets'); Store.persist();
+      return { cursor, copilot, budgeted };
+    });
+    ok('budgets editor: rows for platform "Cursor" present with no connector → a Cursor row (once)',
+      editorRows.cursor.filter(p => p === 'Cursor').length === 1 && editorRows.cursor[0] === 'total', JSON.stringify(editorRows.cursor));
+    ok('budgets editor: only copilot-cli connected → a "GitHub Copilot" row (once); budgeted "Gemini app" (no data, no connector) → a row',
+      editorRows.copilot.filter(p => p === 'GitHub Copilot').length === 1 && editorRows.budgeted.filter(p => p === 'Gemini app').length === 1 && !editorRows.budgeted.includes('GitHub Copilot'), JSON.stringify({ copilot: editorRows.copilot, budgeted: editorRows.budgeted }));
+
     const inf = await page.evaluate(() => {
       Budgets.set('total', '1e400');
       return Budgets.limits.total === undefined && !('total' in Budgets.limits);

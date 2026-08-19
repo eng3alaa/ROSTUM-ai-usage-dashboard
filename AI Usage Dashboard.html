@@ -2931,16 +2931,26 @@ const App = {
       inp.addEventListener('change', () => { Budgets.set(key, inp.value === '' ? null : +inp.value); this.render(); });
       const bar = el('div', { class: 'budget-bar' + (s ? (s.pct >= 100 ? ' over' : s.pct >= 80 ? ' warn' : '') : '') }, el('div', { class: 'fill', style: { width: (s ? Math.min(100, s.pct) : 0) + '%' } }));
       const note = el('div', { class: 'note', text: s ? `${fmtUSD(s.spent)} of ${fmtUSD(s.limit)} (${s.pct}%) · projected ${fmtUSD(s.projected)}` : 'no limit set' });
-      return el('div', { class: 'budget-row' }, el('div', { text: label }), inp, el('div', {}, bar, note));
+      return el('div', { class: 'budget-row', 'data-platform': key }, el('div', { text: label }), inp, el('div', {}, bar, note));
     };
     box.appendChild(rowFor('total', 'Total (all platforms)'));
     // the registry is large now — list Total + platforms you actually use (connected, budgeted, or with data), once per platform
-    const seenP = new Set(), hasData = new Set(Store.allRows().map(r => r.platform));
+    const emitted = new Set(), hasData = new Set(Store.allRows().map(r => r.platform));
+    const wanted = (p) => Budgets.limits[p] != null || hasData.has(p);
     for (const c of CONNECTORS) {
-      if (!c.platform || seenP.has(c.platform)) continue;
-      seenP.add(c.platform);
-      if (Budgets.limits[c.platform] == null && !hasData.has(c.platform) && Store.connectorStatus(c) === 'off') continue;
-      box.appendChild(rowFor(c.platform, c.name));
+      if (!c.platform || emitted.has(c.platform)) continue;
+      // a platform shared by two connectors (GitHub Copilot: PAT card + CLI logs) counts as connected when EITHER is — an
+      // 'off' first connector must not swallow the platform, so only an EMITTED platform is skipped, not a seen one
+      if (!wanted(c.platform) && Store.connectorStatus(c) === 'off') continue;
+      emitted.add(c.platform);
+      box.appendChild(rowFor(c.platform, CONNECTORS.find(x => x.platform === c.platform).name));   // label = the platform's first card, whichever connector triggered the row
+    }
+    // import-only platforms (Cursor / Gemini app / ChatGPT / Claude.ai) have no connector entry — list any platform with data
+    // or a budget that the loop above did not reach, so the note below is true
+    for (const p of [...Store.platforms(), ...Object.keys(Budgets.limits)]) {
+      if (p === 'total' || emitted.has(p) || !wanted(p)) continue;
+      emitted.add(p);
+      box.appendChild(rowFor(p, p));
     }
     box.appendChild(el('div', { class: 'note', text: 'Platforms appear here once connected, budgeted, or once they have data.' }));
   },
@@ -4005,7 +4015,7 @@ const App = {
           if (isCursorUsageCSV(headCells)) {
             const res = parseCursorUsageCSV(csvText);
             Store.setSource('cursor-csv', res.rows, res.meta);   // re-import replaces (one export = the full window)
-            if (res.billed.length) Store.setBilled('cursor-csv', res.billed);
+            Store.setBilled('cursor-csv', res.billed);   // always — [] is a truthful empty: an export without a Cost column must not leave stale dollars behind replaced rows
             notes.push(`${f.name}: Cursor usage-events CSV — ${res.meta.rows} events (exact tokens from the four additive columns${res.billed.length ? ' + cost column' : '; no cost column in this export'})`
               + (res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric or negative)` : '')
               + (res.meta.unreconciled ? ` — ${res.meta.unreconciled} row${res.meta.unreconciled === 1 ? '' : 's'} did not reconcile with Total Tokens (additive reading kept)` : ''));
@@ -4083,10 +4093,16 @@ const App = {
     if (jsonlFiles.length) {
       try {
         const res = await parseClaudeLogs(jsonlFiles, null);
-        if (res.projects.length && !Store.sources.local) Store.projects = res.projects;   // folder scan wins; assign BEFORE persist
-        Store.setSource('local-import', res.rows, res.meta);
-        notes.push(`${jsonlFiles.length} .jsonl files: ${fmtInt(res.meta.msgs)} messages imported`);
-        imported++;
+        if (res.meta.msgs === 0) {
+          // a non-Claude .jsonl (Codex rollout, Copilot CLI events, Continue, Junie, usage-logger) parses to 0 messages without
+          // throwing — do NOT replace prior local-import rows with an empty set and do NOT count it as an import
+          notes.push(`No Claude Code messages found in ${jsonlFiles.length} .jsonl file${jsonlFiles.length === 1 ? '' : 's'} — Codex / Copilot CLI / Continue / Junie logs connect through their own card in the accounts hub (pick the folder)`);
+        } else {
+          if (res.projects.length && !Store.sources.local) Store.projects = res.projects;   // folder scan wins; assign BEFORE persist
+          Store.setSource('local-import', res.rows, res.meta);
+          notes.push(`${jsonlFiles.length} .jsonl files: ${fmtInt(res.meta.msgs)} messages imported`);
+          imported++;
+        }
       } catch (e) { notes.push(`.jsonl import failed — ${e.message || e}`); }
     }
     clear(status);
