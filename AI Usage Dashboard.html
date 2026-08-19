@@ -1180,6 +1180,16 @@ const CONNECTORS = [
     qualityNote: 'Exact tokens from LM Studio chat files (~/.lmstudio/conversations/**/*.conversation.json): each assistant message\'s genInfo.stats carries promptTokensCount / predictedTokensCount and the model\'s load identifier. Only the currently selected version of a regenerated message is counted. Messages carry no timestamps — a whole chat lands on its createdAt/file date. LM Studio warns this structure is undocumented and may change, so the parser is defensive. Chats made through the API server are not written to this folder (no usage-history endpoint exists; the server\'s CORS toggle is off by default). LM Studio rows are priced $0 — runs on your hardware (the zero price is gated on this platform, not on model name, so a hosted model with the same base name elsewhere is priced normally).',
     paths: ['%USERPROFILE%\\.lmstudio\\conversations\\ (Windows)', '~/.lmstudio/conversations/ (macOS/Linux)', 'older installs: ~/.cache/lm-studio/conversations'],
     links: { get: 'https://lmstudio.ai', docs: 'https://lmstudio.ai/docs/app/basics/chat' } },
+  // ---- Wave 1 local-server connector (generic driver + optional usage-logger folder) ----
+  { id: 'ollama', platform: 'Ollama', name: 'Ollama', category: 'local', kind: 'local-server',
+    statusEl: 'ollama-status', brand: '#333333', mark: 'Ol', srcIds: ['ollama'],
+    baseUrl: 'http://localhost:11434', validate: 'validateOllama',
+    corsHint: 'Ollama is running but blocked this page (CORS). Set OLLAMA_ORIGINS="*" (or your page origin), restart Ollama, then validate again.',
+    patterns: [/usage[^/]*\.jsonl$/i], parser: 'parseUsageLoggerJsonl', hint: 'usage-logger JSONL files (ollama-usage.jsonl — see docs/tools/ollama-usage-logger.mjs)',
+    quality: 'exact',
+    qualityNote: 'Live check only: Ollama keeps no usage history and no per-request log — exact token counts (prompt_eval_count / eval_count) exist only inside each API response. This card verifies the server (GET /api/tags, /api/ps) and shows what is installed and loaded now. For history, run the one-file proxy docs/tools/ollama-usage-logger.mjs (it forwards requests to Ollama and appends exact per-request JSONL) and pick its output folder below. Desktop-app chats live in db.sqlite (SQLite, no token counts) — not read in this version. If validation says CORS: set OLLAMA_ORIGINS="*" and restart Ollama. Logged models are priced $0 — they run on your hardware; switch the "Local open-weight" price row to compare against hosted equivalents.',
+    paths: ['server: http://localhost:11434 (OLLAMA_HOST)', 'usage log: ~/.ai-usage/ollama-usage.jsonl (written by the proxy)', 'server.log has request lines but no tokens; db.sqlite has chats but no tokens'],
+    links: { get: 'https://ollama.com/download', docs: 'https://docs.ollama.com/api' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv'] },
 ];
@@ -2139,6 +2149,19 @@ async function fetchJSON(url, headers) {
   }
   return res.json();
 }
+/** Opaque reachability probe: resolves true if SOMETHING answers at url (even without CORS headers), false if
+ *  the connection fails. Lets connectServer tell "running but CORS-blocked" from "not running". */
+async function probeServer(url) {
+  try { await fetch(url + '/', { mode: 'no-cors', cache: 'no-store' }); return true; } catch { return false; }
+}
+/** Ollama live validate: /api/tags (installed) + /api/ps (loaded). No usage history exists on the server. */
+async function validateOllama(base) {
+  const tags = await fetchJSON(base + '/api/tags', {});
+  let ps = null; try { ps = await fetchJSON(base + '/api/ps', {}); } catch {}
+  const n = Array.isArray(tags && tags.models) ? tags.models.length : 0;
+  const loaded = ps && Array.isArray(ps.models) ? ps.models.length : 0;
+  return { label: `${n} models installed`, detail: `${n} models installed · ${loaded} loaded now · no usage history on the server (see the note; usage-logger JSONL is read from the folder below)` };
+}
 
 async function fetchCopilotAll(token) {
   const h = { 'Authorization': 'Bearer ' + token, 'X-GitHub-Api-Version': '2022-11-28', 'Accept': 'application/vnd.github+json' };
@@ -3048,6 +3071,7 @@ const App = {
     if (id === 'local') return this.rescan();
     const c = connectorById(id);
     if (c && c.kind === 'folder-log') return this.rescanFolder(id);
+    if (c && c.kind === 'local-server') { const jobs = [this.connectServer(c)]; if (this._dirHandles[id]) jobs.push(this.rescanFolder(id)); return Promise.all(jobs); }
     if (c && c.keyLS) {
       const inp = document.getElementById(id + '-key');
       const hasKey = (inp && inp.value.trim()) || LS.get(c.keyLS, null);
@@ -3586,6 +3610,41 @@ const App = {
       } catch (e) { console.warn(e); }
     }
   },
+  /** local-server driver: validate via the registry's `validate` fn; distinguish CORS-blocked (attention + fix) from not running (off). */
+  async connectServer(c) {
+    const status = $(c.id + '-status');
+    const gen = this._gen[c.id] = (this._gen[c.id] || 0) + 1;
+    const urlEl = $(c.id + '-url');
+    const base = ((urlEl && urlEl.value.trim()) || c.baseUrl).replace(/\/+$/, '');
+    LS.set('url:' + c.id, base);
+    status.textContent = 'Checking ' + base + '…'; status.dataset.gen = String(gen);
+    try {
+      const fn = globalThis[c.validate];
+      if (typeof fn !== 'function') throw new Error('No validator registered: ' + c.validate);
+      const res = await fn(base);
+      if (gen !== this._gen[c.id]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
+      Store.setConnector(c.id, { label: res.label, lastSync: Date.now(), err: null });
+      status.textContent = ''; status.dataset.gen = '';
+      status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
+      status.appendChild(document.createTextNode(res.detail || ''));
+      this.render();
+    } catch (e) {
+      if (gen !== this._gen[c.id]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }
+      const up = await probeServer(base).catch(() => false);
+      status.textContent = ''; status.dataset.gen = '';
+      if (up) {
+        const msg = c.corsHint || ('Server is running at ' + base + ' but blocked this page (CORS) — allow this origin on the server, then validate again.');
+        Store.setConnector(c.id, { err: msg.slice(0, 80) });
+        status.appendChild(el('span', { class: 'err', text: 'Blocked: ' }));
+        status.appendChild(document.createTextNode(msg + (e && e.message && !/Failed to fetch/i.test(e.message) ? ` (${e.message})` : '')));
+      } else {
+        // unreachable = not running → truly off, not an error state
+        delete Store.connectors[c.id]; Store.persist();
+        status.textContent = `Not running at ${base} — start it and validate again.`;
+      }
+      this.render();
+    }
+  },
 
   async pickFolder() {
     if (!window.showDirectoryPicker) { $('folder-fallback').click(); return; }
@@ -3908,6 +3967,7 @@ const App = {
     const jobs = [];
     if (this.dirHandle) jobs.push(this.rescan());
     for (const [id, h] of Object.entries(this._dirHandles)) if (h) jobs.push(this.rescanFolder(id));
+    for (const c of CONNECTORS) if (c.kind === 'local-server' && Store.connectors[c.id]) jobs.push(this.connectServer(c));
     for (const c of CONNECTORS) {
       if (!c.keyLS) continue;
       const el2 = document.getElementById(c.id + '-key');

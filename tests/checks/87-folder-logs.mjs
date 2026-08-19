@@ -266,6 +266,43 @@ export async function run({ browser, ok }) {
     ok('pricing: $0 is platform-gated (row.platform is a registered "local" connector) — a local-runner row prices at $0, but a hosted model with the same base name (Mistral API, Groq, OpenRouter) is NOT zero-priced',
       lm.localCost === 0 && lm.hostedStillPriced > 0 && lm.mistralApiHosted > 0 && lm.openrouterMistralHosted > 0 && lm.groqLlamaHosted > 0,
       JSON.stringify({ localCost: lm.localCost, hostedStillPriced: lm.hostedStillPriced, mistralApiHosted: lm.mistralApiHosted, openrouterMistralHosted: lm.openrouterMistralHosted, groqLlamaHosted: lm.groqLlamaHosted }));
+
+    // ---- T15: Ollama local-server ----
+    const ol = await page.evaluate(async (text) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      const c = connectorById('ollama');
+      const origFetch = fetchJSON, origProbe = probeServer;
+      window.fetchJSON = async (url) => {
+        const u = String(url);
+        if (u.endsWith('/api/tags')) return { models: [{ name: 'llama4:8b' }, { name: 'qwen3:14b' }] };
+        if (u.endsWith('/api/ps')) return { models: [{ name: 'llama4:8b' }] };
+        throw new Error('unexpected ' + u);
+      };
+      await App.connectServer(c);
+      const okState = { label: Store.connectors.ollama && Store.connectors.ollama.label, status: Store.connectorStatus(c), text: document.getElementById('ollama-status').textContent, url: LS.get('url:ollama', null) };
+      // server up but CORS-blocked: fetch throws TypeError, the no-cors probe succeeds
+      window.fetchJSON = async () => { throw new TypeError('Failed to fetch'); };
+      window.probeServer = async () => true;
+      await App.connectServer(c);
+      const cors = { err: Store.connectors.ollama && Store.connectors.ollama.err, status: Store.connectorStatus(c), text: document.getElementById('ollama-status').textContent };
+      // server down: the probe fails too → off (not an error state)
+      window.probeServer = async () => false;
+      await App.connectServer(c);
+      const down = { has: !!Store.connectors.ollama, status: Store.connectorStatus(c), text: document.getElementById('ollama-status').textContent };
+      window.fetchJSON = origFetch; window.probeServer = origProbe;
+      // the same card also reads usage-logger JSONL through the folder-log path
+      await App.scanFiles(c, [{ path: 'ollama-usage.jsonl', file: new File([text], 'ollama-usage.jsonl') }]);
+      const logged = Store.sources.ollama && Store.sources.ollama.rows.reduce((a, r) => a + r.in, 0);
+      Store.sources = {}; Store.connectors = {}; Store.persist();
+      return { okState, cors, down, logged, kind: c.kind, cat: c.category, quality: c.quality, card: !!document.getElementById('src-ollama') && !!document.getElementById('ollama-url') && !!document.getElementById('ollama-validate') && !!document.getElementById('ollama-pick'),
+        note: /no usage history|keeps no usage history/i.test(c.qualityNote) && /db\.sqlite/.test(c.qualityNote) };
+    }, logText);
+    ok('ollama: validates via stubbed /api/tags + /api/ps (label = models installed, detail = loaded now); URL persisted',
+      /2 models installed/.test(ol.okState.label || '') && ol.okState.status === 'ok' && /1 loaded/.test(ol.okState.text) && ol.okState.url === 'http://localhost:11434', JSON.stringify(ol.okState));
+    ok('ollama: CORS-blocked → attention with the OLLAMA_ORIGINS fix; unreachable → off ("not running")',
+      /OLLAMA_ORIGINS/.test(ol.cors.err || '') && ol.cors.status === 'warn' && /OLLAMA_ORIGINS/.test(ol.cors.text) && !ol.down.has && ol.down.status === 'off' && /not running/i.test(ol.down.text), JSON.stringify({ cors: ol.cors, down: ol.down }));
+    ok('ollama: one card = local-server validate + usage-logger folder (exact, honest note); logger rows land under the ollama source',
+      ol.kind === 'local-server' && ol.cat === 'local' && ol.quality === 'exact' && ol.card && ol.note && ol.logged === 1060, JSON.stringify(ol));
   } finally {
     await page.close();
   }
