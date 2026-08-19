@@ -119,6 +119,32 @@ export async function run({ browser, ok }) {
     ok('gemini-cli: session JSON → in=1800 cr=1700 out=470 msgs=3 (dup id + token-less message skipped); malformed file counted as badLines',
       gc.in === 1800 && gc.cr === 1700 && gc.out === 470 && gc.msgs === 3 && gc.files === 2 && gc.badLines === 1 && JSON.stringify(gc.models) === JSON.stringify(['gemini-3-flash', 'gemini-3-pro'])
       && gc.platform === 'Gemini CLI' && gc.hourOk && gc.sid === 'aaaa' && gc.ids === 3 && gc.kind === 'folder-log' && gc.cat === 'coding' && gc.card, JSON.stringify(gc));
+
+    // ---- T9: GitHub Copilot CLI ----
+    const cp1 = read('copilot', 'session-state', 'sess-1', 'events.jsonl'), cp2 = read('copilot', 'session-state', 'sess-2', 'events.jsonl');
+    const cpc = await page.evaluate(async (a, b) => {
+      const c = connectorById('copilot-cli');
+      const files = [{ path: 'session-state/sess-1/events.jsonl', file: new File([a], 'events.jsonl') }, { path: 'session-state/sess-2/events.jsonl', file: new File([b], 'events.jsonl') }];
+      const res = await parseCopilotCliEvents(files, null, new Set(), c);
+      const t = res.rows.reduce((x, r) => ({ in: x.in + r.in, cw: x.cw + r.cw, cr: x.cr + r.cr, out: x.out + r.out, msgs: x.msgs + r.msgs }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
+      // both copilot connectors share the platform: hub stats must come from each card's OWN source rows
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      Store.setSource('copilot-cli', res.rows.map(r => ({ ...r, d: dayKey(new Date()) })), {});
+      Store.setConnector('copilot-cli', { label: '2 files', lastSync: Date.now(), err: null });
+      Store.setSource('copilot', [{ d: dayKey(new Date()), platform: 'GitHub Copilot', model: 'copilot_premium_request', in: 0, cw: 0, cr: 0, out: 0, msgs: 7, est: 1 }], {});
+      Store.setConnector('copilot', { label: 'alaa-dev', lastSync: Date.now(), err: null });
+      App.renderHub();
+      const cliStats = document.querySelector('#accounts-hub .acct[data-connector="copilot-cli"] .acct-stats').textContent;
+      const patStats = document.querySelector('#accounts-hub .acct[data-connector="copilot"] .acct-stats').textContent;
+      const chips = [...document.querySelectorAll('#platform-chips .chip')].filter(ch => /GitHub Copilot/.test(ch.textContent)).length;
+      Store.sources = {}; Store.connectors = {}; Store.persist();
+      return { ...t, badLines: res.meta.badLines, platform: c.platform, samePlatform: c.platform === connectorById('copilot').platform, sids: [...new Set(res.rows.map(r => r.sid))].sort(),
+        cliStats, patStats, chipsBefore: chips, kind: c.kind, cat: c.category, card: !!document.getElementById('src-copilot-cli') };
+    }, cp1, cp2);
+    ok('copilot-cli: assistant.usage rows (dup id skipped, shutdown not double-counted) + shutdown-only fallback → in=2150 cw=100 cr=900 out=500 msgs=5; 1 bad line',
+      cpc.in === 2150 && cpc.cw === 100 && cpc.cr === 900 && cpc.out === 500 && cpc.msgs === 5 && cpc.badLines === 1 && JSON.stringify(cpc.sids) === JSON.stringify(['sess-1', 'sess-2']), JSON.stringify(cpc));
+    ok('copilot-cli: separate registry entry on the shared "GitHub Copilot" platform; hub cards show their own source stats',
+      cpc.platform === 'GitHub Copilot' && cpc.samePlatform && cpc.kind === 'folder-log' && cpc.cat === 'coding' && cpc.card && /tokens/.test(cpc.cliStats) && cpc.cliStats !== cpc.patStats, JSON.stringify({ cli: cpc.cliStats, pat: cpc.patStats }));
   } finally {
     await page.close();
   }

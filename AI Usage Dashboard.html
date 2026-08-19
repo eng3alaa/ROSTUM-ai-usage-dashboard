@@ -1127,6 +1127,13 @@ const CONNECTORS = [
     qualityNote: 'Exact tokens from Gemini CLI\'s auto-recorded sessions (session-*.json: per-response input / output / cached / thoughts counts and model). Google\'s docs do not publish the field names, so the parser sniffs tokens{} (and usageMetadata{}) defensively. Sessions auto-prune after 30 days / 50 files by default — import regularly. Cost is API-equivalent at list prices (Code Assist quota is not exposed).',
     paths: ['%USERPROFILE%\\.gemini\\tmp\\<project_hash>\\chats\\session-*.json (Windows)', '~/.gemini/tmp/<hash>/chats/ (macOS/Linux)', 'GEMINI_CLI_HOME overrides ~/.gemini'],
     links: { get: 'https://github.com/google-gemini/gemini-cli', docs: 'https://geminicli.com/docs/cli/session-management/' } },
+  { id: 'copilot-cli', platform: 'GitHub Copilot', name: 'GitHub Copilot CLI (logs)', category: 'coding', kind: 'folder-log',
+    statusEl: 'copilot-cli-status', brand: '#8957e5', mark: 'Cl', srcIds: ['copilot-cli'],
+    patterns: [/(^|\/)events\.jsonl$/i], parser: 'parseCopilotCliEvents', hint: 'session-state/<session-id>/events.jsonl (pick ~/.copilot)',
+    quality: 'exact',
+    qualityNote: 'Exact tokens from Copilot CLI session events (events.jsonl: assistant.usage carries server-reported input / output / cache-read / cache-write tokens and model; session.shutdown holds per-model totals, used only when a session has no per-request events). Documented by GitHub; the exact field paths were verified against third-party parsers, so the parser is tolerant. This is separate from the GitHub Copilot billing card (PAT) — both roll up under the GitHub Copilot platform. VS Code Copilot Chat has no local token log unless you enable its OTel file export (Wave 2 parser).',
+    paths: ['%USERPROFILE%\\.copilot\\session-state\\<session-id>\\events.jsonl (Windows)', '~/.copilot/session-state/… (macOS/Linux)'],
+    links: { get: 'https://github.com/github/copilot-cli', docs: 'https://docs.github.com/en/copilot/concepts/agents/copilot-cli/chronicle', usage: 'https://github.com/settings/billing' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv'] },
 ];
@@ -1585,6 +1592,46 @@ async function parseGeminiCliSessions(files, onProgress, seen = new Set()) {
     if (onProgress) onProgress(fi + 1, list.length);
   }
   return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines, addedIds } };
+}
+
+/** GitHub Copilot CLI — ~/.copilot/session-state/<sid>/events.jsonl. Per-request `assistant.usage` events
+ *  (data.model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens; camelCase or snake_case) are the
+ *  source of truth; `session.shutdown` data.modelMetrics is used ONLY when a file has no usage events at all
+ *  (older CLIs / crashed sessions), as one row per model with msgs = requests.count. Dedupe by sid:eventId. */
+async function parseCopilotCliEvents(files, onProgress, seen = new Set()) {
+  const agg = makeAgg(); const addedIds = []; let msgs = 0; const k = { lines: 0, badLines: 0 };
+  const list = files.filter(f => /(^|\/)events\.jsonl$/i.test(f.path));
+  const num = (o, a, b) => finTok(+(o[a] ?? o[b] ?? 0) || 0);
+  for (let fi = 0; fi < list.length; fi++) {
+    const { path, file } = list[fi];
+    const parts = path.split('/'); const sid = parts.length > 1 ? parts[parts.length - 2] : (path.replace(/\.jsonl$/i, ''));
+    let usageEvents = 0; const shutdowns = [];
+    await eachJsonl(file, (o) => {
+      const d = o.data || o.payload || o;
+      const type = String(o.type || o.event || '');
+      if (type === 'assistant.usage') {
+        if (o.id != null) { const id = sid + ':' + o.id; if (seen.has(id)) return; seen.add(id); addedIds.push(id); }
+        const ts = o.timestamp ? new Date(o.timestamp) : null, okTs = ts && !isNaN(ts);
+        agg.add(dayKey(okTs ? ts : file.lastModified), 'GitHub Copilot', String(d.model || 'copilot'),
+          { in: num(d, 'inputTokens', 'input_tokens'), out: num(d, 'outputTokens', 'output_tokens'), cr: num(d, 'cacheReadTokens', 'cache_read_tokens'), cw: num(d, 'cacheWriteTokens', 'cache_write_tokens'), msgs: 1 },
+          sid, okTs ? ts.getHours() : undefined);
+        msgs++; usageEvents++;
+      } else if (type === 'session.shutdown' && d.modelMetrics && typeof d.modelMetrics === 'object') {
+        shutdowns.push({ ts: o.timestamp, metrics: d.modelMetrics });
+      }
+    }, k);
+    if (!usageEvents) for (const s of shutdowns) {
+      const ts = s.ts ? new Date(s.ts) : null, okTs = ts && !isNaN(ts);
+      for (const [model, m] of Object.entries(s.metrics)) {
+        const u = (m && m.usage) || {}, n = finTok(+((m && m.requests && m.requests.count) ?? 1) || 0) || 1;
+        agg.add(dayKey(okTs ? ts : file.lastModified), 'GitHub Copilot', model,
+          { in: num(u, 'inputTokens', 'input_tokens'), out: num(u, 'outputTokens', 'output_tokens'), cr: num(u, 'cacheReadTokens', 'cache_read_tokens'), cw: num(u, 'cacheWriteTokens', 'cache_write_tokens'), msgs: n }, sid, okTs ? ts.getHours() : undefined);
+        msgs += n;
+      }
+    }
+    if (onProgress) onProgress(fi + 1, list.length);
+  }
+  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds } };
 }
 
 const ScanCache = {
