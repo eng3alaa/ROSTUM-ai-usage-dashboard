@@ -59,3 +59,5 @@ v1.1 (branch `v1.1-defect-fixes`) fixes 11 of the 13 verified defects — #5 (co
 Plan 2 (branch v2-accounts-hub) closes #5 (CONNECTORS registry) and #7 (incremental scan cache).
 
 Plan 3 (branch v3-rich-content) delivers the four rich-content packs and closes backlog 2–4, 9–18.
+
+Plan 4a (branch v4a-view-folder-logs) delivers Wave 1 of the every-LLM spec: view layer (hide/unhide cards, sections, insights, legacy sources), hub groups + search, the generic folder-log driver, 9 folder-log parsers, Ollama local-server + usage-logger, Gemini Takeout + Cursor CSV importers.

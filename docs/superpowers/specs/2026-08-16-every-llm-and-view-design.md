@@ -103,6 +103,8 @@ Groups in this order: **Coding tools · Chat apps · Local runners · API vendor
 
 Wave assignment: **Wave 1** = View layer, hub grouping/search, `folder-log` driver + parsers (Codex CLI, Gemini CLI, Copilot CLI, Continue.dev, Cline, Roo Code, Aider, JetBrains Junie, LM Studio, Ollama history), Ollama `local-server` live-validate + usage-logger doc, Gemini Takeout export parser, Cursor CSV export parser. **Wave 2** = LocalAI history, vLLM/llama.cpp metrics-poll, GPT4All/Jan/text-generation-webui, Fireworks + DeepSeek api-key, cloud-token trio (Azure/Vertex/Bedrock), remaining export parsers (Grok, MS Copilot, Perplexity, Meta AI, DeepSeek chat/API ZIP), validate-only vendors (Mistral, Cohere, Together, Groq, HF, xAI, Perplexity API, Windsurf), link-only (Amazon Q, Replicate), Claude.ai Enterprise Analytics API (admin-key kind).
 
+Wave 1 status: DONE (Plan 4a) — with Ollama desktop db.sqlite history deferred to Wave 2 (needs sql.js), and folder-log projects not yet surfaced in the Projects table.
+
 ## Honesty rules
 
 - Card copy states data quality first: **exact / estimated / validate-only / no data**. Estimated rows carry `est.`.
@@ -110,6 +112,8 @@ Wave assignment: **Wave 1** = View layer, hub grouping/search, `folder-log` driv
 - Cloud tokens: never persisted; card explains minting (`az account get-access-token`, `gcloud auth print-access-token`, IAM read-only key).
 - No card claims web-login access to consumer chat usage; chat-app cards say "usage comes from your data export".
 - Anyscale intentionally excluded; Amazon Q / Replicate / Windsurf link-only with the reason.
+
+**Pricing note.** Local-runner rows (category local: LM Studio, Ollama) are priced $0 by platform, not by model name — hosted models with the same base names (Mistral API, Groq, OpenRouter) still price normally. Users with a saved custom price list keep it as-is (Pricing.load takes the saved list wholesale); Reset to defaults picks up new rows.
 
 ## Storage & migration
 
