@@ -211,6 +211,24 @@ export async function run({ browser, ok }) {
     ok('junie: LlmResponseEvent records → in=2700 cr=600 out=360 msgs=3 (tolerant nesting); truncated line = badLines; both IDE and CLI file names match',
       ju.in === 2700 && ju.cr === 600 && ju.out === 360 && ju.msgs === 3 && ju.badLines === 1 && JSON.stringify(ju.models) === JSON.stringify(['claude-sonnet-4.5', 'gpt-5.4']) && ju.platform === 'JetBrains Junie' && ju.hourOk && ju.matched, JSON.stringify(ju));
     ok('junie: card is honest about coverage (estimated; Junie runs only)', ju.quality === 'estimated' && ju.noteOk && ju.kind === 'folder-log' && ju.cat === 'coding' && ju.card, JSON.stringify(ju));
+
+    // ---- T14: LM Studio ----
+    const lmA = read('lmstudio', 'conversations', '1723', 'chat.conversation.json'), lmB = read('lmstudio', 'conversations', '1723', 'bad.conversation.json');
+    const lm = await page.evaluate(async (a, b) => {
+      App.renderHub();   // hub query below needs a fresh synchronous render (App.render() is rAF-batched)
+      const c = connectorById('lmstudio');
+      const res = await parseLmStudioConversations([{ path: 'conversations/1723/chat.conversation.json', file: new File([a], 'chat.conversation.json') }, { path: 'conversations/1723/bad.conversation.json', file: new File([b], 'bad.conversation.json') }], null, new Set(), c);
+      const t = res.rows.reduce((x, r) => ({ in: x.in + r.in, out: x.out + r.out, msgs: x.msgs + r.msgs }), { in: 0, out: 0, msgs: 0 });
+      return { ...t, files: res.meta.files, badLines: res.meta.badLines, models: [...new Set(res.rows.map(r => r.model))].sort(), platform: res.rows[0].platform, days: [...new Set(res.rows.map(r => r.d))], expDay: dayKey(new Date('2026-08-10T09:00:00.000Z')),
+        kind: c.kind, cat: c.category, card: !!document.getElementById('src-lmstudio'), hub: !!document.querySelector('#accounts-hub .hub-group[data-group="local"] .acct[data-connector="lmstudio"]'),
+        // honesty: local open-weight models run on your hardware → API-equivalent cost must be $0, not the "Unknown model" fallback price
+        localCost: (Pricing.load(), Pricing.cost('llama-3.3-70b', { in: 1_000_000, out: 1_000_000, cw: 0, cr: 0 })), hostedStillPriced: Pricing.cost('claude-sonnet-5', { in: 1_000_000, out: 0, cw: 0, cr: 0 }) };
+    }, lmA, lmB);
+    ok('lmstudio: genInfo.stats per selected assistant version → in=1970 out=350 msgs=3; regenerated sibling ignored; malformed file = badLines; day from createdAt',
+      lm.in === 1970 && lm.out === 350 && lm.msgs === 3 && lm.files === 2 && lm.badLines === 1 && JSON.stringify(lm.models) === JSON.stringify(['llama-4-8b', 'qwen3-14b']) && lm.platform === 'LM Studio'
+      && lm.days.length === 1 && lm.days[0] === lm.expDay, JSON.stringify(lm));
+    ok('lmstudio: registry entry is a Local-runner folder-log card', lm.kind === 'folder-log' && lm.cat === 'local' && lm.card && lm.hub, JSON.stringify(lm));
+    ok('pricing: local open-weight models (llama/qwen/mistral/…) price at $0 — they run on your hardware; hosted rows untouched', lm.localCost === 0 && lm.hostedStillPriced > 0, JSON.stringify({ localCost: lm.localCost, hosted: lm.hostedStillPriced }));
   } finally {
     await page.close();
   }

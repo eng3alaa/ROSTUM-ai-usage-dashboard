@@ -140,6 +140,21 @@ export async function generate() {
     jl({ timestamp: '2026-08-10T21:00:00.000Z', event: { type: 'LlmResponseEvent', modelName: 'gpt-5.4', usage: { inputTokens: 300, outputTokens: 40 } } }),
     jl({ timestamp: '2026-08-10T21:00:30.000Z', event: { type: 'AgentFinishedEvent' } }),
   ].join('\n') + '\n');
+
+  // T14 — LM Studio conversation. Only the SELECTED version of a regenerated message counts (v1: 250 out; v0's 300 is ignored); a multiStep with two content blocks counts both.
+  //   Expected: in=120+900+950=1970 out=250+40+60=350 msgs=3 · models llama-4-8b + qwen3-14b (short identifier preferred over the publisher-prefixed indexedModelIdentifier) · files=2 badLines=1 · day = local day of 2026-08-10T09:00Z (createdAt)
+  const gi = (ident, indexed, p, o) => ({ type: 'contentBlock', content: [{ type: 'text', text: '…' }], genInfo: { indexedModelIdentifier: indexed, identifier: ident, loadModelConfig: {}, predictionConfig: {}, stats: { stopReason: 'eosFound', tokensPerSecond: 42, timeToFirstTokenSec: 0.2, totalTimeSec: 3, promptTokensCount: p, predictedTokensCount: o, totalTokensCount: p + o } } });
+  w('lmstudio/conversations/1723/chat.conversation.json', JSON.stringify({
+    name: 'test chat', createdAt: T('2026-08-10T09:00:00.000Z'), pinned: false, perChatPredictionConfig: {}, tokenCount: 0,
+    messages: [
+      { versions: [{ type: 'singleStep', role: 'user', content: [{ type: 'text', text: 'hi' }] }], currentlySelected: 0 },
+      { versions: [
+        { type: 'multiStep', role: 'assistant', steps: [gi('llama-4-8b', 'lmstudio-community/Llama-4-8B', 120, 300)] },
+        { type: 'multiStep', role: 'assistant', steps: [gi('llama-4-8b', 'lmstudio-community/Llama-4-8B', 120, 250)] } ], currentlySelected: 1 },
+      { versions: [{ type: 'multiStep', role: 'assistant', steps: [gi('qwen3-14b', undefined, 900, 40), { type: 'toolCallRequest', toolCallRequest: {} }, gi('qwen3-14b', undefined, 950, 60)] }], currentlySelected: 0 },
+      { versions: [{ type: 'singleStep', role: 'assistant', content: [{ type: 'text', text: 'no genInfo here' }] }], currentlySelected: 0 },
+    ] }, null, 1));
+  w('lmstudio/conversations/1723/bad.conversation.json', '{"name":"broken",');
 }
 
 if (process.argv[1] === import.meta.filename) await generate();
