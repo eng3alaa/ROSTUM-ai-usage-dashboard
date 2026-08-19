@@ -65,6 +65,22 @@ export async function run({ browser, ok }) {
       ok('view: collapse survives reload', again.pref && again.display === 'none', JSON.stringify(again));
     } finally { await p2.close(); }
     await page.evaluate(() => { LS.del('view'); View.load(); App.applyCollapse(); });   // leave page 1 expanded for the next blocks
+
+    // ---- T3: insight hide ----
+    const ins = await page.evaluate(() => {
+      LS.del('view'); View.load(); App.applyCollapse(); App.applyInsightHides(); App._render();
+      const card = document.querySelector('#insights .insight[data-insight="cache"]');
+      card.querySelector('.insight-hide').click();
+      const hidden = card.hidden;
+      const chip = document.querySelector('#insights-chips .insights-hidden-chip');
+      const pref = View.isInsightHidden('cache');
+      const chipText = chip && chip.textContent;
+      chip.click();
+      return { hidden, chipText, pref, restored: card.hidden === false, chipGone: !document.querySelector('#insights-chips .insights-hidden-chip'), prefAfter: View.isInsightHidden('cache'),
+        stillSeven: document.querySelectorAll('#insights .insight').length === 7 };
+    });
+    ok('view: insight ✕ hides one card; "show all" chip restores; DOM keeps all 7 cards',
+      ins.hidden && /1 insight hidden — show all/.test(ins.chipText || '') && ins.pref && ins.restored && ins.chipGone && !ins.prefAfter && ins.stillSeven, JSON.stringify(ins));
   } finally {
     await page.close();
   }
