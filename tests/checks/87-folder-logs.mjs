@@ -303,6 +303,34 @@ export async function run({ browser, ok }) {
       /OLLAMA_ORIGINS/.test(ol.cors.err || '') && ol.cors.status === 'warn' && /OLLAMA_ORIGINS/.test(ol.cors.text) && !ol.down.has && ol.down.status === 'off' && /not running/i.test(ol.down.text), JSON.stringify({ cors: ol.cors, down: ol.down }));
     ok('ollama: one card = local-server validate + usage-logger folder (exact, honest note); logger rows land under the ollama source',
       ol.kind === 'local-server' && ol.cat === 'local' && ol.quality === 'exact' && ol.card && ol.note && ol.logged === 1060, JSON.stringify(ol));
+
+    // ---- T16: exports (Gemini Takeout + Cursor CSV) ----
+    const takeout = read('takeout', 'MyActivity.json'), cursorCsv = read('cursor', 'usage-events.csv');
+    const ex = await page.evaluate(async (tk, cs) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      const kind = sniffJSON(JSON.parse(tk), 'MyActivity.json');
+      const g = parseGeminiTakeout(JSON.parse(tk));
+      const gt = g.rows.reduce((a, r) => ({ in: a.in + r.in, out: a.out + r.out, msgs: a.msgs + r.msgs, est: a.est && r.est === 1 }), { in: 0, out: 0, msgs: 0, est: true });
+      const head = parseCSV(cs.split(/\r?\n/, 1)[0])[0].map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+      const isCursor = isCursorUsageCSV(head), isGenericHead = isCursorUsageCSV(['date', 'platform', 'model', 'input_tokens', 'output_tokens']);
+      const cu = parseCursorUsageCSV(cs);
+      const ct = cu.rows.reduce((a, r) => ({ in: a.in + r.in, cw: a.cw + r.cw, cr: a.cr + r.cr, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
+      await App.handleImportFiles([new File([tk], 'MyActivity.json', { type: 'application/json' }), new File([cs], 'usage-events.csv', { type: 'text/csv' })]);
+      const notes = document.getElementById('import-status').textContent;
+      const out = { kind, gt, gPlat: g.rows[0].platform, gSkipped: g.meta.skipped, gHourOk: g.rows.some(r => r.hour === new Date('2026-08-10T21:30:00.000Z').getHours()),
+        isCursor, isGenericHead, ct, cPlat: cu.rows[0].platform, cRejected: cu.meta.rejected, cBilled: cu.billed.length,
+        srcT: !!Store.sources['gemini-takeout'], srcC: !!Store.sources['cursor-csv'], genericCsvUntouched: !Store.sources.csv, notes,
+        badge: document.querySelector('#src-import .badge').textContent, imports: connectorById('imports').srcIds, order: PLATFORM_ORDER };
+      Store.sources = {}; Store.connectors = {}; Store.persist();
+      return out;
+    }, takeout, cursorCsv);
+    ok('takeout: MyActivity.json sniffed as gemini-takeout and parsed (est. in=16 out=23 msgs=3; 2 records skipped; hour kept) as platform "Gemini app"',
+      ex.kind === 'gemini-takeout' && ex.gt.in === 16 && ex.gt.out === 23 && ex.gt.msgs === 3 && ex.gt.est && ex.gPlat === 'Gemini app' && ex.gSkipped === 2 && ex.gHourOk, JSON.stringify(ex.gt));
+    ok('cursor: usage-events CSV detected (generic CSV header is NOT) and parsed exactly (in=4010 cw=700 cr=900 out=985 msgs=4; 1 rejected cell; no cost column)',
+      ex.isCursor && !ex.isGenericHead && ex.ct.in === 4010 && ex.ct.cw === 700 && ex.ct.cr === 900 && ex.ct.out === 985 && ex.ct.msgs === 4 && ex.cPlat === 'Cursor' && ex.cRejected === 1 && ex.cBilled === 0, JSON.stringify(ex.ct));
+    ok('imports: drop zone routes both formats to their own sources (generic csv untouched); badge + srcIds + PLATFORM_ORDER list them',
+      ex.srcT && ex.srcC && ex.genericCsvUntouched && /Gemini Takeout/.test(ex.notes) && /Cursor/.test(ex.notes) && /Takeout/.test(ex.badge) && /Cursor/.test(ex.badge)
+      && ex.imports.includes('gemini-takeout') && ex.imports.includes('cursor-csv') && ex.order.includes('Gemini app') && ex.order.includes('Cursor'), JSON.stringify({ notes: ex.notes, badge: ex.badge, imports: ex.imports }));
   } finally {
     await page.close();
   }

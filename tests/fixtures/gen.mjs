@@ -156,6 +156,26 @@ export async function generate() {
       { versions: [{ type: 'singleStep', role: 'assistant', content: [{ type: 'text', text: 'no genInfo here' }] }], currentlySelected: 0 },
     ] }, null, 1));
   w('lmstudio/conversations/1723/bad.conversation.json', '{"name":"broken",');
+
+  // T16a — Gemini Takeout MyActivity.json. estTok = round(chars/4). r1: prompt 40 → 10, html 80 → 20 · r2: 20 → 5, 'Hi & bye' 8 → 2 · r3: 4 → 1, 'ok !!' 5 → 1
+  //   Expected: in=16 out=23 msgs=3 skipped=2 (a YouTube record + an undated Gemini record) · platform 'Gemini app' · est
+  w('takeout/MyActivity.json', JSON.stringify([
+    { header: 'Gemini Apps', title: 'Prompted ' + 'x'.repeat(40), time: '2026-08-10T09:00:00.000Z', safeHtmlItem: [{ html: '<p>' + 'y'.repeat(80) + '</p>' }], products: ['Gemini Apps'], activityControls: ['Gemini Apps Activity'] },
+    { header: 'Gemini Apps', title: 'Prompted ' + 'abcdefghij'.repeat(2), time: '2026-08-10T21:30:00.000Z', safeHtmlItem: [{ html: 'Hi &amp; bye' }], products: ['Gemini Apps'] },
+    { header: 'YouTube', title: 'Watched something', time: '2026-08-10T22:00:00.000Z', products: ['YouTube'] },
+    { header: 'Gemini Apps', title: 'Prompted abcd', time: '2026-08-11T08:00:00.000Z', safeHtmlItem: [{ html: '<b>ok</b>!!' }], products: ['Gemini Apps'] },
+    { header: 'Gemini Apps', title: 'Prompted no time on this one', safeHtmlItem: [{ html: 'x' }], products: ['Gemini Apps'] },
+  ], null, 1));
+  // T16b — Cursor usage-events CSV (header set as reported by users on forum.cursor.com; parsed defensively).
+  //   row1: in 1000, cw 200 (1200−1000), cr 900, out 300 · row2: in 500, cw 0, out 80 · row3: in 2500, cw 500, out 600 · row4: 'abc' rejected → in 10, cw 0, out 5
+  //   Expected: in=4010 cw=700 cr=900 out=985 msgs=4 rejected=1 · platform Cursor · no cost column → no billed rows
+  w('cursor/usage-events.csv', [
+    'Date,Kind,Model,Max Mode,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens,Total Tokens',
+    '2026-08-10T09:00:00.000Z,Included,claude-4.5-sonnet,No,1200,1000,900,300,2400',
+    '2026-08-10T09:30:00.000Z,Included,claude-4.5-sonnet,No,500,500,0,80,580',
+    '2026-08-11T10:00:00.000Z,Usage-based,gpt-5.4,Yes,3000,2500,0,600,3600',
+    '2026-08-11T10:05:00.000Z,Included,gpt-5.4,No,abc,10,0,5,15',
+  ].join('\n') + '\n');
 }
 
 if (process.argv[1] === import.meta.filename) await generate();

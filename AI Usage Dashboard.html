@@ -649,12 +649,15 @@ progress { width: 160px; height: 8px; }
     </div>
 
     <div class="card src" id="src-import">
-      <div class="card-head"><h2>Imports</h2><span class="badge">ChatGPT · Claude.ai · Gemini · CSV</span></div>
+      <div class="card-head"><h2>Imports</h2><span class="badge">ChatGPT · Claude.ai · Gemini Takeout · Cursor CSV · CSV</span></div>
       <div class="desc">
         Drop exported files here:
-        <b>ChatGPT</b> data export (<code>conversations.json</code>) · <b>Claude.ai</b> data export (<code>conversations.json</code>) ·
+        <b>ChatGPT</b> data export (<code>conversations.json</code>; tokens estimated from text) · <b>Claude.ai</b> data export (<code>conversations.json</code>; estimated) ·
+        <b>Gemini</b> Google Takeout (<code>My Activity/Gemini Apps/MyActivity.json</code> — pick JSON format in Takeout; estimated from text, one record per prompt) ·
+        <b>Cursor</b> usage-events CSV (cursor.com/dashboard → Usage → Export CSV; exact tokens, cost only if the column is present) ·
         API responses saved by the PowerShell commands · or a generic <b>CSV</b>
-        (<code>date, platform, model, input_tokens, output_tokens[, cache_read_tokens, cache_write_tokens, cost_usd]</code>) — handy for Gemini, which has no usage API.
+        (<code>date, platform, model, input_tokens, output_tokens[, cache_read_tokens, cache_write_tokens, cost_usd]</code>) — handy for the Gemini API, which has no usage endpoint.
+        Consumer chat apps expose no usage API a local page can call — their usage comes from your data export.
       </div>
       <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Import files">
         Drop files here, or click to choose
@@ -1191,7 +1194,7 @@ const CONNECTORS = [
     paths: ['server: http://localhost:11434 (OLLAMA_HOST)', 'usage log: ~/.ai-usage/ollama-usage.jsonl (written by the proxy)', 'server.log has request lines but no tokens; db.sqlite has chats but no tokens'],
     links: { get: 'https://ollama.com/download', docs: 'https://docs.ollama.com/api' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
-    statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv'] },
+    statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv'] },
 ];
 const connectorById = (id) => CONNECTORS.find(c => c.id === id);
 /* Platforms that run on the user's own hardware (category:'local') — Pricing.cost() zero-prices rows
@@ -1210,7 +1213,7 @@ const QUALITY_LABEL = { exact: 'exact', estimated: 'estimated', validate: 'valid
 
 // deduped: several connectors may share one platform (GitHub Copilot billing + Copilot CLI logs)
 const PLATFORM_ORDER = [...new Set(CONNECTORS.map(c => c.platform).filter(Boolean))]
-  .concat(['ChatGPT', 'Claude.ai', 'Other']);
+  .concat(['ChatGPT', 'Claude.ai', 'Gemini app', 'Cursor', 'Other']);   // import-only platforms without their own connector entry; Other stays last
 
 const Store = {
   sources: {},       // srcId -> { rows: [], meta: {} }
@@ -1959,6 +1962,26 @@ function parseClaudeAiExport(convs, assumedModel) {
   return { rows: agg.rows(), meta: { msgs, convs: convs.length } };
 }
 
+/** Google Takeout — My Activity/Gemini Apps/MyActivity.json: array of activity records {header:'Gemini Apps',
+ *  title:'Prompted <text>', time, safeHtmlItem:[{html}], products:['Gemini Apps']}. One record = one prompt +
+ *  response, no conversation tree, no model, no tokens → estimated from text; input = the prompt only (lower bound).
+ *  Non-Gemini and undated records are skipped and counted. */
+function parseGeminiTakeout(arr) {
+  const agg = makeAgg(); let msgs = 0, skipped = 0;
+  const strip = (h) => String(h || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
+  const isGemini = (r) => r.header === 'Gemini Apps' || (Array.isArray(r.products) && r.products.includes('Gemini Apps'));
+  for (const r of arr) {
+    if (!r || typeof r !== 'object' || !isGemini(r)) { skipped++; continue; }
+    const ts = r.time ? new Date(r.time) : null;
+    if (!ts || isNaN(ts)) { skipped++; continue; }
+    const prompt = String(r.title || '').replace(/^Prompted\s+/i, '');
+    const resp = Array.isArray(r.safeHtmlItem) ? r.safeHtmlItem.map(x => strip(x && x.html)).join(' ') : '';
+    agg.add(dayKey(ts), 'Gemini app', 'gemini (app)', { in: estTok(prompt.length), out: estTok(resp.length), msgs: 1, est: 1 }, undefined, ts.getHours());
+    msgs++;
+  }
+  return { rows: agg.rows(), meta: { msgs, skipped, records: arr.length } };
+}
+
 /** Parses a large chat export off the main thread via a Blob-sourced Worker, so a big
  *  ChatGPT/Claude.ai export doesn't freeze the tab. Rebuilds the parse functions' source
  *  inside the worker (Workers don't share scope with the page) — every free identifier
@@ -2059,6 +2082,38 @@ function parseGenericCSV(text) {
     if (iCost >= 0 && c[iCost] !== '') billed.set(d, (billed.get(d) || 0) + numSigned(iCost));
   }
   return { rows: agg.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })), meta: { rows: rows.length - 1, rejected } };
+}
+
+/* Cursor dashboard "usage events" CSV (individual users: cursor.com/dashboard → Usage → Export CSV). Header cells as
+ * reported by users: Date, Kind, Model, Max Mode, Input (w/ Cache Write), Input (w/o Cache Write), Cache Read,
+ * Output Tokens, Total Tokens[, Cost][, User]. Not officially documented → detected + parsed defensively.
+ * `head` = header cells normalized to lowercase_with_underscores. */
+function isCursorUsageCSV(head) {
+  return head.includes('kind') && head.includes('model') && head.some(h => /^input/.test(h)) && head.some(h => /^output/.test(h)) && (head.includes('max_mode') || head.some(h => /^cache_read/.test(h)));
+}
+function parseCursorUsageCSV(text) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) throw new Error('Empty CSV');
+  const head = rows[0].map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+  const find = (re) => head.findIndex(h => re.test(h));
+  const iDate = find(/^(date|timestamp|time)$/), iModel = find(/^model$/), iInCw = find(/^input_w_cache_write/), iInNoCw = find(/^input_w_o_cache_write/),
+        iIn = find(/^input(_tokens)?$/), iCr = find(/^cache_read/), iOut = find(/^output(_tokens)?$/), iCost = find(/^cost/);
+  if (iDate < 0 || iModel < 0) throw new Error('Not a Cursor usage-events CSV (needs Date + Model columns)');
+  const agg = makeAgg(); const billed = new Map(); let n = 0, rejected = 0;
+  const num = (c, i) => { if (i < 0) return 0; const raw = String(c[i] ?? '').trim(); if (!raw) return 0; const v = Number(raw.replace(/[,$\s]/g, '')); if (Number.isFinite(v) && v >= 0) return v; rejected++; return 0; };
+  for (let r = 1; r < rows.length; r++) {
+    const c = rows[r]; const raw = String(c[iDate] || '').trim();
+    const ts = new Date(raw); const d = RE_DATEONLY.test(raw) ? raw : dayKey(ts);
+    if (!d) { rejected++; continue; }
+    const model = String(c[iModel] || '').trim() || 'cursor';
+    const inTok = iInNoCw >= 0 ? num(c, iInNoCw) : num(c, iIn);
+    const cw = iInCw >= 0 && iInNoCw >= 0 ? Math.max(0, num(c, iInCw) - inTok) : 0;   // "Input (w/ Cache Write)" − "Input (w/o Cache Write)" = cache-write tokens
+    const hour = !RE_DATEONLY.test(raw) && !isNaN(ts) ? ts.getHours() : undefined;
+    agg.add(d, 'Cursor', model, { in: inTok, cw, cr: num(c, iCr), out: num(c, iOut), msgs: 1 }, undefined, hour);
+    n++;
+    if (iCost >= 0 && String(c[iCost] ?? '').trim() !== '') { const v = Number(String(c[iCost]).replace(/[,$\s]/g, '')); if (Number.isFinite(v)) billed.set(d, (billed.get(d) || 0) + v); }
+  }
+  return { rows: agg.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })), meta: { rows: n, rejected } };
 }
 
 /* =================================================================
@@ -2324,6 +2379,7 @@ function sniffJSON(obj, fileName) {
     if ('uncached_input_tokens' in r || 'cache_read_input_tokens' in r || 'output_tokens' in r) return 'anthropic-usage';
   }
   if (Array.isArray(obj) && obj.length) {
+    if (obj[0] && (obj[0].header === 'Gemini Apps' || (Array.isArray(obj[0].products) && obj[0].products.includes('Gemini Apps')))) return 'gemini-takeout';
     if (obj[0] && obj[0].mapping) return 'chatgpt-export';
     if (obj[0] && obj[0].chat_messages) return 'claudeai-export';
   }
@@ -3838,7 +3894,18 @@ const App = {
         await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));   // paint before blocking parse
         if (f.name.endsWith('.jsonl')) { jsonlFiles.push({ path: f.name, file: f }); continue; }
         if (f.name.endsWith('.csv')) {
-          const res = parseGenericCSV(await f.text());
+          const csvText = await f.text();
+          const headCells = (parseCSV(csvText.split(/\r?\n/, 1)[0])[0] || []).map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+          if (isCursorUsageCSV(headCells)) {
+            const res = parseCursorUsageCSV(csvText);
+            Store.setSource('cursor-csv', res.rows, res.meta);   // re-import replaces (one export = the full window)
+            if (res.billed.length) Store.setBilled('cursor-csv', res.billed);
+            notes.push(`${f.name}: Cursor usage-events CSV — ${res.meta.rows} events (exact tokens${res.billed.length ? ' + cost column' : '; no cost column in this export'})`
+              + (res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric or negative)` : ''));
+            imported++;
+            continue;
+          }
+          const res = parseGenericCSV(csvText);
           // merge by (day, platform, model): re-imports replace matching rows instead of duplicating
           const keyOf = (r) => r.d + '\u0001' + r.platform + '\u0001' + r.model;
           const merged = new Map((Store.sources.csv ? Store.sources.csv.rows : []).map(r => [keyOf(r), r]));
@@ -3869,6 +3936,11 @@ const App = {
           const res = f.size > 8 * 1024 * 1024 ? await parseInWorker('claudeai', JSON.stringify(obj), assumedModel) : parseClaudeAiExport(obj, assumedModel);
           Store.setSource('claudeai', res.rows, res.meta);
           notes.push(`${f.name}: Claude.ai export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens)`);
+          imported++;
+        } else if (kind === 'gemini-takeout') {
+          const res = parseGeminiTakeout(obj);
+          Store.setSource('gemini-takeout', res.rows, res.meta);
+          notes.push(`${f.name}: Gemini Takeout — ${fmtInt(res.meta.msgs)} prompts (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} non-Gemini/undated record(s) skipped` : ''})`);
           imported++;
         } else if (kind === 'anthropic-usage') {
           const res = parseAnthropicUsage(obj);
