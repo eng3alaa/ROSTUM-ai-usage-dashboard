@@ -1141,6 +1141,20 @@ const CONNECTORS = [
     qualityNote: 'Exact tokens from Continue\'s development data (dev_data/<schemaVersion>/tokensGenerated.jsonl: promptTokens, generatedTokens, model, provider, timestamp — written locally, on by default). Counts come from each provider\'s response; some providers (and Ollama) report estimates. The file has no cost — cost here is API-equivalent at list prices. Other dev_data files (chatInteraction, autocomplete) carry no token counts and are ignored.',
     paths: ['%USERPROFILE%\\.continue\\dev_data\\<schemaVersion>\\tokensGenerated.jsonl (Windows)', '~/.continue/dev_data/… (macOS/Linux)'],
     links: { get: 'https://continue.dev', docs: 'https://docs.continue.dev/customize/deep-dives/development-data' } },
+  { id: 'cline', platform: 'Cline', name: 'Cline (VS Code)', category: 'coding', kind: 'folder-log',
+    statusEl: 'cline-status', brand: '#9b6bff', mark: 'Cn', srcIds: ['cline'],
+    patterns: [/(^|\/)ui_messages\.json$/i], siblings: [/(^|\/)task_metadata\.json$/i], parser: 'parseClineTasks', hint: 'tasks/<taskId>/ui_messages.json (pick the saoudrizwan.claude-dev folder)',
+    quality: 'exact',
+    qualityNote: 'Exact tokens from Cline task folders (tasks/<taskId>/ui_messages.json: api_req_started entries carry tokensIn / tokensOut / cacheWrites / cacheReads / cost). Model comes from task_metadata.json when present. The cost field is Cline\'s own price-table estimate, not a bill — the dashboard reports it in the status line only and prices rows at list prices. Task folders can be huge (checkpoints/) — only the JSON files are read.',
+    paths: ['%APPDATA%\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\tasks (Windows)', '~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks (macOS)', 'same layout under Cursor/Windsurf/VSCodium user dirs'],
+    links: { get: 'https://cline.bot', docs: 'https://github.com/cline/cline/issues/7742' } },
+  { id: 'roo', platform: 'Roo Code', name: 'Roo Code (VS Code)', category: 'coding', kind: 'folder-log',
+    statusEl: 'roo-status', brand: '#e2a736', mark: 'Ro', srcIds: ['roo'],
+    patterns: [/(^|\/)ui_messages\.json$/i], siblings: [/(^|\/)task_metadata\.json$/i], parser: 'parseClineTasks', hint: 'tasks/<taskId>/ui_messages.json (pick the rooveterinaryinc.roo-cline folder)',
+    quality: 'exact',
+    qualityNote: 'Roo Code is a Cline fork with the same task-file format: exact tokens from tasks/<taskId>/ui_messages.json api_req_started entries (tokensIn / tokensOut / cacheWrites / cacheReads / cost). Cost is the extension\'s own estimate, not a bill (status line only). Kilo Code (kilocode.kilo-code) uses the same layout — pick that globalStorage folder here instead.',
+    paths: ['%APPDATA%\\Code\\User\\globalStorage\\rooveterinaryinc.roo-cline\\tasks (Windows)', '~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks (Linux)', '~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks (macOS)'],
+    links: { get: 'https://roocode.com', docs: 'https://deepwiki.com/RooCodeInc/Roo-Code/2.3-state-management-and-storage' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv'] },
 ];
@@ -1658,6 +1672,51 @@ async function parseContinueDevData(files, onProgress) {
     if (onProgress) onProgress(fi + 1, list.length);
   }
   return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds: [] } };
+}
+
+/** Cline / Roo Code / Kilo Code — <globalStorage>/tasks/<taskId>/ui_messages.json (whole-file JSON array). Entries with
+ *  say:'api_req_started' carry a JSON string in `text` {tokensIn, tokensOut, cacheWrites, cacheReads, cost}; entries
+ *  still in flight have no token fields and are skipped. Model = last task_metadata.json model_usage[].model_id in the
+ *  same task dir (handed in via siblingFiles — the driver's connector.siblings list, or `files` itself for direct callers).
+ *  The dir→metadata index is built once per siblingFiles ARRAY (WeakMap by identity), so the driver's per-file calls
+ *  do not rebuild it. Platform = connector.platform ('Cline' | 'Roo Code'). Dedupe by taskId:ts.
+ *  meta.extCost = sum of the extension's own cost estimates (informational only). */
+const _clineMetaIndex = new WeakMap();   // siblingFiles array → Map(dir → task_metadata.json File)
+async function parseClineTasks(files, onProgress, seen = new Set(), c, siblingFiles) {
+  const platform = (c && c.platform) || 'Cline';
+  const agg = makeAgg(); const addedIds = []; let msgs = 0, lines = 0, badLines = 0, extCost = 0;
+  const list = files.filter(f => /(^|\/)ui_messages\.json$/i.test(f.path));
+  const src = Array.isArray(siblingFiles) ? siblingFiles : files;
+  let metaByDir = _clineMetaIndex.get(src);
+  if (!metaByDir) {
+    metaByDir = new Map();
+    for (const f of src) { const m = f.path.match(/^(.*\/)?task_metadata\.json$/i); if (m) metaByDir.set(m[1] || '', f.file); }
+    _clineMetaIndex.set(src, metaByDir);
+  }
+  for (let fi = 0; fi < list.length; fi++) {
+    const { path, file } = list[fi];
+    const dir = path.slice(0, path.lastIndexOf('/') + 1);
+    const taskId = dir.split('/').filter(Boolean).pop() || (path.replace(/\.json$/i, ''));
+    let model = 'unknown';
+    const mf = metaByDir.get(dir);
+    if (mf) { try { const mo = JSON.parse(await mf.text()); const mu = mo && mo.model_usage; if (Array.isArray(mu) && mu.length && mu[mu.length - 1].model_id) model = String(mu[mu.length - 1].model_id); } catch {} }
+    let arr; try { arr = JSON.parse(await file.text()); } catch { badLines++; continue; }
+    if (!Array.isArray(arr)) { badLines++; continue; }
+    lines++;
+    for (const m of arr) {
+      if (!m || m.say !== 'api_req_started' || typeof m.text !== 'string') continue;
+      let info; try { info = JSON.parse(m.text); } catch { continue; }
+      if (!info || (info.tokensIn == null && info.tokensOut == null)) continue;   // request still in flight when the file was written
+      if (m.ts != null) { const id = taskId + ':' + m.ts; if (seen.has(id)) continue; seen.add(id); addedIds.push(id); }
+      const ts = m.ts != null ? new Date(+m.ts) : null, okTs = ts && !isNaN(ts);
+      agg.add(dayKey(okTs ? ts : file.lastModified), platform, model,
+        { in: finTok(+info.tokensIn || 0), out: finTok(+info.tokensOut || 0), cw: finTok(+info.cacheWrites || 0), cr: finTok(+info.cacheReads || 0), msgs: 1 }, taskId, okTs ? ts.getHours() : undefined);
+      extCost += Number.isFinite(+info.cost) ? +info.cost : 0;
+      msgs++;
+    }
+    if (onProgress) onProgress(fi + 1, list.length);
+  }
+  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines, addedIds, extCost } };
 }
 
 const ScanCache = {

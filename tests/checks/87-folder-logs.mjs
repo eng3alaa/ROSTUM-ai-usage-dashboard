@@ -160,6 +160,28 @@ export async function run({ browser, ok }) {
     ok('continue: tokensGenerated.jsonl → in=2500 out=280 msgs=3 (1 truncated line); other dev_data files ignored by the pattern',
       ct.in === 2500 && ct.out === 280 && ct.msgs === 3 && ct.badLines === 1 && ct.files === 1 && ct.driverFiles === 1 && JSON.stringify(ct.models) === JSON.stringify(['claude-sonnet-4.5', 'qwen3:14b'])
       && ct.platform === 'Continue.dev' && ct.hourOk && ct.kind === 'folder-log' && ct.cat === 'coding' && ct.card, JSON.stringify(ct));
+
+    // ---- T11: Cline + Roo Code ----
+    const clA = read('cline', 'tasks', '1786352400000', 'ui_messages.json'), clM = read('cline', 'tasks', '1786352400000', 'task_metadata.json'), clB = read('cline', 'tasks', '1786352500000', 'ui_messages.json');
+    const cl = await page.evaluate(async (a, m, b) => {
+      const mk = () => [
+        { path: 'tasks/1786352400000/ui_messages.json', file: new File([a], 'ui_messages.json') },
+        { path: 'tasks/1786352400000/task_metadata.json', file: new File([m], 'task_metadata.json') },
+        { path: 'tasks/1786352500000/ui_messages.json', file: new File([b], 'ui_messages.json') },
+      ];
+      const cline = connectorById('cline'), roo = connectorById('roo');
+      const r1 = await parseFolderCached(cline, mk(), null, new Map());   // through the driver: siblings must reach the parser
+      const r2 = await parseFolderCached(roo, mk(), null, new Map());
+      const t = r1.rows.reduce((x, r) => ({ in: x.in + r.in, cw: x.cw + r.cw, cr: x.cr + r.cr, out: x.out + r.out, msgs: x.msgs + r.msgs }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
+      const direct = await parseClineTasks(mk().slice(0, 2), null, new Set(), cline, mk());
+      return { ...t, files: r1.meta.files, badLines: r1.meta.badLines, model: r1.rows[0].model, p1: r1.rows[0].platform, p2: r2.rows[0].platform, sameParser: cline.parser === roo.parser && cline.parser === 'parseClineTasks',
+        extCost: direct.meta.extCost, sid: r1.rows[0].sid, hourOk: r1.rows.some(r => r.hour === new Date('2026-08-10T21:03:20.000Z').getHours()),
+        cards: !!document.getElementById('src-cline') && !!document.getElementById('src-roo'), cats: cline.category === 'coding' && roo.category === 'coding' };
+    }, clA, clM, clB);
+    ok('cline/roo: api_req_started tokens → in=1700 out=380 cw=100 cr=900 msgs=2 (dup + in-flight skipped); model from task_metadata; malformed task = badLines',
+      cl.in === 1700 && cl.out === 380 && cl.cw === 100 && cl.cr === 900 && cl.msgs === 2 && cl.files === 2 && cl.badLines === 1 && cl.model === 'claude-sonnet-4.5' && Math.abs(cl.extCost - 0.016) < 1e-9
+      && cl.sid === '1786352400000' && cl.hourOk, JSON.stringify(cl));
+    ok('cline/roo: one shared parser, two entries with their own platform strings and cards', cl.sameParser && cl.p1 === 'Cline' && cl.p2 === 'Roo Code' && cl.cards && cl.cats, JSON.stringify(cl));
   } finally {
     await page.close();
   }
