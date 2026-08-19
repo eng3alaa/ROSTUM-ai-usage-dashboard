@@ -2106,6 +2106,10 @@ function parseGenericCSV(text) {
 /* Cursor dashboard "usage events" CSV (individual users: cursor.com/dashboard → Usage → Export CSV). Header cells as
  * reported by users: Date, Kind, Model, Max Mode, Input (w/ Cache Write), Input (w/o Cache Write), Cache Read,
  * Output Tokens, Total Tokens[, Cost][, User]. Not officially documented → detected + parsed defensively.
+ * Verified on real exports: the four token columns are ADDITIVE — "Input (w/ Cache Write)" = cache-write tokens,
+ * "Input (w/o Cache Write)" = plain input, Cache Read, Output — and Total Tokens = their sum. Each row is reconciled against
+ * Total Tokens: additive first; else the legacy superset reading (w/ − w/o = cache write); else counted in meta.unreconciled
+ * (additive reading kept). No Total Tokens column → additive, nothing to reconcile against.
  * `head` = header cells normalized to lowercase_with_underscores. */
 function isCursorUsageCSV(head) {
   return head.includes('kind') && head.includes('model') && head.some(h => /^input/.test(h)) && head.some(h => /^output/.test(h)) && (head.includes('max_mode') || head.some(h => /^cache_read/.test(h)));
@@ -2116,23 +2120,33 @@ function parseCursorUsageCSV(text) {
   const head = rows[0].map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
   const find = (re) => head.findIndex(h => re.test(h));
   const iDate = find(/^(date|timestamp|time)$/), iModel = find(/^model$/), iInCw = find(/^input_w_cache_write/), iInNoCw = find(/^input_w_o_cache_write/),
-        iIn = find(/^input(_tokens)?$/), iCr = find(/^cache_read/), iOut = find(/^output(_tokens)?$/), iCost = find(/^cost/);
+        iIn = find(/^input(_tokens)?$/), iCr = find(/^cache_read/), iOut = find(/^output(_tokens)?$/), iTotal = find(/^total(_tokens)?$/), iCost = find(/^cost/);
   if (iDate < 0 || iModel < 0) throw new Error('Not a Cursor usage-events CSV (needs Date + Model columns)');
-  const agg = makeAgg(); const billed = new Map(); let n = 0, rejected = 0;
+  const agg = makeAgg(); const billed = new Map(); let n = 0, rejected = 0, unreconciled = 0;
   const num = (c, i) => { if (i < 0) return 0; const raw = String(c[i] ?? '').trim(); if (!raw) return 0; const v = Number(raw.replace(/[,$\s]/g, '')); if (Number.isFinite(v) && v >= 0) return v; rejected++; return 0; };
   for (let r = 1; r < rows.length; r++) {
     const c = rows[r]; const raw = String(c[iDate] || '').trim();
     const ts = new Date(raw); const d = RE_DATEONLY.test(raw) ? raw : dayKey(ts);
     if (!d) { rejected++; continue; }
     const model = String(c[iModel] || '').trim() || 'cursor';
-    const inTok = iInNoCw >= 0 ? num(c, iInNoCw) : num(c, iIn);
-    const cw = iInCw >= 0 && iInNoCw >= 0 ? Math.max(0, num(c, iInCw) - inTok) : 0;   // "Input (w/ Cache Write)" − "Input (w/o Cache Write)" = cache-write tokens
+    const inTok = iInNoCw >= 0 ? num(c, iInNoCw) : num(c, iIn); let cw = 0;
+    const cr = num(c, iCr), out = num(c, iOut);
+    if (iInCw >= 0 && iInNoCw >= 0) {
+      const wCw = num(c, iInCw);   // additive columns (verified on real exports): w/ = cache-write tokens, w/o = plain input
+      cw = wCw;
+      if (iTotal >= 0) {
+        const total = num(c, iTotal);
+        if (wCw + inTok + cr + out === total) { /* additive — the confirmed shape */ }
+        else if (wCw >= inTok && inTok + (wCw - inTok) + cr + out === total) cw = wCw - inTok;   // legacy superset reading: w/ − w/o = cache write
+        else unreconciled++;   // neither reading sums to Total Tokens — keep additive, surface the count
+      }
+    }
     const hour = !RE_DATEONLY.test(raw) && !isNaN(ts) ? ts.getHours() : undefined;
-    agg.add(d, 'Cursor', model, { in: inTok, cw, cr: num(c, iCr), out: num(c, iOut), msgs: 1 }, undefined, hour);
+    agg.add(d, 'Cursor', model, { in: inTok, cw, cr, out, msgs: 1 }, undefined, hour);
     n++;
     if (iCost >= 0 && String(c[iCost] ?? '').trim() !== '') { const v = Number(String(c[iCost]).replace(/[,$\s]/g, '')); if (Number.isFinite(v)) billed.set(d, (billed.get(d) || 0) + v); }
   }
-  return { rows: agg.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })), meta: { rows: n, rejected } };
+  return { rows: agg.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })), meta: { rows: n, rejected, unreconciled } };
 }
 
 /* =================================================================
@@ -3947,8 +3961,9 @@ const App = {
             const res = parseCursorUsageCSV(csvText);
             Store.setSource('cursor-csv', res.rows, res.meta);   // re-import replaces (one export = the full window)
             if (res.billed.length) Store.setBilled('cursor-csv', res.billed);
-            notes.push(`${f.name}: Cursor usage-events CSV — ${res.meta.rows} events (exact tokens${res.billed.length ? ' + cost column' : '; no cost column in this export'})`
-              + (res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric or negative)` : ''));
+            notes.push(`${f.name}: Cursor usage-events CSV — ${res.meta.rows} events (exact tokens from the four additive columns${res.billed.length ? ' + cost column' : '; no cost column in this export'})`
+              + (res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric or negative)` : '')
+              + (res.meta.unreconciled ? ` — ${res.meta.unreconciled} row${res.meta.unreconciled === 1 ? '' : 's'} did not reconcile with Total Tokens (additive reading kept)` : ''));
             imported++;
             continue;
           }

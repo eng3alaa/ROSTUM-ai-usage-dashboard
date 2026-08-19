@@ -403,10 +403,13 @@ export async function run({ browser, ok }) {
       const isCursor = isCursorUsageCSV(head), isGenericHead = isCursorUsageCSV(['date', 'platform', 'model', 'input_tokens', 'output_tokens']);
       const cu = parseCursorUsageCSV(cs);
       const ct = cu.rows.reduce((a, r) => ({ in: a.in + r.in, cw: a.cw + r.cw, cr: a.cr + r.cr, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
+      // no Total Tokens column → additive reading, nothing to reconcile against (unreconciled stays 0)
+      const cuNoTotal = parseCursorUsageCSV('Date,Kind,Model,Max Mode,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens\n2026-08-12T09:00:00.000Z,Included,gpt-5.4,No,300,700,20,40\n');
+      const ctNoTotal = { in: cuNoTotal.rows[0].in, cw: cuNoTotal.rows[0].cw, cr: cuNoTotal.rows[0].cr, out: cuNoTotal.rows[0].out, unrec: cuNoTotal.meta.unreconciled };
       await App.handleImportFiles([new File([tk], 'MyActivity.json', { type: 'application/json' }), new File([cs], 'usage-events.csv', { type: 'text/csv' })]);
       const notes = document.getElementById('import-status').textContent;
       const out = { kind, gt, gPlat: g.rows[0].platform, gSkipped: g.meta.skipped, gHourOk: g.rows.some(r => r.hour === new Date('2026-08-10T21:30:00.000Z').getHours()),
-        isCursor, isGenericHead, ct, cPlat: cu.rows[0].platform, cRejected: cu.meta.rejected, cBilled: cu.billed.length,
+        isCursor, isGenericHead, ct, ctNoTotal, cPlat: cu.rows[0].platform, cRejected: cu.meta.rejected, cUnrec: cu.meta.unreconciled, cBilled: cu.billed.length,
         srcT: !!Store.sources['gemini-takeout'], srcC: !!Store.sources['cursor-csv'], genericCsvUntouched: !Store.sources.csv, notes,
         badge: document.querySelector('#src-import .badge').textContent, imports: connectorById('imports').srcIds, order: PLATFORM_ORDER };
       Store.sources = {}; Store.connectors = {}; Store.persist();
@@ -414,8 +417,12 @@ export async function run({ browser, ok }) {
     }, takeout, cursorCsv);
     ok('takeout: MyActivity.json sniffed as gemini-takeout and parsed (est. in=16 out=23 msgs=3; 2 records skipped; hour kept) as platform "Gemini app"',
       ex.kind === 'gemini-takeout' && ex.gt.in === 16 && ex.gt.out === 23 && ex.gt.msgs === 3 && ex.gt.est && ex.gPlat === 'Gemini app' && ex.gSkipped === 2 && ex.gHourOk, JSON.stringify(ex.gt));
-    ok('cursor: usage-events CSV detected (generic CSV header is NOT) and parsed exactly (in=4010 cw=700 cr=900 out=985 msgs=4; 1 rejected cell; no cost column)',
-      ex.isCursor && !ex.isGenericHead && ex.ct.in === 4010 && ex.ct.cw === 700 && ex.ct.cr === 900 && ex.ct.out === 985 && ex.ct.msgs === 4 && ex.cPlat === 'Cursor' && ex.cRejected === 1 && ex.cBilled === 0, JSON.stringify(ex.ct));
+    ok('cursor: usage-events CSV detected (generic CSV header is NOT) and parsed with the four ADDITIVE token columns reconciled against Total Tokens (in=36666 cw=39521 cr=301106 out=28804 msgs=5; 1 rejected cell; 1 unreconciled row; legacy superset row still read; no cost column)',
+      ex.isCursor && !ex.isGenericHead && ex.ct.in === 36666 && ex.ct.cw === 39521 && ex.ct.cr === 301106 && ex.ct.out === 28804 && ex.ct.msgs === 5 && ex.cPlat === 'Cursor' && ex.cRejected === 1 && ex.cUnrec === 1 && ex.cBilled === 0,
+      JSON.stringify({ ct: ex.ct, rejected: ex.cRejected, unreconciled: ex.cUnrec }));
+    ok('cursor: no Total Tokens column → additive reading (in=700 cw=300 cr=20 out=40), unreconciled=0; import note surfaces the unreconciled count',
+      ex.ctNoTotal.in === 700 && ex.ctNoTotal.cw === 300 && ex.ctNoTotal.cr === 20 && ex.ctNoTotal.out === 40 && ex.ctNoTotal.unrec === 0 && /1 row did not reconcile with Total Tokens/.test(ex.notes),
+      JSON.stringify({ ctNoTotal: ex.ctNoTotal, notes: ex.notes }));
     ok('imports: drop zone routes both formats to their own sources (generic csv untouched); badge + srcIds + PLATFORM_ORDER list them',
       ex.srcT && ex.srcC && ex.genericCsvUntouched && /Gemini Takeout/.test(ex.notes) && /Cursor/.test(ex.notes) && /Takeout/.test(ex.badge) && /Cursor/.test(ex.badge)
       && ex.imports.includes('gemini-takeout') && ex.imports.includes('cursor-csv') && ex.order.includes('Gemini app') && ex.order.includes('Cursor'), JSON.stringify({ notes: ex.notes, badge: ex.badge, imports: ex.imports }));

@@ -189,14 +189,21 @@ export async function generate() {
     { header: 'Gemini Apps', title: 'Prompted no time on this one', safeHtmlItem: [{ html: 'x' }], products: ['Gemini Apps'] },
   ], null, 1));
   // T16b — Cursor usage-events CSV (header set as reported by users on forum.cursor.com; parsed defensively).
-  //   row1: in 1000, cw 200 (1200−1000), cr 900, out 300 · row2: in 500, cw 0, out 80 · row3: in 2500, cw 500, out 600 · row4: 'abc' rejected → in 10, cw 0, out 5
-  //   Expected: in=4010 cw=700 cr=900 out=985 msgs=4 rejected=1 · platform Cursor · no cost column → no billed rows
+  //   Real exports carry FOUR ADDITIVE token columns: Input (w/ Cache Write) = cache-write tokens, Input (w/o Cache Write) = plain input,
+  //   Cache Read, Output — and Total Tokens = their sum. The parser reconciles each row against Total Tokens.
+  //   row1 (real shape, both non-zero): additive → in 33556, cw 38721, cr 301056, out 28089
+  //   row2 (w/ < w/o): additive → in 500, cw 100, out 80
+  //   row3 (legacy superset shape: 2500+(3000−2500)+0+600 = 3600): in 2500, cw 500, out 600
+  //   row4: 'abc' rejected → in 10, cw 0, out 5 (0+10+0+5 = 15 additive)
+  //   row5: reconciles neither way (total 999) → unreconciled, additive reading in 100, cw 200, cr 50, out 30
+  //   Expected: in=36666 cw=39521 cr=301106 out=28804 msgs=5 rejected=1 unreconciled=1 · platform Cursor · no cost column → no billed rows
   w('cursor/usage-events.csv', [
     'Date,Kind,Model,Max Mode,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens,Total Tokens',
-    '2026-08-10T09:00:00.000Z,Included,claude-4.5-sonnet,No,1200,1000,900,300,2400',
-    '2026-08-10T09:30:00.000Z,Included,claude-4.5-sonnet,No,500,500,0,80,580',
+    '2026-08-10T09:00:00.000Z,Included,claude-4.5-sonnet,No,38721,33556,301056,28089,401422',
+    '2026-08-10T09:30:00.000Z,Included,claude-4.5-sonnet,No,100,500,0,80,680',
     '2026-08-11T10:00:00.000Z,Usage-based,gpt-5.4,Yes,3000,2500,0,600,3600',
     '2026-08-11T10:05:00.000Z,Included,gpt-5.4,No,abc,10,0,5,15',
+    '2026-08-11T10:10:00.000Z,Included,gpt-5.4,No,200,100,50,30,999',
   ].join('\n') + '\n');
 }
 
