@@ -262,6 +262,47 @@ export async function run({ browser, ok }) {
       JSON.stringify(ai.models) === JSON.stringify(['claude-sonnet-4.5', 'gpt-5.4']), JSON.stringify(ai));
     ok('aider: card is honest — estimated badge, folder-log coding tool', ai.quality === 'estimated' && /estimated/i.test(ai.badge) && ai.kind === 'folder-log' && ai.cat === 'coding' && ai.card, JSON.stringify(ai));
 
+    // ---- T12b: free local inference THROUGH coding tools — row-level local:1 from the provider hint → Pricing.cost = $0 ----
+    // The row keeps its own platform (Continue.dev / Cline / Aider / OpenAI Codex CLI — none is a 'local' connector), so the
+    // platform gate alone would price qwen3:14b at the "Unknown model" $3/$15 fallback. Hosted rows in the same files stay priced.
+    const clLA = read('cline', 'tasks', '1786352800000', 'ui_messages.json'), clLM = read('cline', 'tasks', '1786352800000', 'task_metadata.json');
+    const aiLocal = read('aider', 'local', '.aider.chat.history.md');
+    const cxOss = read('codex', 'sessions', '2026', '08', '12', 'rollout-2026-08-12T09-00-00-oss.jsonl'), cxNamed = read('codex', 'sessions', '2026', '08', '12', 'rollout-2026-08-12T10-00-00-named.jsonl');
+    const lc = await page.evaluate(async (ctText, clA, clM, aiText, cxA, cxB) => {
+      Pricing.load();
+      const cost = (r) => Pricing.cost(r.model, r);
+      const ct = await parseContinueDevData([{ path: 'dev_data/0.2.0/tokensGenerated.jsonl', file: new File([ctText], 'tokensGenerated.jsonl') }], null, new Set(), connectorById('continue'));
+      const ctLocal = ct.rows.filter(r => r.model === 'qwen3:14b'), ctHosted = ct.rows.filter(r => r.model === 'claude-sonnet-4.5');
+      const mk = () => [{ path: 'tasks/1786352800000/ui_messages.json', file: new File([clA], 'ui_messages.json') }, { path: 'tasks/1786352800000/task_metadata.json', file: new File([clM], 'task_metadata.json') }];
+      const cl = await parseFolderCached(connectorById('cline'), mk(), null, new Map());
+      const ai = await parseAiderHistory([{ path: 'local/.aider.chat.history.md', file: new File([aiText], '.aider.chat.history.md') }], null, new Set(), connectorById('aider'));
+      const cx = await parseCodexRollouts([
+        { path: 'sessions/2026/08/12/rollout-2026-08-12T09-00-00-oss.jsonl', file: new File([cxA], 'rollout-2026-08-12T09-00-00-oss.jsonl') },
+        { path: 'sessions/2026/08/12/rollout-2026-08-12T10-00-00-named.jsonl', file: new File([cxB], 'rollout-2026-08-12T10-00-00-named.jsonl') },
+      ], null, new Set(), connectorById('codex'));
+      const cxOss = cx.rows.filter(r => r.sid === 'rollout-2026-08-12T09-00-00-oss'), cxNamed = cx.rows.filter(r => r.sid === 'rollout-2026-08-12T10-00-00-named');
+      return {
+        ctLocalN: ctLocal.length, ctLocalFlag: ctLocal.every(r => r.local === 1), ctLocalCost: ctLocal.reduce((a, r) => a + cost(r), 0), ctLocalPlatform: ctLocal[0] && ctLocal[0].platform,
+        ctHostedN: ctHosted.length, ctHostedFlag: ctHosted.some(r => r.local), ctHostedCost: ctHosted.reduce((a, r) => a + cost(r), 0),
+        clN: cl.rows.length, clFlag: cl.rows.every(r => r.local === 1), clCost: cl.rows.reduce((a, r) => a + cost(r), 0), clModel: cl.rows[0] && cl.rows[0].model, clPlatform: cl.rows[0] && cl.rows[0].platform, clIn: cl.rows.reduce((a, r) => a + r.in, 0),
+        aiN: ai.rows.length, aiFlag: ai.rows.every(r => r.local === 1), aiCost: ai.rows.reduce((a, r) => a + cost(r), 0), aiModel: ai.rows[0] && ai.rows[0].model, aiEst: ai.rows.every(r => r.est === 1),
+        cxOssN: cxOss.length, cxOssFlag: cxOss.every(r => r.local === 1), cxOssCost: cxOss.reduce((a, r) => a + cost(r), 0), cxOssModel: cxOss[0] && cxOss[0].model,
+        cxNamedN: cxNamed.length, cxNamedFlag: cxNamed.some(r => r.local), cxNamedCost: cxNamed.reduce((a, r) => a + cost(r), 0),
+        directLocal: Pricing.cost('qwen3:14b', { in: 1_000_000, out: 1_000_000, cw: 0, cr: 0, platform: 'Continue.dev', local: 1 }),
+        directHosted: Pricing.cost('qwen3:14b', { in: 1_000_000, out: 1_000_000, cw: 0, cr: 0, platform: 'Continue.dev' }),
+      };
+    }, ctA, clLA, clLM, aiLocal, cxOss, cxNamed);
+    ok('continue: {model:qwen3:14b, provider:ollama} row carries local:1 and Pricing.cost = $0 (platform stays Continue.dev); the anthropic-provider claude-sonnet-4.5 rows carry no flag and still cost > 0',
+      lc.ctLocalN === 1 && lc.ctLocalFlag && lc.ctLocalCost === 0 && lc.ctLocalPlatform === 'Continue.dev' && lc.ctHostedN >= 1 && !lc.ctHostedFlag && lc.ctHostedCost > 0, JSON.stringify(lc));
+    ok('cline: task_metadata model_usage[].model_provider_id "ollama" → row local:1, $0 (qwen3:14b in=400 under platform Cline)',
+      lc.clN === 1 && lc.clFlag && lc.clCost === 0 && lc.clModel === 'qwen3:14b' && lc.clPlatform === 'Cline' && lc.clIn === 400, JSON.stringify(lc));
+    ok('aider: "ollama_chat/qwen3" model prefix → row local:1, $0 (still est:1; model string kept verbatim)',
+      lc.aiN === 1 && lc.aiFlag && lc.aiCost === 0 && lc.aiModel === 'ollama_chat/qwen3' && lc.aiEst, JSON.stringify(lc));
+    ok('codex: session_meta.payload.model_provider "ollama" → rows local:1, $0; a gpt-oss:20b session WITHOUT that field is NOT flagged (model name alone never means local) and is priced',
+      lc.cxOssN === 1 && lc.cxOssFlag && lc.cxOssCost === 0 && lc.cxOssModel === 'gpt-oss:20b' && lc.cxNamedN === 1 && !lc.cxNamedFlag && lc.cxNamedCost > 0, JSON.stringify(lc));
+    ok('pricing: Pricing.cost honours a row-level local:1 in addition to the platform gate (same model/platform without the flag is priced)',
+      lc.directLocal === 0 && lc.directHosted > 0, JSON.stringify({ directLocal: lc.directLocal, directHosted: lc.directHosted }));
+
     // ---- T13: JetBrains Junie ----
     const junieText = read('junie', '.matterhorn', 'events', 'ISSUE-1 task-1-events.jsonl');
     const ju = await page.evaluate(async (text) => {

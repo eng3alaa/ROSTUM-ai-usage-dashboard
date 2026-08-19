@@ -137,6 +137,12 @@ export async function generate() {
     req(T('2026-08-11T09:00:05.000Z'), { request: '…', tokensIn: 1000, tokensOut: 20, cacheWrites: 100, cacheReads: 400, cost: 0.005 }),
   ], null, 1));
   w('cline/tasks/1786352700000/task_metadata.json', JSON.stringify({ files_in_context: [], model_usage: [{ ts: T('2026-08-11T09:00:00.000Z'), model_id: 'claude-sonnet-4.5', model_provider_id: 'anthropic', mode: 'act' }] }));
+  // T11c — local-provider rows: a Cline task whose model_usage names a LOCAL backend (model_provider_id 'ollama') must come out
+  //   with local:1 → Pricing.cost = $0 (platform stays 'Cline'). Separate task dir so the T11/T11b totals stay put.
+  w('cline/tasks/1786352800000/ui_messages.json', JSON.stringify([
+    req(T('2026-08-12T09:00:05.000Z'), { request: '…', tokensIn: 400, tokensOut: 40, cacheWrites: 0, cacheReads: 0, cost: 0 }),
+  ], null, 1));
+  w('cline/tasks/1786352800000/task_metadata.json', JSON.stringify({ files_in_context: [], model_usage: [{ ts: T('2026-08-12T09:00:00.000Z'), model_id: 'qwen3:14b', model_provider_id: 'ollama', mode: 'act' }] }));
 
   // T12 — Aider chat history. "sent" is the full prompt; cache write/hit are carved out. Expected (est):
   //   in = 8200 + (12000-2100-8000) + 500 = 10600 · cw=2100 · cr=8000 · out = 578+1200+50 = 1828 · msgs=3 · badLines=1 (unparseable Tokens line) · models gpt-5.4 (Aug 10) + claude-sonnet-4.5 (Aug 11)
@@ -153,6 +159,24 @@ export async function generate() {
     '> Model: claude-sonnet-4.5 with diff edit format',
     '> Tokens: 500 sent, 50 received. Cost: $0.01 message, $0.01 session.', '',
   ].join('\n'));
+  // T12b — Aider on a local backend: LiteLLM-style provider prefix ('ollama_chat/', 'ollama/', 'lm_studio/') → local:1 → $0. Separate repo folder so T12 totals stay put.
+  w('aider/local/.aider.chat.history.md', [
+    '# aider chat started at 2026-08-12 10:00:00', '',
+    '> Aider v0.86.1', '> Main model: ollama_chat/qwen3 with whole edit format', '',
+    '> Tokens: 1.2k sent, 90 received. Cost: $0.00 message, $0.00 session.', '',
+  ].join('\n'));
+  // T7b — Codex CLI on a local provider: session_meta.payload.model_provider is the built-in OSS provider id ('ollama' / 'lmstudio';
+  //   older builds wrote 'oss'). Only that field says "local" — a gpt-oss:* model name alone (second file) must NOT be treated as local.
+  w('codex/sessions/2026/08/12/rollout-2026-08-12T09-00-00-oss.jsonl', [
+    jl({ timestamp: '2026-08-12T09:00:00.000Z', type: 'session_meta', payload: { id: 'oss1', cwd: 'D:\\proj1', cli_version: '0.60.0', originator: 'codex_cli_rs', model_provider: 'ollama' } }),
+    jl({ timestamp: '2026-08-12T09:00:01.000Z', type: 'turn_context', payload: { cwd: 'D:\\proj1', model: 'gpt-oss:20b', approval_policy: 'on-request' } }),
+    jl({ timestamp: '2026-08-12T09:01:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: tk(300, 0, 60, 10), last_token_usage: tk(300, 0, 60, 10) } } }),
+  ].join('\n') + '\n');
+  w('codex/sessions/2026/08/12/rollout-2026-08-12T10-00-00-named.jsonl', [
+    jl({ timestamp: '2026-08-12T10:00:00.000Z', type: 'session_meta', payload: { id: 'named1', cwd: 'D:\\proj1', cli_version: '0.60.0', originator: 'codex_cli_rs' } }),
+    jl({ timestamp: '2026-08-12T10:00:01.000Z', type: 'turn_context', payload: { cwd: 'D:\\proj1', model: 'gpt-oss:20b', approval_policy: 'on-request' } }),
+    jl({ timestamp: '2026-08-12T10:01:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: tk(300, 0, 60, 10), last_token_usage: tk(300, 0, 60, 10) } } }),
+  ].join('\n') + '\n');
 
   // T13 — Junie events. Expected: in=1500+900+300=2700 out=200+120+40=360 cr=600 msgs=3 badLines=1 (truncated line); models claude-sonnet-4.5 + gpt-5.4 (alternate nesting: event.usage + modelName)
   w('junie/.matterhorn/events/ISSUE-1 task-1-events.jsonl', [

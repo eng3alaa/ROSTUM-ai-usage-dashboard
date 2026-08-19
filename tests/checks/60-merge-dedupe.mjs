@@ -63,6 +63,34 @@ export async function run({ browser, ok }) {
     });
     ok('dedupe: aged compacted rows still dedupe across local sources',
       aged.n === 1 && aged.in === 100 && aged.msgs === 1, JSON.stringify(aged));
+
+    // Compaction must PRESERVE the row-level local:1 flag (free local inference through a coding tool) and must not
+    // merge a local row into a hosted row of the same day/platform/model — otherwise a $0 row would be priced after 90 days
+    // (or a hosted row zero-priced). Also: makeAgg keys on the flag the same way.
+    const loc = await page.evaluate(async () => {
+      localStorage.removeItem('aiusage:data');
+      Store.sources = {}; Store.billed = {}; Store.projects = [];
+      const agedDay = addDays(todayKey(), -200);
+      const base = { d: agedDay, platform: 'Continue.dev', model: 'qwen3:14b', in: 100, cw: 0, cr: 0, out: 20, msgs: 1 };
+      const rows = Store.compactRows([
+        { ...base, sid: 's1', local: 1 }, { ...base, sid: 's2', local: 1 },   // two local rows → one merged local bundle
+        { ...base, sid: 's3' },                                              // hosted row, same day/platform/model → separate bundle
+      ]);
+      const localB = rows.filter(r => r.local === 1), hostedB = rows.filter(r => !r.local);
+      Pricing.load();
+      const agg = makeAgg();
+      agg.add(agedDay, 'Continue.dev', 'qwen3:14b', { in: 10, out: 1, msgs: 1, local: 1 });
+      agg.add(agedDay, 'Continue.dev', 'qwen3:14b', { in: 10, out: 1, msgs: 1 });
+      agg.add(agedDay, 'Continue.dev', 'qwen3:14b', { in: 10, out: 1, msgs: 1, local: 1 });
+      const ar = agg.rows();
+      return { n: rows.length, localN: localB.length, localIn: localB.reduce((a, r) => a + r.in, 0), localMsgs: localB.reduce((a, r) => a + r.msgs, 0), localSids: localB[0] && localB[0].sids,
+        hostedN: hostedB.length, hostedIn: hostedB.reduce((a, r) => a + r.in, 0), localCost: localB.reduce((a, r) => a + Pricing.cost(r.model, r), 0), hostedCost: hostedB.reduce((a, r) => a + Pricing.cost(r.model, r), 0),
+        aggN: ar.length, aggLocal: ar.filter(r => r.local === 1).map(r => [r.in, r.msgs]), aggHosted: ar.filter(r => !r.local).map(r => [r.in, r.msgs]) };
+    });
+    ok('compactRows: local:1 survives compaction and is part of the merge key (2 local + 1 hosted aged rows → 1 local bundle in=200 msgs=2 sids=[s1,s2] at $0, 1 hosted bundle in=100 priced)',
+      loc.n === 2 && loc.localN === 1 && loc.localIn === 200 && loc.localMsgs === 2 && JSON.stringify(loc.localSids) === JSON.stringify(['s1', 's2']) && loc.hostedN === 1 && loc.hostedIn === 100 && loc.localCost === 0 && loc.hostedCost > 0, JSON.stringify(loc));
+    ok('makeAgg: local:1 is in the bundle key and copied onto the bundle (2 local adds → one local bundle in=20; 1 hosted add → separate bundle in=10)',
+      loc.aggN === 2 && JSON.stringify(loc.aggLocal) === JSON.stringify([[20, 2]]) && JSON.stringify(loc.aggHosted) === JSON.stringify([[10, 1]]), JSON.stringify(loc));
   } finally {
     await page.close();
   }

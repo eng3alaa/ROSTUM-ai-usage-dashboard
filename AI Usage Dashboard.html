@@ -964,9 +964,11 @@ const Pricing = {
   /** cost in USD for a token bundle. Local runners (row.platform is a registered 'local'-category
    *  connector, e.g. LM Studio/Ollama) are ALWAYS $0 — gated by platform, never by model name, so a
    *  hosted model that happens to share a base name with an open-weight one (Mistral API, Groq
-   *  Llama/Gemma, an OpenRouter route) is priced normally. */
+   *  Llama/Gemma, an OpenRouter route) is priced normally. A row may also carry local:1 — set by a
+   *  coding-tool parser (Continue.dev / Cline / Aider / Codex) when the log's PROVIDER field names a
+   *  local backend (see LOCAL_PROVIDER_IDS); the row keeps the tool's platform but is $0 too. */
   cost(model, t) {
-    if (t && t.platform && LOCAL_PLATFORMS.has(t.platform)) return 0;
+    if (t && (t.local || (t.platform && LOCAL_PLATFORMS.has(t.platform)))) return 0;
     const p = this.resolve(model);
     return (t.in * p.in + t.out * p.out + (t.cw || 0) * p.cw + (t.cr || 0) * p.cr) / 1e6;
   }
@@ -1145,28 +1147,28 @@ const CONNECTORS = [
     statusEl: 'continue-status', brand: '#5b8def', mark: 'Co', srcIds: ['continue'],
     patterns: [/(^|\/)tokensGenerated\.jsonl$/i], parser: 'parseContinueDevData', hint: 'dev_data/<version>/tokensGenerated.jsonl (pick ~/.continue)',
     quality: 'exact',
-    qualityNote: 'Exact tokens from Continue\'s development data (dev_data/<schemaVersion>/tokensGenerated.jsonl: promptTokens, generatedTokens, model, provider, timestamp — written locally, on by default). Counts come from each provider\'s response; some providers (and Ollama) report estimates. The file has no cost — cost here is API-equivalent at list prices. Other dev_data files (chatInteraction, autocomplete) carry no token counts and are ignored.',
+    qualityNote: 'Exact tokens from Continue\'s development data (dev_data/<schemaVersion>/tokensGenerated.jsonl: promptTokens, generatedTokens, model, provider, timestamp — written locally, on by default). Counts come from each provider\'s response; some providers (and Ollama) report estimates. The file has no cost — cost here is API-equivalent at list prices, except requests whose provider is a local runner (ollama, lmstudio, llama.cpp, …), which are $0. Other dev_data files (chatInteraction, autocomplete) carry no token counts and are ignored.',
     paths: ['%USERPROFILE%\\.continue\\dev_data\\<schemaVersion>\\tokensGenerated.jsonl (Windows)', '~/.continue/dev_data/… (macOS/Linux)'],
     links: { get: 'https://continue.dev', docs: 'https://docs.continue.dev/customize/deep-dives/development-data' } },
   { id: 'cline', platform: 'Cline', name: 'Cline (VS Code)', category: 'coding', kind: 'folder-log',
     statusEl: 'cline-status', brand: '#9b6bff', mark: 'Cn', srcIds: ['cline'],
     patterns: [/(^|\/)ui_messages\.json$/i], siblings: [/(^|\/)task_metadata\.json$/i], parser: 'parseClineTasks', hint: 'tasks/<taskId>/ui_messages.json (pick the saoudrizwan.claude-dev folder)',
     quality: 'exact',
-    qualityNote: 'Exact tokens from Cline task folders (tasks/<taskId>/ui_messages.json: api_req_started entries carry tokensIn / tokensOut / cacheWrites / cacheReads / cost). Model comes from task_metadata.json when present. The cost field is Cline\'s own price-table estimate, not a bill — the dashboard reports it in the status line only and prices rows at list prices. Task folders can be huge (checkpoints/) — only the JSON files are read.',
+    qualityNote: 'Exact tokens from Cline task folders (tasks/<taskId>/ui_messages.json: api_req_started entries carry tokensIn / tokensOut / cacheWrites / cacheReads / cost). Model comes from task_metadata.json when present. The cost field is Cline\'s own price-table estimate, not a bill — the dashboard reports it in the status line only and prices rows at list prices (requests whose task_metadata model_provider_id is a local runner — ollama, lmstudio, … — are $0). Task folders can be huge (checkpoints/) — only the JSON files are read.',
     paths: ['%APPDATA%\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\tasks (Windows)', '~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks (macOS)', 'same layout under Cursor/Windsurf/VSCodium user dirs'],
     links: { get: 'https://cline.bot', docs: 'https://github.com/cline/cline/issues/7742' } },
   { id: 'roo', platform: 'Roo Code', name: 'Roo Code (VS Code)', category: 'coding', kind: 'folder-log',
     statusEl: 'roo-status', brand: '#e2a736', mark: 'Ro', srcIds: ['roo'],
     patterns: [/(^|\/)ui_messages\.json$/i], siblings: [/(^|\/)task_metadata\.json$/i], parser: 'parseClineTasks', hint: 'tasks/<taskId>/ui_messages.json (pick the rooveterinaryinc.roo-cline folder)',
     quality: 'exact',
-    qualityNote: 'Roo Code is a Cline fork with the same task-file format: exact tokens from tasks/<taskId>/ui_messages.json api_req_started entries (tokensIn / tokensOut / cacheWrites / cacheReads / cost). Cost is the extension\'s own estimate, not a bill (status line only). Kilo Code (kilocode.kilo-code) uses the same layout — pick that globalStorage folder here instead. Roo Code may not write task_metadata.json — model shows as unknown until it does.',
+    qualityNote: 'Roo Code is a Cline fork with the same task-file format: exact tokens from tasks/<taskId>/ui_messages.json api_req_started entries (tokensIn / tokensOut / cacheWrites / cacheReads / cost). Cost is the extension\'s own estimate, not a bill (status line only). Requests whose task_metadata model_provider_id is a local runner (ollama, lmstudio, …) are priced $0. Kilo Code (kilocode.kilo-code) uses the same layout — pick that globalStorage folder here instead. Roo Code may not write task_metadata.json — model shows as unknown until it does.',
     paths: ['%APPDATA%\\Code\\User\\globalStorage\\rooveterinaryinc.roo-cline\\tasks (Windows)', '~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks (Linux)', '~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks (macOS)'],
     links: { get: 'https://roocode.com', docs: 'https://deepwiki.com/RooCodeInc/Roo-Code/2.3-state-management-and-storage' } },
   { id: 'aider', platform: 'Aider', name: 'Aider', category: 'coding', kind: 'folder-log',
     statusEl: 'aider-status', brand: '#14b8a6', mark: 'Ai', srcIds: ['aider'],
     patterns: [/(^|\/)\.aider\.chat\.history\.md$/i], parser: 'parseAiderHistory', hint: '.aider.chat.history.md files (pick a project folder, or a parent folder that holds several repos)',
     quality: 'estimated',
-    qualityNote: 'Estimated: aider\'s chat history (.aider.chat.history.md, per repo) prints rounded "Tokens: 8.2k sent, 578 received" lines per message — parsed with k-rounding, so totals are approximate and rows are marked est. Cache write/hit tokens are carved out of "sent" when printed; the model comes from each session\'s "Model:" line; messages carry the session\'s date but no reliable hour. Aider has no account or server — usage is billed by the underlying provider key. For exact numbers run aider with --analytics-log <file>.jsonl (message_send events; Wave 2 parser).',
+    qualityNote: 'Estimated: aider\'s chat history (.aider.chat.history.md, per repo) prints rounded "Tokens: 8.2k sent, 578 received" lines per message — parsed with k-rounding, so totals are approximate and rows are marked est. Cache write/hit tokens are carved out of "sent" when printed; the model comes from each session\'s "Model:" line; messages carry the session\'s date but no reliable hour. Aider has no account or server — usage is billed by the underlying provider key; models on a local backend (ollama_chat/, ollama/, lm_studio/ prefixes) are priced $0. For exact numbers run aider with --analytics-log <file>.jsonl (message_send events; Wave 2 parser).',
     paths: ['<repo>\\.aider.chat.history.md (per project; AIDER_CHAT_HISTORY_FILE overrides)', 'optional: --llm-history-file, --analytics-log <file>.jsonl'],
     links: { get: 'https://aider.chat', docs: 'https://aider.chat/docs/config/options.html' } },
   { id: 'junie', platform: 'JetBrains Junie', name: 'JetBrains AI Assistant / Junie', category: 'coding', kind: 'folder-log',
@@ -1190,7 +1192,7 @@ const CONNECTORS = [
     corsHint: 'Ollama is running but blocked this page (CORS). Set OLLAMA_ORIGINS="*" (or your page origin), restart Ollama, then validate again.',
     patterns: [/usage[^/]*\.jsonl$/i], parser: 'parseUsageLoggerJsonl', hint: 'usage-logger JSONL files (ollama-usage.jsonl — see docs/tools/ollama-usage-logger.mjs)',
     quality: 'exact',
-    qualityNote: 'Live check only: Ollama keeps no usage history and no per-request log — exact token counts (prompt_eval_count / eval_count) exist only inside each API response. This card verifies the server (GET /api/tags, /api/ps) and shows what is installed and loaded now. For history, run the one-file proxy docs/tools/ollama-usage-logger.mjs (it forwards requests to Ollama and appends exact per-request JSONL) and pick its output folder below. Desktop-app chats live in db.sqlite (SQLite, no token counts) — not read in this version. If validation says CORS: set OLLAMA_ORIGINS="*" and restart Ollama. Logged models are priced $0 — they run on your hardware; switch the "Local open-weight" price row to compare against hosted equivalents.',
+    qualityNote: 'Live check only: Ollama keeps no usage history and no per-request log — exact token counts (prompt_eval_count / eval_count) exist only inside each API response. This card verifies the server (GET /api/tags, /api/ps) and shows what is installed and loaded now. For history, run the one-file proxy docs/tools/ollama-usage-logger.mjs (it forwards requests to Ollama and appends exact per-request JSONL) and pick its output folder below. Desktop-app chats live in db.sqlite (SQLite, no token counts) — not read in this version. If validation says CORS: set OLLAMA_ORIGINS="*" and restart Ollama. Logged models are priced $0 — they run on your hardware (gated on the Ollama platform, not on model name). Ollama used THROUGH a coding tool (Continue.dev, Cline, Aider, Codex --oss) is also $0 when that tool\'s log names the provider.',
     paths: ['server: http://localhost:11434 (OLLAMA_HOST)', 'usage log: ~/.ai-usage/ollama-usage.jsonl (written by the proxy)', 'server.log has request lines but no tokens; db.sqlite has chats but no tokens'],
     links: { get: 'https://ollama.com/download', docs: 'https://docs.ollama.com/api' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
@@ -1200,6 +1202,13 @@ const connectorById = (id) => CONNECTORS.find(c => c.id === id);
 /* Platforms that run on the user's own hardware (category:'local') — Pricing.cost() zero-prices rows
  * whose OWN platform is in this set. CONNECTORS is static at runtime, so a const computed once here is fine. */
 const LOCAL_PLATFORMS = new Set(CONNECTORS.filter(c => c.category === 'local').map(c => c.platform));
+/* Provider ids that mean "inference ran on the user's own hardware" (no API bill). Coding-tool logs keep their
+ * own platform (Continue.dev / Cline / Roo / Aider / Codex) but name the backend — Continue's event.provider, Cline's
+ * model_usage[].model_provider_id, Aider's LiteLLM prefix (ollama_chat/, ollama/, lm_studio/…), Codex's
+ * session_meta.model_provider (built-in OSS ids 'ollama' / 'lmstudio', 'oss' in older builds). The parser sets
+ * local:1 on the row and Pricing.cost() zero-prices it. Matched on the PROVIDER field only — never on the model name. */
+const LOCAL_PROVIDER_IDS = new Set(['ollama', 'ollama_chat', 'lmstudio', 'lm_studio', 'llama.cpp', 'llamacpp', 'llamafile', 'localai', 'jan', 'gpt4all', 'msty', 'vllm', 'text-generation-webui', 'text-gen-webui', 'koboldcpp']);
+const isLocalProvider = (p) => p != null && LOCAL_PROVIDER_IDS.has(String(p).trim().toLowerCase());
 /* Hub groups (spec order). Within a group: connected → attention → disconnected, then registry order. */
 const HUB_GROUPS = [
   { id: 'coding', label: 'Coding tools' },
@@ -1285,9 +1294,9 @@ const Store = {
     const keep = [], merge = new Map();
     for (const r of rows) {
       if (!r.sid || r.d >= cutoff) { keep.push(r); continue; }
-      const k = r.d + '\u0001' + r.platform + '\u0001' + r.model;
+      const k = r.d + '\u0001' + r.platform + '\u0001' + r.model + '\u0001' + (r.local ? '1' : '');
       let b = merge.get(k);
-      if (!b) { b = { d: r.d, platform: r.platform, model: r.model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0, sids: [] }; if (r.est) b.est = 1; merge.set(k, b); }
+      if (!b) { b = { d: r.d, platform: r.platform, model: r.model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0, sids: [] }; if (r.est) b.est = 1; if (r.local) b.local = 1; merge.set(k, b); }
       b.in += r.in || 0; b.cw += r.cw || 0; b.cr += r.cr || 0; b.out += r.out || 0; b.msgs += r.msgs || 0;
       if (r.est) b.est = 1;
       if (r.sid && !b.sids.includes(r.sid)) b.sids.push(r.sid);
@@ -1361,12 +1370,13 @@ function makeAgg() {
     add(d, platform, model, t, sid, hour) {
       if (!d) return;
       const hk = (hour == null || Number.isNaN(hour)) ? '' : String(hour);
-      const key = d + '\u0001' + platform + '\u0001' + model + '\u0001' + (sid || '') + '\u0001' + hk;
+      const key = d + '\u0001' + platform + '\u0001' + model + '\u0001' + (sid || '') + '\u0001' + hk + '\u0001' + (t.local ? '1' : '');
       let b = map.get(key);
       if (!b) {
         b = { d, platform, model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0, est: t.est ? 1 : 0 };
         if (sid) b.sid = sid;
         if (hk !== '') b.hour = hour;
+        if (t.local) b.local = 1;   // free local inference through a coding tool (provider hint) — Pricing.cost → $0
         map.set(key, b);
       }
       b.in += t.in || 0; b.cw += t.cw || 0; b.cr += t.cr || 0; b.out += t.out || 0; b.msgs += t.msgs || 0;
@@ -1609,9 +1619,10 @@ async function parseCodexRollouts(files, onProgress, seen = new Set()) {
     const sid = (path.split('/').pop() || '').replace(/\.jsonl$/i, '');
     if (seen.has(sid)) { if (onProgress) onProgress(fi + 1, list.length); continue; }   // same rollout re-appearing under sessions/ vs archived_sessions/ — whole file already counted
     seen.add(sid); addedIds.push(sid);
-    let model = 'codex', prev = null;
+    let model = 'codex', prev = null, local = 0;
     await eachJsonl(file, (o) => {
       const p = o.payload || {};
+      if (o.type === 'session_meta' && p.model_provider != null) local = (isLocalProvider(p.model_provider) || /^oss$/i.test(String(p.model_provider).trim())) ? 1 : 0;   // built-in OSS provider ids ('ollama' / 'lmstudio'; 'oss' in older builds) — the model name alone never decides
       if (o.type === 'session_meta' || o.type === 'turn_context') { if (p.model) model = String(p.model); return; }
       if (o.type !== 'event_msg' || p.type !== 'token_count' || !p.info || !p.info.total_token_usage) return;
       const u = p.info.total_token_usage;
@@ -1621,8 +1632,9 @@ async function parseCodexRollouts(files, onProgress, seen = new Set()) {
       prev = cur;
       if (d.in <= 0 && d.out <= 0) return;   // no new usage since the last snapshot (duplicate line / heartbeat)
       const ts = o.timestamp ? new Date(o.timestamp) : null, okTs = ts && !isNaN(ts);
-      agg.add(dayKey(okTs ? ts : file.lastModified), 'OpenAI Codex CLI', model,
-        { in: Math.max(0, d.in - d.cr), cr: d.cr, out: Math.max(0, d.out), msgs: 1 }, sid, okTs ? ts.getHours() : undefined);
+      const t = { in: Math.max(0, d.in - d.cr), cr: d.cr, out: Math.max(0, d.out), msgs: 1 };
+      if (local) t.local = 1;
+      agg.add(dayKey(okTs ? ts : file.lastModified), 'OpenAI Codex CLI', model, t, sid, okTs ? ts.getHours() : undefined);
       msgs++;
     }, k);
     if (onProgress) onProgress(fi + 1, list.length);
@@ -1714,8 +1726,9 @@ async function parseContinueDevData(files, onProgress) {
     await eachJsonl(file, (o) => {
       if (o.promptTokens == null && o.generatedTokens == null) return;
       const ts = o.timestamp ? new Date(o.timestamp) : null, okTs = ts && !isNaN(ts);
-      agg.add(dayKey(okTs ? ts : file.lastModified), 'Continue.dev', String(o.model || 'unknown'),
-        { in: finTok(+o.promptTokens || 0), out: finTok(+o.generatedTokens || 0), msgs: 1 }, undefined, okTs ? ts.getHours() : undefined);
+      const t = { in: finTok(+o.promptTokens || 0), out: finTok(+o.generatedTokens || 0), msgs: 1 };
+      if (isLocalProvider(o.provider)) t.local = 1;   // Continue's provider id ('ollama', 'lmstudio', 'llama.cpp', …) → free local inference
+      agg.add(dayKey(okTs ? ts : file.lastModified), 'Continue.dev', String(o.model || 'unknown'), t, undefined, okTs ? ts.getHours() : undefined);
       msgs++;
     }, k);
     if (onProgress) onProgress(fi + 1, list.length);
@@ -1777,8 +1790,9 @@ async function parseClineTasks(files, onProgress, seen = new Set(), c, siblingFi
       let tin = finTok(+info.tokensIn || 0);
       const inclusive = isRoo || info.apiProtocol === 'openai' || (info.apiProtocol == null && !(u && /^(anthropic|claude-code|bedrock|vertex)$/.test(u.provider)));
       if (inclusive && tin >= cr + cw) tin -= cr + cw;
-      agg.add(dayKey(okTs ? ts : file.lastModified), platform, model,
-        { in: tin, out: finTok(+info.tokensOut || 0), cw, cr, msgs: 1 }, taskId, okTs ? ts.getHours() : undefined);
+      const t = { in: tin, out: finTok(+info.tokensOut || 0), cw, cr, msgs: 1 };
+      if (u && isLocalProvider(u.provider)) t.local = 1;   // model_provider_id 'ollama' / 'lmstudio' … → free local inference
+      agg.add(dayKey(okTs ? ts : file.lastModified), platform, model, t, taskId, okTs ? ts.getHours() : undefined);
       extCost += Number.isFinite(+info.cost) ? +info.cost : 0;
       msgs++;
     }
@@ -1813,7 +1827,9 @@ async function parseAiderHistory(files, onProgress) {
       if (!m) { badLines++; continue; }
       const sent = num(m[1]), cw = num(m[2]), cr = num(m[3]), out = num(m[4]);
       if ([sent, cw, cr, out].some(Number.isNaN)) { badLines++; continue; }
-      agg.add(day, 'Aider', model, { in: Math.max(0, sent - cw - cr), cw, cr, out, msgs: 1, est: 1 });
+      const t = { in: Math.max(0, sent - cw - cr), cw, cr, out, msgs: 1, est: 1 };
+      if (model.includes('/') && isLocalProvider(model.split('/')[0])) t.local = 1;   // LiteLLM provider prefix: ollama_chat/, ollama/, lm_studio/ … → free local inference
+      agg.add(day, 'Aider', model, t);
       msgs++;
     }
     if (onProgress) onProgress(fi + 1, list.length);
@@ -1851,8 +1867,8 @@ async function parseJunieEvents(files, onProgress) {
 
 /** LM Studio — *.conversation.json (whole-file JSON). For each message take versions[currentlySelected]; assistant
  *  versions are 'multiStep' (steps[] contentBlocks, each with genInfo.stats) or 'singleStep' (genInfo on the version).
- *  in = stats.promptTokensCount, out = stats.predictedTokensCount, model = genInfo.identifier (the short load id, e.g. 'llama-4-8b' —
- *  matches the $0 local price row) || indexedModelIdentifier (publisher-prefixed / .gguf path — display fallback only).
+ *  in = stats.promptTokensCount, out = stats.predictedTokensCount, model = genInfo.identifier (the short load id, e.g. 'llama-4-8b';
+ *  the row is $0 by platform, not by model name) || indexedModelIdentifier (publisher-prefixed / .gguf path — display fallback only).
  *  Day = createdAt (ms) or the file's lastModified; no per-message timestamps → no hour. */
 async function parseLmStudioConversations(files, onProgress) {
   const agg = makeAgg(); let msgs = 0, lines = 0, badLines = 0;
@@ -3459,11 +3475,12 @@ const App = {
     for (const r of rows) {
       const k = r.platform + ' ' + r.model;
       let b = map.get(k);
-      if (!b) { b = { platform: r.platform, model: r.model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0, est: 0 }; map.set(k, b); }
+      if (!b) { b = { platform: r.platform, model: r.model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0, est: 0, cost: 0 }; map.set(k, b); }
       b.in += r.in || 0; b.cw += r.cw || 0; b.cr += r.cr || 0; b.out += r.out || 0; b.msgs += r.msgs || 0;
+      b.cost += Pricing.cost(r.model, r);   // per ROW: a local:1 row ($0) and a hosted row of the same platform/model share a line without repricing each other
       if (r.est) b.est = 1;
     }
-    const list = [...map.values()].map(b => ({ ...b, cost: Pricing.cost(b.model, b) })).sort((a, b) => b.cost - a.cost);
+    const list = [...map.values()].sort((a, b) => b.cost - a.cost);
     const wrap = $('breakdown-table');
     clear(wrap);
     if (!list.length) { wrap.appendChild(this.emptyNode()); return; }
