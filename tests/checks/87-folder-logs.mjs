@@ -197,6 +197,20 @@ export async function run({ browser, ok }) {
       ai.in === 10600 && ai.cw === 2100 && ai.cr === 8000 && ai.out === 1828 && ai.msgs === 3 && ai.badLines === 1 && ai.lines === 4 && ai.allEst && ai.noHour
       && ai.byModel['gpt-5.4'] === '2026-08-10' && ai.byModel['claude-sonnet-4.5'] === '2026-08-11' && ai.platform === 'Aider', JSON.stringify(ai));
     ok('aider: card is honest — estimated badge, folder-log coding tool', ai.quality === 'estimated' && /estimated/i.test(ai.badge) && ai.kind === 'folder-log' && ai.cat === 'coding' && ai.card, JSON.stringify(ai));
+
+    // ---- T13: JetBrains Junie ----
+    const junieText = read('junie', '.matterhorn', 'events', 'ISSUE-1 task-1-events.jsonl');
+    const ju = await page.evaluate(async (text) => {
+      const c = connectorById('junie');
+      const res = await parseJunieEvents([{ path: '.matterhorn/events/ISSUE-1 task-1-events.jsonl', file: new File([text], 'ISSUE-1 task-1-events.jsonl') }], null, new Set(), c);
+      const t = res.rows.reduce((x, r) => ({ in: x.in + r.in, cr: x.cr + r.cr, out: x.out + r.out, msgs: x.msgs + r.msgs }), { in: 0, cr: 0, out: 0, msgs: 0 });
+      const matched = c.patterns.some(re => re.test('.matterhorn/events/ISSUE-1 task-1-events.jsonl')) && c.patterns.some(re => re.test('sessions/abc/events.jsonl'));
+      return { ...t, badLines: res.meta.badLines, models: [...new Set(res.rows.map(r => r.model))].sort(), platform: res.rows[0].platform, hourOk: res.rows.some(r => r.hour === new Date('2026-08-10T21:00:00.000Z').getHours()),
+        matched, quality: c.quality, kind: c.kind, cat: c.category, card: !!document.getElementById('src-junie'), noteOk: /AI Assistant chat/.test(c.qualityNote) };
+    }, junieText);
+    ok('junie: LlmResponseEvent records → in=2700 cr=600 out=360 msgs=3 (tolerant nesting); truncated line = badLines; both IDE and CLI file names match',
+      ju.in === 2700 && ju.cr === 600 && ju.out === 360 && ju.msgs === 3 && ju.badLines === 1 && JSON.stringify(ju.models) === JSON.stringify(['claude-sonnet-4.5', 'gpt-5.4']) && ju.platform === 'JetBrains Junie' && ju.hourOk && ju.matched, JSON.stringify(ju));
+    ok('junie: card is honest about coverage (estimated; Junie runs only)', ju.quality === 'estimated' && ju.noteOk && ju.kind === 'folder-log' && ju.cat === 'coding' && ju.card, JSON.stringify(ju));
   } finally {
     await page.close();
   }

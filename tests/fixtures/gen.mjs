@@ -130,6 +130,16 @@ export async function generate() {
     '> Model: claude-sonnet-4.5 with diff edit format',
     '> Tokens: 500 sent, 50 received. Cost: $0.01 message, $0.01 session.', '',
   ].join('\n'));
+
+  // T13 — Junie events. Expected: in=1500+900+300=2700 out=200+120+40=360 cr=600 msgs=3 badLines=1 (truncated line); models claude-sonnet-4.5 + gpt-5.4 (alternate nesting: event.usage + modelName)
+  w('junie/.matterhorn/events/ISSUE-1 task-1-events.jsonl', [
+    jl({ timestamp: '2026-08-10T09:00:00.000Z', event: { type: 'AgentStartedEvent', issueId: 'ISSUE-1' } }),
+    jl({ timestamp: '2026-08-10T09:00:10.000Z', event: { type: 'LlmResponseEvent', model: 'claude-sonnet-4.5', inputTokens: 1500, outputTokens: 200, cacheTokens: 600, cost: 0.011, answer: { text: '…' } } }),
+    jl({ timestamp: '2026-08-10T09:01:00.000Z', event: { type: 'LlmResponseEvent', model: 'claude-sonnet-4.5', inputTokens: 900, outputTokens: 120, cacheTokens: 0, cost: 0.004 } }),
+    '{"timestamp":"2026-08-10T09:02:00.000Z","event":{"type":"LlmResponseEvent"',   // truncated
+    jl({ timestamp: '2026-08-10T21:00:00.000Z', event: { type: 'LlmResponseEvent', modelName: 'gpt-5.4', usage: { inputTokens: 300, outputTokens: 40 } } }),
+    jl({ timestamp: '2026-08-10T21:00:30.000Z', event: { type: 'AgentFinishedEvent' } }),
+  ].join('\n') + '\n');
 }
 
 if (process.argv[1] === import.meta.filename) await generate();
