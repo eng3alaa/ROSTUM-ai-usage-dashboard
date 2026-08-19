@@ -105,6 +105,19 @@ export async function run({ browser, ok }) {
       && cx.platforms.length === 1 && cx.platforms[0] === 'OpenAI Codex CLI' && JSON.stringify(cx.hours) === JSON.stringify(cx.expHours) && cx.sid === 'rollout-2026-08-10T09-00-00-abc', JSON.stringify(cx));
     ok('codex: registry entry is a folder-log coding tool with an exact-quality generic card in the Coding group', cx.card && cx.cat === 'coding' && cx.kind === 'folder-log' && cx.quality === 'exact' && cx.hub, JSON.stringify(cx));
 
+    // ---- T7 follow-up: the same rollout filename (contains the session UUID) appearing under both sessions/ and archived_sessions/ must count once ----
+    const cxDupe = await page.evaluate(async (text) => {
+      const c = connectorById('codex');
+      const files = [
+        { path: 'sessions/2026/08/10/rollout-2026-08-10T09-00-00-abc.jsonl', file: new File([text], 'rollout-2026-08-10T09-00-00-abc.jsonl') },
+        { path: 'archived_sessions/2026/08/10/rollout-2026-08-10T09-00-00-abc.jsonl', file: new File([text], 'rollout-2026-08-10T09-00-00-abc.jsonl') },
+      ];
+      const res = await parseFolderCached(c, files, null, new Map());
+      return res.rows.reduce((a, r) => ({ in: a.in + r.in, cr: a.cr + r.cr, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, cr: 0, out: 0, msgs: 0 });
+    }, codexText);
+    ok('codex: same rollout filename under sessions/ and archived_sessions/ is counted once (whole-file sid dedupe) — in=200 cr=200 out=130 msgs=3, not doubled',
+      cxDupe.in === 200 && cxDupe.cr === 200 && cxDupe.out === 130 && cxDupe.msgs === 3, JSON.stringify(cxDupe));
+
     // ---- T8: Gemini CLI ----
     const gemA = read('gemini', 'tmp', 'abc123', 'chats', 'session-2026-08-10T09-00-aaaa.json'), gemB = read('gemini', 'tmp', 'abc123', 'chats', 'session-bad.json');
     const gc = await page.evaluate(async (a, b) => {
@@ -145,6 +158,19 @@ export async function run({ browser, ok }) {
       cpc.in === 2150 && cpc.cw === 100 && cpc.cr === 900 && cpc.out === 500 && cpc.msgs === 5 && cpc.badLines === 1 && JSON.stringify(cpc.sids) === JSON.stringify(['sess-1', 'sess-2']), JSON.stringify(cpc));
     ok('copilot-cli: separate registry entry on the shared "GitHub Copilot" platform; hub cards show their own source stats',
       cpc.platform === 'GitHub Copilot' && cpc.samePlatform && cpc.kind === 'folder-log' && cpc.cat === 'coding' && cpc.card && /tokens/.test(cpc.cliStats) && cpc.cliStats !== cpc.patStats, JSON.stringify({ cli: cpc.cliStats, pat: cpc.patStats }));
+
+    // ---- T9 follow-up: the same session events.jsonl appearing under two paths must not double-count via the session.shutdown fallback ----
+    const cpDupe = await page.evaluate(async (a) => {
+      const c = connectorById('copilot-cli');
+      const files = [
+        { path: 'session-state/sess-1/events.jsonl', file: new File([a], 'events.jsonl') },
+        { path: 'backup/sess-1/events.jsonl', file: new File([a], 'events.jsonl') },   // same session dir name + content → every assistant.usage id already seen
+      ];
+      const res = await parseFolderCached(c, files, null, new Map());
+      return res.rows.reduce((x, r) => ({ in: x.in + r.in, cw: x.cw + r.cw, cr: x.cr + r.cr, out: x.out + r.out, msgs: x.msgs + r.msgs }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
+    }, cp1);
+    ok('copilot-cli: a fully-deduped repeat of the same session file must not fall back to session.shutdown (no double count) — totals equal the single-file totals',
+      cpDupe.in === 2100 && cpDupe.cw === 100 && cpDupe.cr === 900 && cpDupe.out === 490 && cpDupe.msgs === 3, JSON.stringify(cpDupe));
 
     // ---- T10: Continue.dev ----
     const ctA = read('continue', 'dev_data', '0.2.0', 'tokensGenerated.jsonl'), ctB = read('continue', 'dev_data', '0.2.0', 'chatInteraction.jsonl');
@@ -190,12 +216,15 @@ export async function run({ browser, ok }) {
       const res = await parseAiderHistory([{ path: 'proj/.aider.chat.history.md', file: new File([text], '.aider.chat.history.md') }], null, new Set(), c);
       const t = res.rows.reduce((x, r) => ({ in: x.in + r.in, cw: x.cw + r.cw, cr: x.cr + r.cr, out: x.out + r.out, msgs: x.msgs + r.msgs }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
       const byModel = Object.fromEntries(res.rows.map(r => [r.model, r.d]));
-      return { ...t, badLines: res.meta.badLines, lines: res.meta.lines, allEst: res.rows.every(r => r.est === 1), noHour: res.rows.every(r => r.hour == null), byModel, platform: res.rows[0].platform,
+      const models = [...new Set(res.rows.map(r => r.model))].sort();
+      return { ...t, badLines: res.meta.badLines, lines: res.meta.lines, allEst: res.rows.every(r => r.est === 1), noHour: res.rows.every(r => r.hour == null), byModel, models, platform: res.rows[0].platform,
         quality: c.quality, kind: c.kind, cat: c.category, card: !!document.getElementById('src-aider'), badge: document.querySelector('#src-aider .badge').textContent };
     }, aiderText);
     ok('aider: "Tokens:" lines → est. in=10600 cw=2100 cr=8000 out=1828 msgs=3; k-rounding honored; unparseable line = badLines; per-session model + day; no hour',
       ai.in === 10600 && ai.cw === 2100 && ai.cr === 8000 && ai.out === 1828 && ai.msgs === 3 && ai.badLines === 1 && ai.lines === 4 && ai.allEst && ai.noHour
       && ai.byModel['gpt-5.4'] === '2026-08-10' && ai.byModel['claude-sonnet-4.5'] === '2026-08-11' && ai.platform === 'Aider', JSON.stringify(ai));
+    ok('aider: "Main model:" line is recognized (not just "Model:"); "Weak model:" never overrides the row model — models are exactly [claude-sonnet-4.5, gpt-5.4], never "aider" or "gpt-5-mini"',
+      JSON.stringify(ai.models) === JSON.stringify(['claude-sonnet-4.5', 'gpt-5.4']), JSON.stringify(ai));
     ok('aider: card is honest — estimated badge, folder-log coding tool', ai.quality === 'estimated' && /estimated/i.test(ai.badge) && ai.kind === 'folder-log' && ai.cat === 'coding' && ai.card, JSON.stringify(ai));
 
     // ---- T13: JetBrains Junie ----
@@ -219,16 +248,24 @@ export async function run({ browser, ok }) {
       const c = connectorById('lmstudio');
       const res = await parseLmStudioConversations([{ path: 'conversations/1723/chat.conversation.json', file: new File([a], 'chat.conversation.json') }, { path: 'conversations/1723/bad.conversation.json', file: new File([b], 'bad.conversation.json') }], null, new Set(), c);
       const t = res.rows.reduce((x, r) => ({ in: x.in + r.in, out: x.out + r.out, msgs: x.msgs + r.msgs }), { in: 0, out: 0, msgs: 0 });
+      // honesty: the $0 price is PLATFORM-gated (a row's own platform is a registered 'local' connector), not a model-name regex —
+      // a hosted model that happens to share a base name with an open-weight one (Mistral API, Groq Llama/Gemma, OpenRouter) must still be priced.
+      Pricing.load();
       return { ...t, files: res.meta.files, badLines: res.meta.badLines, models: [...new Set(res.rows.map(r => r.model))].sort(), platform: res.rows[0].platform, days: [...new Set(res.rows.map(r => r.d))], expDay: dayKey(new Date('2026-08-10T09:00:00.000Z')),
         kind: c.kind, cat: c.category, card: !!document.getElementById('src-lmstudio'), hub: !!document.querySelector('#accounts-hub .hub-group[data-group="local"] .acct[data-connector="lmstudio"]'),
-        // honesty: local open-weight models run on your hardware → API-equivalent cost must be $0, not the "Unknown model" fallback price
-        localCost: (Pricing.load(), Pricing.cost('llama-3.3-70b', { in: 1_000_000, out: 1_000_000, cw: 0, cr: 0 })), hostedStillPriced: Pricing.cost('claude-sonnet-5', { in: 1_000_000, out: 0, cw: 0, cr: 0 }) };
+        localCost: Pricing.cost('llama-3.3-70b', { in: 1_000_000, out: 1_000_000, cw: 0, cr: 0, platform: 'LM Studio' }),
+        hostedStillPriced: Pricing.cost('claude-sonnet-5', { in: 1_000_000, out: 0, cw: 0, cr: 0 }),
+        mistralApiHosted: Pricing.cost('mistral-large-latest', { in: 1_000_000, out: 1_000_000 }),
+        openrouterMistralHosted: Pricing.cost('mistralai/mistral-large', { in: 1_000_000, out: 1_000_000 }),
+        groqLlamaHosted: Pricing.cost('llama-3.3-70b-versatile', { in: 1_000_000, out: 1_000_000 }) };
     }, lmA, lmB);
     ok('lmstudio: genInfo.stats per selected assistant version → in=1970 out=350 msgs=3; regenerated sibling ignored; malformed file = badLines; day from createdAt',
       lm.in === 1970 && lm.out === 350 && lm.msgs === 3 && lm.files === 2 && lm.badLines === 1 && JSON.stringify(lm.models) === JSON.stringify(['llama-4-8b', 'qwen3-14b']) && lm.platform === 'LM Studio'
       && lm.days.length === 1 && lm.days[0] === lm.expDay, JSON.stringify(lm));
     ok('lmstudio: registry entry is a Local-runner folder-log card', lm.kind === 'folder-log' && lm.cat === 'local' && lm.card && lm.hub, JSON.stringify(lm));
-    ok('pricing: local open-weight models (llama/qwen/mistral/…) price at $0 — they run on your hardware; hosted rows untouched', lm.localCost === 0 && lm.hostedStillPriced > 0, JSON.stringify({ localCost: lm.localCost, hosted: lm.hostedStillPriced }));
+    ok('pricing: $0 is platform-gated (row.platform is a registered "local" connector) — a local-runner row prices at $0, but a hosted model with the same base name (Mistral API, Groq, OpenRouter) is NOT zero-priced',
+      lm.localCost === 0 && lm.hostedStillPriced > 0 && lm.mistralApiHosted > 0 && lm.openrouterMistralHosted > 0 && lm.groqLlamaHosted > 0,
+      JSON.stringify({ localCost: lm.localCost, hostedStillPriced: lm.hostedStillPriced, mistralApiHosted: lm.mistralApiHosted, openrouterMistralHosted: lm.openrouterMistralHosted, groqLlamaHosted: lm.groqLlamaHosted }));
   } finally {
     await page.close();
   }

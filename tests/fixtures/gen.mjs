@@ -118,9 +118,10 @@ export async function generate() {
 
   // T12 — Aider chat history. "sent" is the full prompt; cache write/hit are carved out. Expected (est):
   //   in = 8200 + (12000-2100-8000) + 500 = 10600 · cw=2100 · cr=8000 · out = 578+1200+50 = 1828 · msgs=3 · badLines=1 (unparseable Tokens line) · models gpt-5.4 (Aug 10) + claude-sonnet-4.5 (Aug 11)
+  //   real aider prints "Main model:" (not "Model:"), plus a "Weak model:" line that must NOT be picked up as the row model
   w('aider/proj/.aider.chat.history.md', [
     '# aider chat started at 2026-08-10 09:12:33', '',
-    '> Aider v0.86.1', '> Model: gpt-5.4 with diff edit format', '> Git repo: .git with 12 files', '',
+    '> Aider v0.86.1', '> Main model: gpt-5.4 with diff edit format', '> Weak model: gpt-5-mini', '> Git repo: .git with 12 files', '',
     '#### make it faster', '',
     'I will change the loop.', '',
     '> Tokens: 8.2k sent, 578 received. Cost: $0.03 message, $0.05 session.',
