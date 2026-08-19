@@ -9,12 +9,13 @@ export async function run({ browser, ok }) {
       const cards = [...document.querySelectorAll('#accounts-hub .acct')];
       return {
         n: cards.length,
+        total: CONNECTORS.length,
         ids: cards.map(c => c.dataset.connector),
         dots: cards.map(c => c.querySelector('.dot')?.className || ''),
         allOff: cards.every(c => c.querySelector('.dot')?.classList.contains('off')),
       };
     });
-    ok('hub: 7 account cards render from the registry', hub.n === 7 &&
+    ok('hub: every registry card renders (baseline 7 ids present)', hub.n === hub.total &&
       ['local','anthropic','openai','gemini','copilot','openrouter','imports'].every(id => hub.ids.includes(id)),
       JSON.stringify(hub.ids));
     ok('hub: all cards start disconnected (gray dot)', hub.allOff, JSON.stringify(hub.dots));
