@@ -212,7 +212,7 @@ input[type="date"], input[type="text"], input[type="password"], select {
 /* ============ Print report ============ */
 .report-meta { font-size: 12px; color: var(--ink-2); margin: 0 0 12px; }
 @media print {
-  .topbar .top-actions, .filterbar, #accounts-hub, #sources, .sources, #card-budgets, #card-pricing, #alerts, #storage-warning, .toggle, .btn, #hub-bar, .acct-hide, .collapse-btn, .insight-hide, #insights-chips, #sources-title { display: none !important; }
+  .topbar .top-actions, .filterbar, #accounts-hub, #sources, .sources, #card-budgets, #card-pricing, #alerts, #storage-warning, .toggle, .btn, #hub-bar, .acct-hide, .collapse-btn, .insight-hide, #insights-chips, #sources-title, #pricing-title { display: none !important; }
   /* an open <dialog> renders in the top layer, above the normal document flow — hiding its
      ancestors via the print stylesheet does not hide it, so it needs its own rule */
   dialog { display: none !important; }
@@ -854,7 +854,7 @@ const View = {
   hideInsight(key) { this._add('hiddenInsights', key); },
   showAllInsights() { if (this.prefs.hiddenInsights.length) { this.prefs.hiddenInsights = []; this.save(); } },
   setLegacySources(on) { this.prefs.showLegacySources = !!on; this.save(); },
-  onConnectorChange(id, status) { if (status !== 'off' && this.isCardHidden(id)) this.revealCard(id); },
+  onConnectorChange(id, prev, next) { if (prev === 'off' && next !== 'off' && this.isCardHidden(id)) this.revealCard(id); },
 };
 
 /* Sections with a ▾/▸ toggle. head = element that IS (or contains) the .card-head/.section-title/.row-head; body = ids hidden when collapsed. */
@@ -1143,8 +1143,10 @@ const Store = {
     if (migrated) this.persist();
   },
   setConnector(id, patch) {
+    const prev = this.connectorStatus(connectorById(id) || { id, srcIds: [] });   // status BEFORE the patch
     this.connectors[id] = { ...(this.connectors[id] || {}), ...patch }; this.persist();
-    View.onConnectorChange(id, this.connectorStatus({ id }));   // connected/attention → un-hide the card (View.hiddenCards)
+    const next = this.connectorStatus(connectorById(id) || { id, srcIds: [] });
+    View.onConnectorChange(id, prev, next);   // reveal only on an off→connected/attention transition, not every sync
   },
   connectorStatus(c) {
     // status is driven by the connector's own state entry, not data presence — every
@@ -2443,7 +2445,7 @@ const App = {
       const host = $(s.head); if (!host) continue;
       const head = host.matches('.card-head, .section-title, .row-head') ? host : host.querySelector('.card-head, .section-title, .row-head');
       if (!head || head.querySelector('.collapse-btn')) continue;
-      const btn = el('button', { class: 'collapse-btn', type: 'button', 'data-section': s.id });
+      const btn = el('button', { class: 'collapse-btn', type: 'button', 'data-section': s.id, 'aria-label': 'Collapse ' + s.label, 'aria-controls': s.body.join(' ') });
       btn.addEventListener('click', () => { View.toggleCollapse(s.id); this.applyCollapse(); this.render(); });   // re-render: charts measure a hidden (0-width) container otherwise
       head.insertBefore(btn, head.firstChild);
     }
@@ -2453,7 +2455,7 @@ const App = {
     for (const s of SECTIONS) {
       const on = View.isCollapsed(s.id);
       const btn = document.querySelector(`.collapse-btn[data-section="${s.id}"]`);
-      if (btn) { btn.textContent = on ? '▸' : '▾'; btn.setAttribute('aria-expanded', String(!on)); btn.title = (on ? 'Expand ' : 'Collapse ') + s.label; }
+      if (btn) { btn.textContent = on ? '▸' : '▾'; btn.setAttribute('aria-expanded', String(!on)); btn.title = (on ? 'Expand ' : 'Collapse ') + s.label; btn.setAttribute('aria-label', btn.title); }
       for (const id of s.body) { const b = $(id); if (b) b.classList.toggle('sec-collapsed', on); }
     }
   },
@@ -2596,6 +2598,7 @@ const App = {
     // filters.hiddenPlatforms, so it never leaks into localStorage.
     if (!c.platform) { this._drill = null; this.render(); return; }   // imports → show everything
     this._drill = this._drill === c.platform ? null : c.platform;
+    View._del('collapsed', 'daily'); this.applyCollapse();   // never drill onto a bare collapsed header
     this.render();
     $('card-daily').scrollIntoView({ behavior: 'smooth', block: 'start' });
   },

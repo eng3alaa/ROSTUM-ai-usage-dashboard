@@ -105,6 +105,26 @@ export async function run({ browser, ok }) {
     });
     ok('view: connector modal still hosts source cards while the legacy section is hidden', modalStill.inModal && modalStill.home, JSON.stringify(modalStill));
     await page.evaluate(() => { LS.del('view'); View.load(); App.applyCollapse(); App.applyInsightHides(); App.applyLegacySources(); App._render(); });
+
+    // ---- fix: auto-reveal only on the off→connected transition ----
+    const autoReveal = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      App._drill = null; App.filters.hiddenPlatforms = new Set();
+      LS.del('view'); View.load();
+      Store.setConnector('openai', { label: 'k', lastSync: Date.now(), err: null });
+      View.hideCard('openai');
+      App._render();
+      const hiddenBefore = !document.querySelector('#accounts-hub .acct[data-connector="openai"]');
+      Store.setConnector('openai', { lastSync: Date.now() });   // ok -> ok: must NOT reveal
+      App._render();
+      const stillHidden = !document.querySelector('#accounts-hub .acct[data-connector="openai"]') && View.isCardHidden('openai');
+      delete Store.connectors.openai;
+      Store.setConnector('openai', { label: 'k', lastSync: Date.now(), err: null });   // off -> ok: must reveal
+      App._render();
+      const revealed = !!document.querySelector('#accounts-hub .acct[data-connector="openai"]') && !View.isCardHidden('openai');
+      return { hiddenBefore, stillHidden, revealed };
+    });
+    ok('view: auto-reveal only on the off→connected transition', autoReveal.hiddenBefore && autoReveal.stillHidden && autoReveal.revealed, JSON.stringify(autoReveal));
   } finally {
     await page.close();
   }
