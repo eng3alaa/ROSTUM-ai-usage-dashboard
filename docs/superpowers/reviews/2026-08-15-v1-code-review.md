@@ -61,3 +61,5 @@ Plan 2 (branch v2-accounts-hub) closes #5 (CONNECTORS registry) and #7 (incremen
 Plan 3 (branch v3-rich-content) delivers the four rich-content packs and closes backlog 2–4, 9–18.
 
 Plan 4a (branch v4a-view-folder-logs) delivers Wave 1 of the every-LLM spec: view layer (hide/unhide cards, sections, insights, legacy sources), hub groups + search, the generic folder-log driver, 9 folder-log parsers, Ollama local-server + usage-logger, Gemini Takeout + Cursor CSV importers.
+
+Plan 4a integration review (2026-08-19): 7-lens workflow review + one adversarial verifier per finding — 44 raw → 16 confirmed (0 refuted, 23 minor unverified, of which 12 were fixed alongside); all 16 fixed TDD-style on the branch (10 fix commits, 169 → 209 checks). Non-blockers recorded as "Post-4a backlog" in the every-LLM spec.

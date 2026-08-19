@@ -105,6 +105,22 @@ Wave assignment: **Wave 1** = View layer, hub grouping/search, `folder-log` driv
 
 Wave 1 status: DONE (Plan 4a) — with Ollama desktop db.sqlite history deferred to Wave 2 (needs sql.js), and folder-log projects not yet surfaced in the Projects table.
 
+Plan 4a integration review (2026-08-19, 7 lenses + adversarial verification, 16 confirmed findings — all fixed on the branch, suite 209/209 ×3): Ollama dual driver (own gen slot, per-half status/label/err, unreachable server keeps a data-owned folder entry connected — no phantom auto-reveal); Cline/Roo per-request model from model_usage[] + inclusive-of-cache tokensIn subtraction (Roo, OpenAI-protocol Cline); Cursor CSV four ADDITIVE token columns reconciled with Total Tokens; row-level `local:1` (Continue provider, Cline/Roo model_provider_id, Aider LiteLLM prefix, Codex model_provider) → $0 alongside the platform gate; Pricing.resolve normalizes vendor-native Claude ids (dotted / family-last / dated); compactRows compacts by age regardless of sid; hub search drops its query when the box hides + no-match note; Cursor re-import rewrites the billed envelope; Budgets editor lists every platform with data; non-Claude .jsonl on Imports no longer wipes local-import; ScanCache v4 (stale keys swept); copy corrections (Local open-weight row, Copilot CLI list-price statement, Gemini CLI prune, CORS wording, busiest-hours "last 90 days").
+
+### Post-4a backlog (from the 2026-08-19 integration review; not blockers, carry into Plan 4b or later)
+
+1. Imports dropzone: sniff-route non-Claude .jsonl (Codex rollout / Copilot CLI events / Continue tokensGenerated / Junie / usage-logger) to the registered folder-log parser under that connector's srcId (today: honest "no Claude Code messages — use the tool's hub card" note only).
+2. Per-file scan-cache order dependence: a file whose ids were all skipped as duplicates of an earlier file is cached empty; if the earlier file disappears, the survivor's stale empty entry hides its usage until that file changes.
+3. Codex delta-of-cumulative: a resumed session whose first snapshot is ≥ the previous cumulative is not detected; `last_token_usage` is ignored.
+4. Cursor CSV re-import replaces the whole `cursor-csv` source although each export is a date window — merge by window/month instead (label says "re-import replaces").
+5. `docs/tools/ollama-usage-logger.mjs`: responses over 8 MB drop the final done/usage chunk and are never logged — stream-parse the usage fields or log the cap honestly.
+6. Keyboard focus lands on <body> after ✕ hide, hub-group collapse, hidden-chip restore, and modal close when the hub re-rendered underneath.
+7. Cline heuristic: a task with no task_metadata.json and no apiProtocol is treated as inclusive-of-cache (guarded by tokensIn ≥ cr+cw); Roo detection is by connector id — revisit against real files; a Kilo Code entry would need its own flag.
+8. Codex custom providers under arbitrary config.toml names cannot be flagged local (only ollama / lmstudio / oss ids are recognized).
+9. Busiest hours beyond 90 days: rows compact without hour (label says "last 90 days"); a per-day 24-bucket rollup would keep the histogram for older data.
+10. Legacy persisted dual-driver entries without serverLabel/filesLabel show only one half until the next validate (cosmetic; cannot occur for entries created on this branch).
+11. Ollama no-cors probe: "something answered at <base>" is the honest ceiling — a non-Ollama HTTP server on 11434 reads as "likely CORS".
+
 ## Honesty rules
 
 - Card copy states data quality first: **exact / estimated / validate-only / no data**. Estimated rows carry `est.`.
