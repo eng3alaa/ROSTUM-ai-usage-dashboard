@@ -145,6 +145,21 @@ export async function run({ browser, ok }) {
       cpc.in === 2150 && cpc.cw === 100 && cpc.cr === 900 && cpc.out === 500 && cpc.msgs === 5 && cpc.badLines === 1 && JSON.stringify(cpc.sids) === JSON.stringify(['sess-1', 'sess-2']), JSON.stringify(cpc));
     ok('copilot-cli: separate registry entry on the shared "GitHub Copilot" platform; hub cards show their own source stats',
       cpc.platform === 'GitHub Copilot' && cpc.samePlatform && cpc.kind === 'folder-log' && cpc.cat === 'coding' && cpc.card && /tokens/.test(cpc.cliStats) && cpc.cliStats !== cpc.patStats, JSON.stringify({ cli: cpc.cliStats, pat: cpc.patStats }));
+
+    // ---- T10: Continue.dev ----
+    const ctA = read('continue', 'dev_data', '0.2.0', 'tokensGenerated.jsonl'), ctB = read('continue', 'dev_data', '0.2.0', 'chatInteraction.jsonl');
+    const ct = await page.evaluate(async (a, b) => {
+      const c = connectorById('continue');
+      const files = [{ path: 'dev_data/0.2.0/tokensGenerated.jsonl', file: new File([a], 'tokensGenerated.jsonl') }, { path: 'dev_data/0.2.0/chatInteraction.jsonl', file: new File([b], 'chatInteraction.jsonl') }];
+      const direct = await parseContinueDevData(files, null, new Set(), c);
+      const viaDriver = await parseFolderCached(c, files, null, new Map());   // pattern filter must drop chatInteraction.jsonl
+      const t = direct.rows.reduce((x, r) => ({ in: x.in + r.in, out: x.out + r.out, msgs: x.msgs + r.msgs }), { in: 0, out: 0, msgs: 0 });
+      return { ...t, badLines: direct.meta.badLines, files: direct.meta.files, driverFiles: viaDriver.meta.files, models: [...new Set(direct.rows.map(r => r.model))].sort(), platform: direct.rows[0].platform,
+        hourOk: direct.rows.some(r => r.hour === new Date('2026-08-11T21:00:00.000Z').getHours()), kind: c.kind, cat: c.category, card: !!document.getElementById('src-continue') };
+    }, ctA, ctB);
+    ok('continue: tokensGenerated.jsonl → in=2500 out=280 msgs=3 (1 truncated line); other dev_data files ignored by the pattern',
+      ct.in === 2500 && ct.out === 280 && ct.msgs === 3 && ct.badLines === 1 && ct.files === 1 && ct.driverFiles === 1 && JSON.stringify(ct.models) === JSON.stringify(['claude-sonnet-4.5', 'qwen3:14b'])
+      && ct.platform === 'Continue.dev' && ct.hourOk && ct.kind === 'folder-log' && ct.cat === 'coding' && ct.card, JSON.stringify(ct));
   } finally {
     await page.close();
   }

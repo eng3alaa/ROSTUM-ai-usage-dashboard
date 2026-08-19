@@ -1134,6 +1134,13 @@ const CONNECTORS = [
     qualityNote: 'Exact tokens from Copilot CLI session events (events.jsonl: assistant.usage carries server-reported input / output / cache-read / cache-write tokens and model; session.shutdown holds per-model totals, used only when a session has no per-request events). Documented by GitHub; the exact field paths were verified against third-party parsers, so the parser is tolerant. This is separate from the GitHub Copilot billing card (PAT) — both roll up under the GitHub Copilot platform. VS Code Copilot Chat has no local token log unless you enable its OTel file export (Wave 2 parser).',
     paths: ['%USERPROFILE%\\.copilot\\session-state\\<session-id>\\events.jsonl (Windows)', '~/.copilot/session-state/… (macOS/Linux)'],
     links: { get: 'https://github.com/github/copilot-cli', docs: 'https://docs.github.com/en/copilot/concepts/agents/copilot-cli/chronicle', usage: 'https://github.com/settings/billing' } },
+  { id: 'continue', platform: 'Continue.dev', name: 'Continue.dev', category: 'coding', kind: 'folder-log',
+    statusEl: 'continue-status', brand: '#5b8def', mark: 'Co', srcIds: ['continue'],
+    patterns: [/(^|\/)tokensGenerated\.jsonl$/i], parser: 'parseContinueDevData', hint: 'dev_data/<version>/tokensGenerated.jsonl (pick ~/.continue)',
+    quality: 'exact',
+    qualityNote: 'Exact tokens from Continue\'s development data (dev_data/<schemaVersion>/tokensGenerated.jsonl: promptTokens, generatedTokens, model, provider, timestamp — written locally, on by default). Counts come from each provider\'s response; some providers (and Ollama) report estimates. The file has no cost — cost here is API-equivalent at list prices. Other dev_data files (chatInteraction, autocomplete) carry no token counts and are ignored.',
+    paths: ['%USERPROFILE%\\.continue\\dev_data\\<schemaVersion>\\tokensGenerated.jsonl (Windows)', '~/.continue/dev_data/… (macOS/Linux)'],
+    links: { get: 'https://continue.dev', docs: 'https://docs.continue.dev/customize/deep-dives/development-data' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv'] },
 ];
@@ -1632,6 +1639,25 @@ async function parseCopilotCliEvents(files, onProgress, seen = new Set()) {
     if (onProgress) onProgress(fi + 1, list.length);
   }
   return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds } };
+}
+
+/** Continue.dev — ~/.continue/dev_data/<ver>/tokensGenerated.jsonl: one event per model response
+ *  {promptTokens, generatedTokens, model, provider, timestamp}. No ids → no dedupe (each event is one request). */
+async function parseContinueDevData(files, onProgress) {
+  const agg = makeAgg(); let msgs = 0; const k = { lines: 0, badLines: 0 };
+  const list = files.filter(f => /(^|\/)tokensGenerated\.jsonl$/i.test(f.path));
+  for (let fi = 0; fi < list.length; fi++) {
+    const { file } = list[fi];
+    await eachJsonl(file, (o) => {
+      if (o.promptTokens == null && o.generatedTokens == null) return;
+      const ts = o.timestamp ? new Date(o.timestamp) : null, okTs = ts && !isNaN(ts);
+      agg.add(dayKey(okTs ? ts : file.lastModified), 'Continue.dev', String(o.model || 'unknown'),
+        { in: finTok(+o.promptTokens || 0), out: finTok(+o.generatedTokens || 0), msgs: 1 }, undefined, okTs ? ts.getHours() : undefined);
+      msgs++;
+    }, k);
+    if (onProgress) onProgress(fi + 1, list.length);
+  }
+  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds: [] } };
 }
 
 const ScanCache = {
