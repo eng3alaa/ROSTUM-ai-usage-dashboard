@@ -81,6 +81,30 @@ export async function run({ browser, ok }) {
     });
     ok('view: insight ✕ hides one card; "show all" chip restores; DOM keeps all 7 cards',
       ins.hidden && /1 insight hidden — show all/.test(ins.chipText || '') && ins.pref && ins.restored && ins.chipGone && !ins.prefAfter && ins.stillSeven, JSON.stringify(ins));
+
+    // ---- T4: legacy Data sources section ----
+    const legacy = await page.evaluate(() => {
+      LS.del('view'); View.load(); App.applyLegacySources();
+      const offDisplay = getComputedStyle(document.getElementById('sources')).display;
+      const titleOff = getComputedStyle(document.getElementById('sources-title')).display;
+      const cb = document.getElementById('show-legacy-sources');
+      cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true }));
+      const onDisplay = getComputedStyle(document.getElementById('sources')).display;
+      const pref = LS.get('view', {}).showLegacySources;
+      cb.checked = false; cb.dispatchEvent(new Event('change', { bubbles: true }));
+      return { offDisplay, titleOff, onDisplay, pref };
+    });
+    ok('view: legacy Data sources hidden by default; settings toggle shows and persists',
+      legacy.offDisplay === 'none' && legacy.titleOff === 'none' && legacy.onDisplay !== 'none' && legacy.pref === true, JSON.stringify(legacy));
+    const modalStill = await page.evaluate(async () => {
+      App.openConnectorModal('anthropic');
+      const dlg = document.getElementById('connector-modal');
+      const inModal = !!dlg.querySelector('#src-anthropic') && getComputedStyle(dlg.querySelector('#src-anthropic')).display !== 'none';
+      const closed = new Promise(r => dlg.addEventListener('close', r, { once: true })); dlg.close(); await closed;
+      return { inModal, home: !!document.querySelector('#sources #src-anthropic') };
+    });
+    ok('view: connector modal still hosts source cards while the legacy section is hidden', modalStill.inModal && modalStill.home, JSON.stringify(modalStill));
+    await page.evaluate(() => { LS.del('view'); View.load(); App.applyCollapse(); App.applyInsightHides(); App.applyLegacySources(); App._render(); });
   } finally {
     await page.close();
   }

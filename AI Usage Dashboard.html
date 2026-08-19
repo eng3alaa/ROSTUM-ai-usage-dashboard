@@ -166,7 +166,7 @@ input[type="date"], input[type="text"], input[type="password"], select {
 #connector-modal .modal-close { margin-left: auto; }
 #connector-modal .card.src { border: 0; padding: 0; background: transparent; }
 #hub-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; min-height: 0; }
-#hub-bar:empty { display: none; }
+#hub-bar label.inline { font-size: 12px; color: var(--ink-2); display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
 .acct .acct-hide { border: 0; background: transparent; color: var(--muted); font-size: 12px; line-height: 1; padding: 2px 5px; border-radius: 4px; cursor: pointer; opacity: 0; flex: none; }
 .acct:hover .acct-hide, .acct:focus-within .acct-hide, .acct .acct-hide:focus-visible { opacity: 1; }
 .acct .acct-hide:hover { color: var(--ink); background: var(--wash); }
@@ -175,7 +175,7 @@ input[type="date"], input[type="text"], input[type="password"], select {
 .collapse-btn:hover { color: var(--ink); }
 .row-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; }
 .row-head h2 { font-size: 13px; color: var(--ink-2); font-weight: 650; margin: 0; }
-@media screen { .sec-collapsed { display: none !important; } }   /* screen-only: print ignores collapse by construction */
+@media screen { .sec-collapsed, .legacy-off { display: none !important; } }   /* screen-only: print ignores collapse by construction */
 .insight { position: relative; }
 .insight-hide { position: absolute; top: 4px; right: 6px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; line-height: 1; padding: 2px 4px; border-radius: 4px; opacity: 0; }
 .insight:hover .insight-hide, .insight-hide:focus-visible { opacity: 1; }
@@ -212,7 +212,7 @@ input[type="date"], input[type="text"], input[type="password"], select {
 /* ============ Print report ============ */
 .report-meta { font-size: 12px; color: var(--ink-2); margin: 0 0 12px; }
 @media print {
-  .topbar .top-actions, .filterbar, #accounts-hub, #sources, .sources, #card-budgets, #card-pricing, #alerts, #storage-warning, .toggle, .btn, #hub-bar, .acct-hide, .collapse-btn, .insight-hide, #insights-chips { display: none !important; }
+  .topbar .top-actions, .filterbar, #accounts-hub, #sources, .sources, #card-budgets, #card-pricing, #alerts, #storage-warning, .toggle, .btn, #hub-bar, .acct-hide, .collapse-btn, .insight-hide, #insights-chips, #sources-title { display: none !important; }
   /* an open <dialog> renders in the top layer, above the normal document flow — hiding its
      ancestors via the print stylesheet does not hide it, so it needs its own rule */
   dialog { display: none !important; }
@@ -367,7 +367,7 @@ progress { width: 160px; height: 8px; }
   <header class="topbar">
     <div class="title-block">
       <h1>AI Usage &amp; Cost Monitor</h1>
-      <div class="subtitle" id="last-updated">No data yet — connect a source below.</div>
+      <div class="subtitle" id="last-updated">No data yet — connect an account above.</div>
     </div>
     <div class="top-actions">
       <label class="inline" style="font-size:12px;color:var(--ink-2);display:inline-flex;gap:5px;align-items:center">
@@ -411,7 +411,7 @@ progress { width: 160px; height: 8px; }
   </div>
 
   <!-- ================= Accounts hub ================= -->
-  <div id="hub-bar"><span id="hub-chips"></span></div>
+  <div id="hub-bar"><span id="hub-chips"></span><label class="inline" title="The legacy per-source cards below the charts — the accounts hub above hosts the same cards in its Manage dialog"><input type="checkbox" id="show-legacy-sources"> Show legacy source cards</label></div>
   <div id="accounts-hub" aria-label="AI accounts"></div>
   <dialog id="connector-modal">
     <div class="modal-head">
@@ -2309,7 +2309,7 @@ const App = {
     }
     $('last-updated').textContent = srcNames.length
       ? `Data ${span.min || '—'} → ${span.max || '—'} · sources: ${srcNames.join(', ')} · rendered ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
-      : 'No data yet — connect a source below.';
+      : 'No data yet — connect an account above.';
   },
 
   /* ---------- budgets & alerts ---------- */
@@ -2472,6 +2472,17 @@ const App = {
     const chips = clear($('insights-chips'));
     if (n) chips.appendChild(el('button', { class: 'chip insights-hidden-chip', type: 'button', text: `${n} insight${n === 1 ? '' : 's'} hidden — show all`,
       onclick: () => { View.showAllInsights(); this.applyInsightHides(); } }));
+  },
+  wireLegacyToggle() {
+    const cb = $('show-legacy-sources');
+    cb.addEventListener('change', () => { View.setLegacySources(cb.checked); this.applyLegacySources(); });
+    this.applyLegacySources();
+  },
+  applyLegacySources() {
+    const on = !!View.prefs.showLegacySources;
+    $('show-legacy-sources').checked = on;
+    $('sources').classList.toggle('legacy-off', !on);
+    $('sources-title').classList.toggle('legacy-off', !on);
   },
 
   /* ---------- accounts hub ---------- */
@@ -2930,8 +2941,8 @@ const App = {
   emptyNode() {
     const n = el('div', { class: 'empty' });
     n.appendChild(document.createTextNode('No data in this range yet — '));
-    const a = el('a', { text: 'connect a source below' });
-    a.addEventListener('click', () => $('src-local').scrollIntoView({ behavior: 'smooth' }));
+    const a = el('a', { text: 'connect an account' });
+    a.addEventListener('click', () => this.openConnectorModal('local'));
     n.appendChild(a);
     n.appendChild(document.createTextNode('.'));
     return n;
@@ -3322,6 +3333,7 @@ const App = {
     this.renderPricing();
     this.wireCollapsibles();
     this.wireInsightHides();
+    this.wireLegacyToggle();
 
     // range presets
     $('range-presets').querySelectorAll('button').forEach(b => {
