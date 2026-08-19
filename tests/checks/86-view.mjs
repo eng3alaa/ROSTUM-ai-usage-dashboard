@@ -1,0 +1,44 @@
+import { openDashboard } from '../lib/harness.mjs';
+
+export async function run({ browser, ok }) {
+  const { page } = await openDashboard(browser);
+  try {
+    // ---- T1: hide / unhide account cards ----
+    const hide = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      App._drill = null; App.filters.hiddenPlatforms = new Set();
+      LS.del('view'); View.load();
+      App._render();
+      const before = document.querySelectorAll('#accounts-hub .acct').length;
+      document.querySelector('#accounts-hub .acct[data-connector="openrouter"] .acct-hide').click();
+      App._render();
+      const after = document.querySelectorAll('#accounts-hub .acct').length;
+      const gone = !document.querySelector('#accounts-hub .acct[data-connector="openrouter"]');
+      const chip = document.querySelector('#hub-chips .hub-hidden-chip');
+      const persisted = (LS.get('view', {}) || {}).hiddenCards;
+      return { before, after, gone, chipText: chip && chip.textContent, persisted };
+    });
+    ok('view: ✕ hides an account card, chip counts it, preference persists',
+      hide.after === hide.before - 1 && hide.gone && /^1 hidden — show$/.test(hide.chipText || '') &&
+      Array.isArray(hide.persisted) && hide.persisted.length === 1 && hide.persisted[0] === 'openrouter', JSON.stringify(hide));
+
+    const show = await page.evaluate(() => {
+      document.querySelector('#hub-chips .hub-hidden-chip').click();
+      App._render();
+      return { back: !!document.querySelector('#accounts-hub .acct[data-connector="openrouter"]'),
+        chip: !!document.querySelector('#hub-chips .hub-hidden-chip'), persisted: LS.get('view', {}).hiddenCards.length };
+    });
+    ok('view: "N hidden — show" chip restores every hidden card', show.back && !show.chip && show.persisted === 0, JSON.stringify(show));
+
+    const reveal = await page.evaluate(() => {
+      View.hideCard('openrouter'); App._render();
+      const hiddenFirst = !document.querySelector('#accounts-hub .acct[data-connector="openrouter"]');
+      Store.setConnector('openrouter', { label: 'my-key', lastSync: Date.now(), err: null });   // connect → auto-reveal
+      App._render();
+      return { hiddenFirst, back: !!document.querySelector('#accounts-hub .acct[data-connector="openrouter"]'), pref: View.isCardHidden('openrouter') };
+    });
+    ok('view: connecting a hidden card auto-reveals it', reveal.hiddenFirst && reveal.back && reveal.pref === false, JSON.stringify(reveal));
+  } finally {
+    await page.close();
+  }
+}
