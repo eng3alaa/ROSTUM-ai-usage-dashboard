@@ -242,6 +242,71 @@ export async function run({ browser, ok }) {
     ok('validate-only vendors: registry invariants (api-key · api · validate · fetch fn · srcIds self · statusEl + card · honest notes/links; Groq from Task 2 present; PLATFORM_ORDER derived)',
       vinv.bad.length === 0 && vinv.inOrder, JSON.stringify(vinv));
 
+    // ---- T7: Fireworks AI (exact tokens + billed USD via the key driver) ----
+    const fwServerless = JSON.parse(read('wave2', 'fireworks', 'billingUsage-serverless.json'));
+    const fwDedicated = JSON.parse(read('wave2', 'fireworks', 'billingUsage-dedicated.json'));
+    const fwSummary = JSON.parse(read('wave2', 'fireworks', 'billing-summary.json'));
+    const fw = await page.evaluate(async (serverless, dedicated, summary) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const c = connectorById('fireworks');
+      if (typeof fetchFireworks !== 'function' || !c || !document.getElementById('fireworks-key') || !document.getElementById('fireworks-f-account')) return { missing: true };
+      const realFetch = window.fetch;
+      const resp = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
+      let calls = [], failSummary = false;
+      // stub = a Fireworks server that answers EVERY window with the whole fixture — the fetcher's half-open window guard must count each bucket exactly once
+      window.fetch = async (url, init) => {
+        const u = new URL(String(url));
+        calls.push({ url: u.toString(), auth: init && init.headers && init.headers.Authorization });
+        if (!u.pathname.startsWith('/v1/accounts/my-team/')) return resp({ error: { message: 'unexpected ' + u.pathname } }, 404);
+        if (u.pathname.endsWith('/billingUsage')) return resp(u.searchParams.get('usageType') === 'DEDICATED_DEPLOYMENT' ? dedicated : serverless);
+        if (u.pathname.endsWith('/billing/summary')) return failSummary ? resp({ error: { message: 'boom' } }, 500) : resp(summary);
+        return resp({}, 404);
+      };
+      // 1) direct fetcher call: rows, billed, URL/header discipline
+      const res = await fetchFireworks('fw_test', { account: 'my-team' }, { days: 90 });
+      const t = res.rows.reduce((a, r) => ({ in: a.in + r.in, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, out: 0, msgs: 0 });
+      const dayA = serverless.usageBuckets[0].startTime.slice(0, 10), dayB = serverless.usageBuckets[3].startTime.slice(0, 10);
+      const llamaA = res.rows.find(r => r.d === dayA && r.model === 'llama-v3p3-70b-instruct');
+      const bu = calls.filter(x => x.url.includes('/billingUsage')), sm = calls.filter(x => x.url.includes('/billing/summary'));
+      const winOk = calls.every(x => { const u = new URL(x.url); const s = Date.parse(u.searchParams.get('startTime')), e = Date.parse(u.searchParams.get('endTime')); return e > s && e - s <= 31 * 864e5; });
+      const direct = { ...t, n: res.rows.length, platforms: [...new Set(res.rows.map(r => r.platform))], models: res.rows.map(r => r.model).sort(), est: res.rows.some(r => r.est),
+        llamaA: llamaA && { in: llamaA.in, out: llamaA.out }, days: [...new Set(res.rows.map(r => r.d))].sort(), dayA, dayB,
+        billed: res.billed.map(b => [b.d, b.amount]), billedTotal: res.billed.reduce((a, b) => a + b.amount, 0), label: res.label, detail: res.detail,
+        nUsage: bu.length, nServerless: bu.filter(x => x.url.includes('usageType=SERVERLESS')).length, nDedicated: bu.filter(x => x.url.includes('usageType=DEDICATED_DEPLOYMENT')).length, nSummary: sm.length,
+        groupBy: bu.every(x => new URL(x.url).searchParams.get('groupBy') === 'model_name'), daily: sm.every(x => new URL(x.url).searchParams.get('granularity') === 'DAILY'),
+        auth: calls.every(x => x.auth === 'Bearer fw_test'), host: calls.every(x => x.url.startsWith('https://api.fireworks.ai/v1/accounts/my-team/')), winOk };
+      const noAccount = await fetchFireworks('fw_test', {}, { days: 90 }).then(() => 'resolved', e => e.message);
+      // 2) through the key driver: rows + billed stored under 'fireworks', connector labeled
+      calls = [];
+      document.getElementById('fireworks-key').value = 'fw_test';
+      document.getElementById('fireworks-f-account').value = 'my-team';
+      await App.connectKey(c);
+      const st = Store.connectors.fireworks || {};
+      const rows = (Store.sources.fireworks || {}).rows || [];
+      const driver = { status: Store.connectorStatus(c), label: st.label || null, err: st.err || null, text: document.getElementById('fireworks-status').textContent,
+        in: rows.reduce((a, r) => a + r.in, 0), out: rows.reduce((a, r) => a + r.out, 0), billedTotal: Store.billedRows('fireworks').reduce((a, b) => a + b.amount, 0), calls: calls.length };
+      // 3) summary endpoint fails → tokens still land, no error state, no stale dollars invented
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; failSummary = true;
+      await App.connectKey(c);
+      const st2 = Store.connectors.fireworks || {};
+      const soft = { status: Store.connectorStatus(c), err: st2.err || null, rows: ((Store.sources.fireworks || {}).rows || []).length, billed: Store.billedRows('fireworks').length, text: document.getElementById('fireworks-status').textContent };
+      window.fetch = realFetch;
+      document.getElementById('fireworks-key').value = ''; document.getElementById('fireworks-f-account').value = '';
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist(); App._render();
+      return { direct, noAccount, driver, soft, kind: c.kind, cat: c.category, quality: c.quality, fields: JSON.stringify(c.fields), card: !!document.getElementById('src-fireworks') };
+    }, fwServerless, fwDedicated, fwSummary);
+    ok('fireworks: billingUsage serverless + dedicated → exact rows (in=19800 out=4930 msgs=0, 4 day·model rows, string tokens parsed, "abc" rejected, out-of-window bucket dropped) + billing/summary → billed 6.46 over 2 days',
+      !fw.missing && fw.direct.in === 19800 && fw.direct.out === 4930 && fw.direct.msgs === 0 && fw.direct.n === 4 && !fw.direct.est
+      && fw.direct.platforms.length === 1 && fw.direct.platforms[0] === 'Fireworks AI' && JSON.stringify(fw.direct.models) === JSON.stringify(['dep-1', 'llama-v3p3-70b-instruct', 'llama-v3p3-70b-instruct', 'qwen3-235b-a22b'])
+      && fw.direct.llamaA && fw.direct.llamaA.in === 12000 && fw.direct.llamaA.out === 3410 && JSON.stringify(fw.direct.days) === JSON.stringify([fw.direct.dayB, fw.direct.dayA].sort())
+      && fw.direct.billed.length === 2 && Math.abs(fw.direct.billedTotal - 6.46) < 1e-9 && Math.abs((fw.direct.billed.find(b => b[0] === fw.direct.dayA) || [0, 0])[1] - 6.34) < 1e-9, JSON.stringify(fw.direct || fw));
+    ok('fireworks: 31-day windows × 2 usage types + daily summary per window (3+3+3 calls for 90 days), groupBy=model_name, Bearer auth, account in the path; missing account id is a clear error',
+      !fw.missing && fw.direct.nUsage === 6 && fw.direct.nServerless === 3 && fw.direct.nDedicated === 3 && fw.direct.nSummary === 3 && fw.direct.groupBy && fw.direct.daily && fw.direct.auth && fw.direct.host && fw.direct.winOk
+      && /account id/i.test(fw.noAccount) && /^account my-team/.test(fw.direct.label) && /4 day·model rows/.test(fw.direct.detail) && /2 billed days/.test(fw.direct.detail), JSON.stringify({ d: fw.direct, noAccount: fw.noAccount }));
+    ok('fireworks: key driver stores rows + billed under fireworks (label names the account); summary failure degrades to tokens-only without an error state; registry = api-key · api · exact · account field',
+      !fw.missing && fw.driver.status === 'ok' && fw.driver.err === null && /account my-team/.test(fw.driver.label) && /Connected/.test(fw.driver.text) && fw.driver.in === 19800 && fw.driver.out === 4930 && Math.abs(fw.driver.billedTotal - 6.46) < 1e-9 && fw.driver.calls === 9
+      && fw.soft.status === 'ok' && fw.soft.err === null && fw.soft.rows === 4 && fw.soft.billed === 0 && /billing summary unavailable/.test(fw.soft.text)
+      && fw.kind === 'api-key' && fw.cat === 'api' && fw.quality === 'exact' && fw.card && fw.fields === JSON.stringify([{ id: 'account', label: 'Account id', placeholder: 'e.g. my-team' }]), JSON.stringify({ driver: fw.driver, soft: fw.soft, kind: fw.kind, cat: fw.cat, quality: fw.quality, fields: fw.fields, card: fw.card }));
   } finally {
     await page.close();
   }

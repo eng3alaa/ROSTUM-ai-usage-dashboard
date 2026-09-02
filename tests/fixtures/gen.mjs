@@ -345,6 +345,31 @@ export async function generate() {
     internal: [['q'.repeat(8), 'r'.repeat(60)]], visible: [['q'.repeat(8), 'r'.repeat(60)]],
     metadata: { user_0: { timestamp: '2026-08-11 10:00:00' }, assistant_0: { timestamp: '2026-08-11 10:00:05' } } }, null, 1));
   w('wave2/tgwebui/user_data/logs/chat_state.json', JSON.stringify({ unique_id: 'x' }));   // not matched (no chat/ or instruct/ dir) — ignored
+  // ---- Plan 4b (Wave 2) fixtures: API vendors ----
+  // T7 — Fireworks billingUsage (tokens as JSON STRINGS; day = bucket start UTC; groupBy=model_name) + billing/summary (USD per day).
+  //   Days are RELATIVE so the 90-day fetch window always covers them: A = 3 days ago, B = 40 days ago (a different 31-day window), Z = 200 days ago (outside the range → must be dropped).
+  //   serverless: A llama in 12000 out 3400 · A qwen in 5000 out 900 · A llama promptTokens "abc" (rejected → 0) out 10 · B llama in 800 out 120 · Z 99999/99999 (dropped)
+  //   dedicated:  A dep-1 in 2000 out 500
+  //   Expected rows (serverless + dedicated): in = 12000+5000+0+800+2000 = 19800 · out = 3400+900+10+120+500 = 4930 · msgs = 0 (no request count in the export)
+  //     4 day·model rows: A/llama (in 12000, out 3410), A/qwen, B/llama, A/dep-1 · model names lose the accounts/<acct>/models/ (serverless) and accounts/<acct>/deployments/ (dedicated → 'dep-1') prefixes
+  //   summary: A serverless 1.84 + dedicated 4.50 = 6.34 · B 0.12 · Z 9.99 (dropped) → 2 billed days, total 6.46
+  const fwDay = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+  const fwBucket = (n, model, p, c) => ({ startTime: fwDay(n) + 'T00:00:00Z', endTime: fwDay(n - 1) + 'T00:00:00Z', dimensions: { model_name: model }, promptTokens: p, completionTokens: c });
+  w('wave2/fireworks/billingUsage-serverless.json', JSON.stringify({ usageBuckets: [
+    fwBucket(3, 'accounts/fireworks/models/llama-v3p3-70b-instruct', '12000', '3400'),
+    fwBucket(3, 'accounts/fireworks/models/qwen3-235b-a22b', '5000', '900'),
+    fwBucket(3, 'accounts/fireworks/models/llama-v3p3-70b-instruct', 'abc', '10'),
+    fwBucket(40, 'accounts/fireworks/models/llama-v3p3-70b-instruct', '800', '120'),
+    fwBucket(200, 'accounts/fireworks/models/llama-v3p3-70b-instruct', '99999', '99999'),
+  ] }, null, 1));
+  w('wave2/fireworks/billingUsage-dedicated.json', JSON.stringify({ usageBuckets: [
+    fwBucket(3, 'accounts/acme/deployments/dep-1', '2000', '500'),
+  ] }, null, 1));
+  w('wave2/fireworks/billing-summary.json', JSON.stringify({ lineItems: [
+    { category: 'SERVERLESS', usageBuckets: [{ startTime: fwDay(3) + 'T00:00:00Z', amount: '1.84', currency: 'USD' }, { startTime: fwDay(40) + 'T00:00:00Z', amount: '0.12', currency: 'USD' }] },
+    { category: 'DEDICATED_DEPLOYMENT', usageBuckets: [{ startTime: fwDay(3) + 'T00:00:00Z', amount: '4.50', currency: 'USD' }] },
+    { category: 'TRAINING', usageBuckets: [{ startTime: fwDay(200) + 'T00:00:00Z', amount: '9.99', currency: 'USD' }] },
+  ] }, null, 1));
 }
 
 if (process.argv[1] === import.meta.filename) await generate();

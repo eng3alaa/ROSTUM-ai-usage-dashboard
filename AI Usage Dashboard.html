@@ -1347,6 +1347,15 @@ const CONNECTORS = [
     qualityNote: 'Estimated: oobabooga\'s web UI keeps history files (user_data/logs/chat/<character>/*.json, user_data/logs/instruct/*.json) with every user/assistant pair with a timestamp and model_name per turn but no token counts — both sides are estimated from text (chars ÷ 4), so every row is marked est.; input counts only the user turn (not the re-sent context), so totals are a lower bound. The live check calls the OpenAI-compatible API (GET /v1/models; start the UI with --api, port 5000): it has no history endpoint and its /v1/billing/usage is a stub that always returns 0. From a file:// page the API is CORS-blocked unless the server runs with --listen or --public-api. Local models are $0 — they run on your hardware.',
     paths: ['<install>\\user_data\\logs\\chat\\<character>\\<id>.json (chat / chat-instruct)', '<install>\\user_data\\logs\\instruct\\<id>.json', 'server: http://127.0.0.1:5000 (--api; --api-port / OPENEDAI_PORT change it)'],
     links: { get: 'https://github.com/oobabooga/text-generation-webui', docs: 'https://github.com/oobabooga/text-generation-webui/wiki/12-%E2%80%90-OpenAI-API' } },
+  // ---- Wave 2 api-key connector with real usage: Fireworks AI ----
+  { id: 'fireworks', platform: 'Fireworks AI', name: 'Fireworks AI', category: 'api', kind: 'api-key',
+    statusEl: 'fireworks-status', brand: '#6720ff', mark: 'Fw', srcIds: ['fireworks'], keyLS: 'key:fireworks', fetch: 'fetchFireworks',
+    keyLabel: 'Fireworks API key', keyHint: 'fw_… (app.fireworks.ai → Settings → API keys — any regular key works)',
+    fields: [{ id: 'account', label: 'Account id', placeholder: 'e.g. my-team' }],
+    quality: 'exact',
+    qualityNote: 'Exact tokens and billed dollars: any regular Fireworks key plus your account id reads GET /v1/accounts/{account}/billingUsage (daily prompt / completion tokens per model, serverless and dedicated deployments, fetched in 31-day windows) and GET …/billing/summary?granularity=DAILY (rated USD per day). Token counts arrive as strings and are daily only (no hour); the API caches for a few minutes. Request counts are not part of the export, so the messages metric stays 0 for Fireworks. Find the account id in app.fireworks.ai (Settings, or the first path segment of the console URL); the key is kept in this browser only if you tick Remember.',
+    paths: ['GET https://api.fireworks.ai/v1/accounts/{account}/billingUsage?usageType=SERVERLESS|DEDICATED_DEPLOYMENT&groupBy=model_name (≤31-day windows)', 'GET https://api.fireworks.ai/v1/accounts/{account}/billing/summary?granularity=DAILY', 'CLI equivalent: firectl billing get-usage / export-metrics'],
+    links: { get: 'https://app.fireworks.ai/settings/users/api-keys', docs: 'https://docs.fireworks.ai/accounts/exporting-usage-and-costs', usage: 'https://app.fireworks.ai/account/billing' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv'] },
 ];
@@ -2707,6 +2716,64 @@ async function validateTgwebui(base) {
   const j = await fetchJSON(base + '/v1/models', {});
   const n = Array.isArray(j && j.data) ? j.data.length : 0;
   return { label: `${n} models`, detail: `${n} models listed · no usage history on the server — chat/instruct logs (estimated) are read from the user_data folder below` };
+}
+
+/* ---------- Fireworks AI: exact tokens (billingUsage) + billed USD (billing/summary) with a regular key ---------- */
+/** fields.account = Fireworks account id (app.fireworks.ai). `days` back from today in ≤31-day half-open windows [s, e); two
+ *  passes (SERVERLESS, DEDICATED_DEPLOYMENT); token fields are JSON strings; day = bucket start (UTC); model = dimensions.model_name
+ *  without the accounts/<acct>/models/ (serverless) or accounts/<acct>/deployments/ (dedicated) prefix. A bucket is counted only if its start falls inside the window that requested it,
+ *  so padded or cached responses never double count. Summary failure → billed null (tokens still land). */
+async function fetchFireworks(key, fields, opts) {
+  const account = String((fields && fields.account) || '').trim();
+  if (!account) throw new Error('Enter your Fireworks account id (app.fireworks.ai → Settings → Account; it is also the first path segment in the console URL)');
+  if (!/^[A-Za-z0-9_-]+$/.test(account)) throw new Error('Account id may only contain letters, digits, - and _');
+  const days = (opts && opts.days) || 90;
+  const h = { 'Authorization': 'Bearer ' + key };
+  const base = 'https://api.fireworks.ai/v1/accounts/' + encodeURIComponent(account);
+  const iso = (d) => d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const dayMs = 864e5, endAll = new Date();
+  const startAll = new Date(Date.UTC(endAll.getUTCFullYear(), endAll.getUTCMonth(), endAll.getUTCDate()) - days * dayMs);
+  const windows = [];
+  for (let s = startAll.getTime(); s < endAll.getTime();) { const e = Math.min(s + 31 * dayMs, endAll.getTime()); windows.push([new Date(s), new Date(e)]); s = e; }
+  const inWin = (t, s, e) => { const ms = Date.parse(t); return Number.isFinite(ms) && ms >= s.getTime() && ms < e.getTime(); };
+  const modelOf = (b) => { const dims = b.dimensions || {}; const raw = dims.model_name || dims.modelName || b.model_name || b.modelName || b.model || 'fireworks (all models)'; return String(raw).replace(/^accounts\/[^/]+\/(models|deployments)\//, ''); };   // serverless 'accounts/fireworks/models/<m>' and dedicated 'accounts/<acct>/deployments/<dep>' both lose their resource prefix
+  const agg = makeAgg();
+  for (const usageType of ['SERVERLESS', 'DEDICATED_DEPLOYMENT']) {
+    for (const [s, e] of windows) {
+      const url = new URL(base + '/billingUsage');
+      url.searchParams.set('startTime', iso(s)); url.searchParams.set('endTime', iso(e));
+      url.searchParams.set('usageType', usageType); url.searchParams.set('groupBy', 'model_name'); url.searchParams.set('timezone', 'UTC');
+      const j = await fetchJSON(url, h);
+      for (const b of (j.usageBuckets || j.buckets || j.data || [])) {
+        const t = b.startTime || b.start_time || b.bucketStart;
+        if (!inWin(t, s, e)) continue;
+        agg.add(dayKeyUTC(t), 'Fireworks AI', modelOf(b), { in: finTok(+b.promptTokens || 0), out: finTok(+b.completionTokens || 0), msgs: finTok(+(b.requests ?? b.numRequests ?? b.requestCount) || 0) });
+      }
+    }
+  }
+  let billed = null;
+  try {
+    const bm = new Map();
+    for (const [s, e] of windows) {
+      const url = new URL(base + '/billing/summary');
+      url.searchParams.set('granularity', 'DAILY'); url.searchParams.set('startTime', iso(s)); url.searchParams.set('endTime', iso(e));
+      const j = await fetchJSON(url, h);
+      const items = Array.isArray(j.lineItems) ? j.lineItems : Array.isArray(j.items) ? j.items : [j];   // per-category line items, or buckets at the top level
+      for (const it of items) for (const b of (it.usageBuckets || it.buckets || [])) {
+        const t = b.startTime || b.start_time || b.bucketStart;
+        if (!inWin(t, s, e)) continue;
+        const raw = b.cost ?? b.amount ?? b.totalCost ?? b.total;
+        const amt = raw && typeof raw === 'object' ? parseFloat(raw.value ?? raw.amount) : parseFloat(raw);
+        const d = dayKeyUTC(t);
+        bm.set(d, (bm.get(d) || 0) + finAmt(amt));
+      }
+    }
+    billed = [...bm.entries()].map(([d, amount]) => ({ d, amount })).sort((a, b) => a.d < b.d ? -1 : 1);
+  } catch (e) { console.warn('fireworks billing summary failed', e); }
+  const rows = agg.rows();
+  return { label: `account ${account} · last 4: ${key.slice(-4)}`, rows, billed,
+    detail: `${rows.length} day·model rows${billed ? ` · ${billed.length} billed day${billed.length === 1 ? '' : 's'}` : ' · billing summary unavailable (tokens only)'} · last ${days} days in ${windows.length} windows`,
+    meta: { days, account, windows: windows.length } };
 }
 
 async function fetchCopilotAll(token) {
