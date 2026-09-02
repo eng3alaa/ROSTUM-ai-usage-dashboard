@@ -1249,6 +1249,49 @@ const CONNECTORS = [
     qualityNote: 'No data: Windsurf (Codeium, now Cognition) meters prompt credits, never tokens. Individuals see credit consumption on windsurf.com/subscription/usage only — no CSV export, no API. Teams/Enterprise admins can call server.codeium.com/api/v1/UserPageAnalytics with a read-only service key (per-user promptCreditsUsed in cents, current billing cycle only), but the endpoint is CORS-blocked from a page opened from disk and is not available on Free/Pro plans. Local Cascade storage under ~/.codeium/windsurf/ is undocumented and binary, with no token counts or credits. Check credits via the link, or enter figures through the generic CSV import.',
     paths: ['windsurf.com/subscription/usage (prompt credits, web only)', '%USERPROFILE%\\.codeium\\windsurf\\ (hooks.json, memories — no usage data)', 'Teams/Enterprise: POST https://server.codeium.com/api/v1/UserPageAnalytics (service key in the JSON body; CORS-blocked)'],
     links: { get: 'https://windsurf.com', usage: 'https://windsurf.com/subscription/usage', docs: 'https://docs.devin.ai/desktop/accounts/api-reference/user-page-analytics' } },
+  // ---- Wave 2 validate-only API vendors (key driver: App.connectKey → globalThis[c.fetch](key, fields, { days })) ----
+  { id: 'mistral', platform: 'Mistral', name: 'Mistral (La Plateforme)', category: 'api', kind: 'api-key',
+    statusEl: 'mistral-status', brand: '#f7931e', mark: 'Mi', srcIds: ['mistral'], keyLS: 'key:mistral', fetch: 'fetchMistral',
+    keyLabel: 'Mistral API key', keyHint: 'La Plateforme key (console.mistral.ai → API keys)',
+    quality: 'validate',
+    qualityNote: 'Validate-only: Mistral gives standard La Plateforme keys no usage or billing endpoint — this card checks the key against GET /v1/models and shows how many models it can reach, nothing more. Token and spend history live in the console (Workspaces → Usage); there is no export. The Enterprise-only Admin API (/v1/admin/usage) returns monthly spend by category, not tokens per model, and is CORS-blocked from this page, so it is not used. The key is kept in this browser only if you tick Remember.',
+    paths: ['GET https://api.mistral.ai/v1/models (validate only)', 'spend: console.mistral.ai → Workspaces → Usage (no export)'],
+    links: { get: 'https://console.mistral.ai/api-keys', docs: 'https://docs.mistral.ai/admin/workspaces/usage-limits', usage: 'https://console.mistral.ai/usage' } },
+  { id: 'cohere', platform: 'Cohere', name: 'Cohere', category: 'api', kind: 'api-key',
+    statusEl: 'cohere-status', brand: '#39594d', mark: 'Ch', srcIds: ['cohere'], keyLS: 'key:cohere', fetch: 'fetchCohere',
+    keyLabel: 'Cohere API key', keyHint: 'production or trial key (dashboard.cohere.com → API keys)',
+    quality: 'validate',
+    qualityNote: 'Validate-only: Cohere has no usage, billing or spend endpoint — POST /v1/check-api-key confirms the key (and its organization) and GET /v2/models counts models. Token usage exists only as per-response metadata (meta.billed_units) and on dashboard.cohere.com/billing, which has no export. Nothing here is estimated: the card simply never shows tokens or dollars for Cohere.',
+    paths: ['POST https://api.cohere.com/v1/check-api-key · GET https://api.cohere.com/v2/models (validate only)', 'spend: dashboard.cohere.com/billing (no export)'],
+    links: { get: 'https://dashboard.cohere.com/api-keys', docs: 'https://docs.cohere.com/reference/check-api-key', usage: 'https://dashboard.cohere.com/billing' } },
+  { id: 'together', platform: 'Together AI', name: 'Together AI', category: 'api', kind: 'api-key',
+    statusEl: 'together-status', brand: '#0f6fff', mark: 'Tg', srcIds: ['together'], keyLS: 'key:together', fetch: 'fetchTogether',
+    keyLabel: 'Together API key', keyHint: 'api.together.ai → Settings → API keys',
+    quality: 'validate',
+    qualityNote: 'Validate-only: Together AI documents no usage, credits or billing API — GET /v1/models proves the key works and that is all this card can read. Usage and cost (by product, API key, project) are in the console billing and cost-analytics pages, with no export. Together is prepaid; your balance is not readable from here either.',
+    paths: ['GET https://api.together.xyz/v1/models (validate only)', 'spend: api.together.ai → Settings → Billing / Cost analytics (no export)'],
+    links: { get: 'https://api.together.ai/settings/api-keys', docs: 'https://docs.together.ai/docs/billing-usage-limits', usage: 'https://api.together.ai/settings/organization/~current/billing' } },
+  { id: 'huggingface', platform: 'Hugging Face', name: 'Hugging Face (Inference Providers)', category: 'api', kind: 'api-key',
+    statusEl: 'huggingface-status', brand: '#ff9d00', mark: 'HF', srcIds: ['huggingface'], keyLS: 'key:huggingface', fetch: 'fetchHuggingFace',
+    keyLabel: 'Hugging Face access token', keyHint: 'hf_… (huggingface.co → Settings → Access Tokens)',
+    quality: 'validate',
+    qualityNote: 'Validate-only: Hugging Face exposes no usage or credits endpoint for Inference Providers — GET /api/whoami-v2 confirms the token and shows the account, plan (PRO) and organizations. Inference spend, monthly credits and the per-model / per-provider breakdown are visible only at huggingface.co/settings/inference-providers/overview (no export). Requests routed with a custom provider key are billed by that provider, not by Hugging Face.',
+    paths: ['GET https://huggingface.co/api/whoami-v2 (validate only)', 'spend: huggingface.co/settings/inference-providers/overview · /settings/billing (no export)'],
+    links: { get: 'https://huggingface.co/settings/tokens', docs: 'https://huggingface.co/docs/inference-providers/pricing', usage: 'https://huggingface.co/settings/inference-providers/overview' } },
+  { id: 'xai', platform: 'xAI API', name: 'xAI API (Grok models)', category: 'api', kind: 'api-key',
+    statusEl: 'xai-status', brand: '#4b5563', mark: 'xA', srcIds: ['xai'], keyLS: 'key:xai', fetch: 'fetchXai',
+    keyLabel: 'xAI API key', keyHint: 'xai-… (console.x.ai → API keys — a regular key, not a management key)',
+    quality: 'validate',
+    qualityNote: 'Validate-only: a regular xAI API key can only be checked — GET /v1/api-key returns the key name, team and status and GET /v1/models the model list; api.x.ai has no usage endpoint. Billed usage history, prepaid balance and invoices live on the Management API (management-api.x.ai, separate management key), which sends no CORS headers and therefore cannot be read from this page — use the console Usage Explorer. Grok chat (grok.com) is a different product; see the Grok export card.',
+    paths: ['GET https://api.x.ai/v1/api-key · GET https://api.x.ai/v1/models (validate only)', 'spend: console.x.ai → Usage Explorer (Management API is CORS-blocked from this page)'],
+    links: { get: 'https://console.x.ai/', docs: 'https://docs.x.ai/developers/management-api-guide', usage: 'https://docs.x.ai/docs/key-information/usage-explorer' } },
+  { id: 'perplexity-api', platform: 'Perplexity API', name: 'Perplexity API (Sonar)', category: 'api', kind: 'api-key',
+    statusEl: 'perplexity-api-status', brand: '#20808d', mark: 'Px', srcIds: ['perplexity-api'], keyLS: 'key:perplexity-api', fetch: 'fetchPerplexityApi',
+    keyLabel: 'Perplexity API key', keyHint: 'pplx-… (perplexity.ai → Settings → API)',
+    quality: 'validate',
+    qualityNote: 'Validate-only, with a caveat: Perplexity offers no balance or usage endpoint for Sonar keys, and GET /v1/models is unauthenticated — so this card can only confirm the API is reachable, it cannot verify your key (only a paid completion would). Usage, per-model cost and invoices are on the API console Billing tab (no export). The org-admin analytics endpoint covers the "Computer" product only, not Sonar spend, so it is not used here.',
+    paths: ['GET https://api.perplexity.ai/v1/models (unauthenticated — reachability only)', 'spend: perplexity.ai/account/api → Billing (no export)'],
+    links: { get: 'https://www.perplexity.ai/account/api', docs: 'https://docs.perplexity.ai/api-reference/models-get', usage: 'https://www.perplexity.ai/account/api' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv'] },
 ];
@@ -2341,6 +2384,66 @@ async function fetchGroq(key) {
   const j = await fetchJSON('https://api.groq.com/openai/v1/models', { 'Authorization': 'Bearer ' + key });
   const n = Array.isArray(j && j.data) ? j.data.length : 0;
   return { label: `${n} models`, detail: `${n} models available to this key · no usage or spend API — usage and billing are in the Groq console (see the links)` };
+}
+
+/* ---------- Wave 2 validate-only vendors — key-driver fetchers: async (key, fields, opts) → { label, detail } (no rows: nothing to read) ---------- */
+/** Model-list length in any of the shapes these vendors return: bare array (Together), {data:[…]} (OpenAI-style: Mistral, xAI, Perplexity), {models:[…]} (Cohere v2). */
+const countModels = (j) => Array.isArray(j) ? j.length : Array.isArray(j && j.data) ? j.data.length : Array.isArray(j && j.models) ? j.models.length : 0;
+/** Mistral La Plateforme — standard keys have no usage/billing endpoint; GET /v1/models proves the key works. */
+async function fetchMistral(key) {
+  const j = await fetchJSON('https://api.mistral.ai/v1/models', { 'Authorization': 'Bearer ' + key });
+  const n = countModels(j);
+  return { label: `${n} models available`, detail: `key valid · ${n} models · Mistral has no usage or spend API for standard keys — see the console for spend (the Enterprise Admin API is CORS-blocked from this page)` };
+}
+/** Cohere — POST /v1/check-api-key (valid + organization), then GET /v2/models for a count. No usage endpoint exists. */
+async function fetchCohere(key) {
+  const h = { 'Authorization': 'Bearer ' + key };
+  const res = await fetch('https://api.cohere.com/v1/check-api-key', { method: 'POST', headers: h });
+  if (!res.ok) {
+    let detail = '';
+    try { const j = await res.json(); detail = (j && (j.message || (j.error && j.error.message))) || ''; } catch {}
+    throw new Error(`HTTP ${res.status}${detail ? ' — ' + detail : ''}`);
+  }
+  const chk = await res.json();
+  if (chk && chk.valid === false) throw new Error('Cohere reports this key as not valid');
+  let n = 0;
+  try { n = countModels(await fetchJSON('https://api.cohere.com/v2/models', h)); } catch (e) { console.warn('cohere models unavailable', e); }
+  const org = chk && chk.organization_id ? ' · org ' + String(chk.organization_id).slice(0, 12) : '';
+  return { label: `valid key · ${n} models`, detail: `key valid${org} · ${n} models · usage is per-response metadata + dashboard.cohere.com/billing only (no usage API)` };
+}
+/** Together AI — GET /v1/models (bare array). No usage, credits or billing endpoint is documented. */
+async function fetchTogether(key) {
+  const j = await fetchJSON('https://api.together.xyz/v1/models', { 'Authorization': 'Bearer ' + key });
+  const n = countModels(j);
+  return { label: `${n} models available`, detail: `key valid · ${n} models · Together exposes no usage, credits or billing endpoint — spend lives in the console billing / cost-analytics pages` };
+}
+/** Hugging Face — GET /api/whoami-v2: account, plan (isPro), orgs. Inference spend is settings-UI only. */
+async function fetchHuggingFace(key) {
+  const j = await fetchJSON('https://huggingface.co/api/whoami-v2', { 'Authorization': 'Bearer ' + key });
+  const who = String(j.name || j.fullname || 'hf user');
+  const orgs = Array.isArray(j.orgs) ? j.orgs.map(o => o && (o.name || o.fullname)).filter(Boolean).map(String) : [];
+  const plan = j.isPro ? 'PRO' : (j.type === 'org' ? 'org' : 'free');
+  const orgLabel = orgs.length ? ` · ${orgs.length} org${orgs.length === 1 ? '' : 's'}` : '';
+  return { label: `${who} · ${plan}${orgLabel}`,
+    detail: `token valid for ${who} (${plan})${orgs.length ? ' · orgs: ' + orgs.join(', ') : ''} · inference spend and monthly credits are visible only at huggingface.co/settings/inference-providers/overview (no usage API)` };
+}
+/** xAI — regular key: GET /v1/api-key (name, team, blocked/disabled flags) + GET /v1/models. Usage needs the CORS-blocked Management API. */
+async function fetchXai(key) {
+  const h = { 'Authorization': 'Bearer ' + key };
+  const j = await fetchJSON('https://api.x.ai/v1/api-key', h);
+  if (j.api_key_disabled || j.api_key_blocked || j.team_blocked) throw new Error('xAI reports this key as ' + (j.api_key_disabled ? 'disabled' : j.api_key_blocked ? 'blocked' : 'on a blocked team'));
+  let n = 0;
+  try { n = countModels(await fetchJSON('https://api.x.ai/v1/models', h)); } catch (e) { console.warn('xai models unavailable', e); }
+  const team = j.team_id ? ' · team ' + String(j.team_id).slice(0, 8) : '';
+  return { label: `${j.name || 'xAI key'}${team}`,
+    detail: `key "${j.name || 'unnamed'}" valid${team} · ${n} models · usage and spend need the Management API (management-api.x.ai), which sends no CORS headers — use the console Usage Explorer` };
+}
+/** Perplexity API — GET /v1/models is unauthenticated: proves reachability, NOT the key (only a paid completion would). No usage endpoint. */
+async function fetchPerplexityApi(key) {
+  const j = await fetchJSON('https://api.perplexity.ai/v1/models', { 'Authorization': 'Bearer ' + key });
+  const n = countModels(j);
+  return { label: 'reachable — Sonar keys cannot be verified without a paid request',
+    detail: `api.perplexity.ai reachable · ${n} models listed · GET /v1/models needs no auth, so this does NOT prove the key is valid (only a paid completion would) · usage and spend are in the API console Billing tab (no usage API)` };
 }
 
 async function fetchCopilotAll(token) {

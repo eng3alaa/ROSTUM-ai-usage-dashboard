@@ -154,6 +154,94 @@ export async function run({ browser, ok }) {
     });
     ok('key driver: every `fetch` entry is a key kind with keyLS key:<id>, statusEl <id>-status, its own srcId, a registered global fetcher, keyLabel, quality copy, and the key UI (+fields; Remember unless sessionOnly)',
       inv.ids.includes('groq') && inv.every, JSON.stringify(inv));
+    // ---- T3: validate-only vendors (Mistral, Cohere, Together, Hugging Face, xAI, Perplexity API) through the key driver ----
+    const vend = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const ids = ['mistral', 'cohere', 'together', 'huggingface', 'xai', 'perplexity-api'];
+      const missing = ids.filter(id => !connectorById(id) || !document.getElementById(id + '-key'));
+      if (missing.length) return { missing };
+      const realFetch = window.fetch;
+      const resp = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
+      // [id, key, routes: [urlSubstring, method, body]]
+      const cases = [
+        { id: 'mistral', key: 'mk-test', routes: [['https://api.mistral.ai/v1/models', 'GET', { object: 'list', data: [{ id: 'mistral-large-latest' }, { id: 'codestral-latest' }, { id: 'ministral-8b-latest' }] }]] },
+        { id: 'cohere', key: 'co-test', routes: [['https://api.cohere.com/v1/check-api-key', 'POST', { valid: true, organization_id: 'org-12345678', owner_id: 'u1' }], ['https://api.cohere.com/v2/models', 'GET', { models: [{ name: 'command-a-03-2025' }, { name: 'embed-v4.0' }] }]] },
+        { id: 'together', key: 'tg-test', routes: [['https://api.together.xyz/v1/models', 'GET', [{ id: 'meta-llama/Llama-4-Maverick' }, { id: 'Qwen/Qwen3-235B' }, { id: 'deepseek-ai/DeepSeek-V4' }, { id: 'mistralai/Mixtral-8x22B' }]]] },
+        { id: 'huggingface', key: 'hf_test', routes: [['https://huggingface.co/api/whoami-v2', 'GET', { type: 'user', name: 'alaa', fullname: 'Alaa S.', isPro: true, orgs: [{ name: 'acme' }, { name: 'rostum' }] }]] },
+        { id: 'xai', key: 'xai-test', routes: [['https://api.x.ai/v1/api-key', 'GET', { name: 'dashboard-key', team_id: 'team_8f1c2d3e4a5b', api_key_id: 'k1', api_key_blocked: false, api_key_disabled: false, team_blocked: false, acls: ['api-key:model:*'] }], ['https://api.x.ai/v1/models', 'GET', { object: 'list', data: [{ id: 'grok-4' }, { id: 'grok-3-mini' }] }]] },
+        { id: 'perplexity-api', key: 'pplx-test', routes: [['https://api.perplexity.ai/v1/models', 'GET', { object: 'list', data: [{ id: 'sonar' }, { id: 'sonar-pro' }, { id: 'sonar-reasoning-pro' }] }]] },
+      ];
+      const out = {};
+      for (const k of cases) {
+        const c = connectorById(k.id);
+        const calls = [];
+        window.fetch = async (url, init) => {
+          const u = String(url), m = ((init && init.method) || 'GET').toUpperCase();
+          calls.push({ u, m, auth: init && init.headers && (init.headers.Authorization || init.headers.authorization) });
+          const r = k.routes.find(([pre, meth]) => u.startsWith(pre) && meth === m);
+          return r ? resp(r[2]) : resp({ error: { message: 'unexpected ' + m + ' ' + u } }, 404);
+        };
+        document.getElementById(k.id + '-key').value = k.key;
+        await App.connectKey(c);
+        const st = Store.connectors[k.id] || {};
+        out[k.id] = { label: st.label || null, err: st.err || null, status: Store.connectorStatus(c), text: document.getElementById(k.id + '-status').textContent,
+          calls, rows: !!Store.sources[k.id], billed: Store.billedRows(k.id).length };
+      }
+      // rejected key → attention carrying the server's message (fetchJSON surfaces error.message)
+      window.fetch = async () => resp({ error: { message: 'Unauthorized: invalid API key' } }, 401);
+      document.getElementById('mistral-key').value = 'bad-key';
+      await App.connectKey(connectorById('mistral'));
+      out.bad = { err: Store.connectors.mistral && Store.connectors.mistral.err, status: Store.connectorStatus(connectorById('mistral')), text: document.getElementById('mistral-status').textContent };
+      // Cohere answers HTTP 200 with valid:false → must still be an error state
+      window.fetch = async (url) => String(url).includes('check-api-key') ? resp({ valid: false }) : resp({ models: [] });
+      document.getElementById('cohere-key').value = 'bad-key';
+      await App.connectKey(connectorById('cohere'));
+      out.cohereInvalid = { err: Store.connectors.cohere && Store.connectors.cohere.err, status: Store.connectorStatus(connectorById('cohere')) };
+      window.fetch = realFetch;
+      for (const id of ids) document.getElementById(id + '-key').value = '';
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist(); App._render();
+      return out;
+    });
+    const every = (v, f) => !v.missing && Object.keys(v).filter(k => !/^(bad|cohereInvalid)$/.test(k)).every(id => f(v[id], id));
+    ok('validate-only vendors: six api-key entries validate via stubbed fetch (Bearer auth, documented URLs) → honest labels, status ok, no rows/billed',
+      every(vend, (r) => r.status === 'ok' && r.err === null && /Connected/.test(r.text) && !r.rows && r.billed === 0)
+      && /^3 models available$/.test(vend.mistral.label) && vend.mistral.calls.length === 1 && vend.mistral.calls[0].u === 'https://api.mistral.ai/v1/models' && vend.mistral.calls[0].auth === 'Bearer mk-test'
+      && /^valid key · 2 models$/.test(vend.cohere.label) && vend.cohere.calls.length === 2 && vend.cohere.calls[0].m === 'POST' && vend.cohere.calls[0].u === 'https://api.cohere.com/v1/check-api-key' && vend.cohere.calls[1].u === 'https://api.cohere.com/v2/models' && vend.cohere.calls.every(x => x.auth === 'Bearer co-test') && /org-1234/.test(vend.cohere.text)
+      && /^4 models available$/.test(vend.together.label) && vend.together.calls.length === 1 && vend.together.calls[0].u === 'https://api.together.xyz/v1/models' && vend.together.calls[0].auth === 'Bearer tg-test'
+      && /^alaa · PRO · 2 orgs$/.test(vend.huggingface.label) && /acme, rostum/.test(vend.huggingface.text) && vend.huggingface.calls.length === 1 && vend.huggingface.calls[0].u === 'https://huggingface.co/api/whoami-v2' && vend.huggingface.calls[0].auth === 'Bearer hf_test'
+      && /^dashboard-key · team team_8f1/.test(vend.xai.label) && /2 models/.test(vend.xai.text) && vend.xai.calls.length === 2 && vend.xai.calls[0].u === 'https://api.x.ai/v1/api-key' && vend.xai.calls[1].u === 'https://api.x.ai/v1/models' && vend.xai.calls.every(x => x.auth === 'Bearer xai-test')
+      && vend['perplexity-api'].label === 'reachable — Sonar keys cannot be verified without a paid request' && /does NOT prove the key is valid/.test(vend['perplexity-api'].text) && vend['perplexity-api'].calls.length === 1 && vend['perplexity-api'].calls[0].u === 'https://api.perplexity.ai/v1/models',
+      JSON.stringify(vend));
+    ok('validate-only vendors: HTTP 401 → attention with the server message; Cohere valid:false → attention despite HTTP 200',
+      !vend.missing && /401/.test(vend.bad.err || '') && /invalid API key/i.test(vend.bad.err || '') && vend.bad.status === 'warn' && /failed|HTTP 401/i.test(vend.bad.text)
+      && /not valid/i.test(vend.cohereInvalid.err || '') && vend.cohereInvalid.status === 'warn', JSON.stringify({ bad: vend.bad, cohereInvalid: vend.cohereInvalid, missing: vend.missing }));
+
+    const vinv = await page.evaluate(() => {
+      const want = { mistral: 'Mistral', cohere: 'Cohere', together: 'Together AI', huggingface: 'Hugging Face', xai: 'xAI API', 'perplexity-api': 'Perplexity API' };
+      const bad = [];
+      for (const [id, platform] of Object.entries(want)) {
+        const c = connectorById(id);
+        if (!c) { bad.push(id + ': missing'); continue; }
+        if (c.platform !== platform) bad.push(id + ': platform ' + c.platform);
+        if (c.kind !== 'api-key' || c.category !== 'api' || c.quality !== 'validate') bad.push(id + ': kind/category/quality');
+        if (c.statusEl !== id + '-status' || !document.getElementById(c.statusEl)) bad.push(id + ': statusEl');
+        if (!Array.isArray(c.srcIds) || !c.srcIds.includes(id)) bad.push(id + ': srcIds');
+        if (typeof globalThis[c.fetch] !== 'function') bad.push(id + ': fetch ' + c.fetch);
+        if (c.keyLS !== 'key:' + id || !c.keyLabel || !c.keyHint) bad.push(id + ': key copy');
+        if (!/^validate-only/i.test(c.qualityNote || '') || !/(no usage|no .*endpoint|console|dashboard)/i.test(c.qualityNote || '')) bad.push(id + ': qualityNote honesty');
+        if (!c.links || !c.links.usage || !c.links.docs) bad.push(id + ': links');
+        if (!Array.isArray(c.paths) || !c.paths.length) bad.push(id + ': paths');
+        if (!document.getElementById('src-' + id)) bad.push(id + ': generic card');
+      }
+      const px = connectorById('perplexity-api');
+      if (px && !/cannot verify your key/i.test(px.qualityNote || '')) bad.push('perplexity-api: note must say the key cannot be verified');
+      const groq = CONNECTORS.find(c => c.platform === 'Groq');
+      if (!groq || groq.kind !== 'api-key' || groq.quality !== 'validate') bad.push('groq (Task 2) missing or not validate-only');
+      return { bad, inOrder: Object.values(want).every(p => PLATFORM_ORDER.includes(p)) };
+    });
+    ok('validate-only vendors: registry invariants (api-key · api · validate · fetch fn · srcIds self · statusEl + card · honest notes/links; Groq from Task 2 present; PLATFORM_ORDER derived)',
+      vinv.bad.length === 0 && vinv.inOrder, JSON.stringify(vinv));
+
   } finally {
     await page.close();
   }
