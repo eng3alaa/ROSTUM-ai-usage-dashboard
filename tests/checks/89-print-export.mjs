@@ -48,8 +48,8 @@ export async function run({ browser, ok }) {
       await page.setViewport({ width: 1280, height: 900 });
       await page.evaluate(() => {
         Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
-        Store.setSource('csv', Array.from({ length: 30 }, (_, i) => ({ d: addDays('2026-07-01', i), platform: 'Gemini', model: 'g', in: 10, cw: 0, cr: 0, out: 5, msgs: 1 })), {});
-        App.filters.range = '30'; App._render();
+        Store.setSource('csv', Array.from({ length: 30 }, (_, i) => ({ d: addDays(todayKey(), i - 29), platform: 'Gemini', model: 'g', in: 10, cw: 0, cr: 0, out: 5, msgs: 1 })), {});
+        App.filters.range = '30'; App._render();   // rows seeded relative to today: the chart window is a rolling 30 days on the real clock, so fixed dates fall out of range (no svg) over time
       });
       // now shrink + switch to print WITHOUT re-rendering — the SVG's width attribute is stale
       await page.setViewport({ width: 720, height: 900 });
