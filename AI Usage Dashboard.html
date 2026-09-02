@@ -158,6 +158,8 @@ input[type="date"], input[type="text"], input[type="password"], input[type="sear
 .acct a.btn { text-decoration: none; display: inline-block; }
 .acct.link-only .acct-label { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .src .note.reason { font-weight: 600; color: var(--ink-2); }
+.src textarea { font: inherit; font-size: 12.5px; color: var(--ink); background: var(--page); border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px; flex: 1; min-width: 120px; resize: vertical; }
+.src .row label.field { font-size: 12px; color: var(--ink-2); min-width: 96px; }
 .acct { background: var(--surface-1); border: 1px solid var(--border); border-left: 3px solid var(--acct-brand, var(--border));
         border-radius: 8px; padding: 10px 12px; cursor: pointer; }
 .acct:hover { border-color: var(--baseline); border-left-color: var(--acct-brand, var(--baseline)); }
@@ -1128,6 +1130,9 @@ const Budgets = {
  * local-server fields: baseUrl · validate 'globalFnName' (async (base) → {label, detail}) · corsHint ({base} = server URL) · optional patterns/parser for a usage-logger folder
  * link-only fields (4b): kind 'link-only' · reason (one sentence shown on the hub card: why there is no data path) · quality 'none' · srcIds [] · links {usage, docs, get?}
  *                    — never "connected", no Connect/Sync/Disconnect; the hub card offers Details (modal) + the vendor usage link only
+ * key-driver fields (4b): kind api-key|admin-key|cloud-token · fetch 'globalFnName' (async (key, fields, {days}) → {label, detail, rows?, billed?, meta?}) · keyLS 'key:<id>'
+ *                    · keyLabel · keyHint (placeholder) · fields [{id,label,placeholder,type text|password|textarea,secret?}] (inputs '<id>-f-<field>'; non-secret values persist to
+ *                    LS 'field:<id>:<field>', secrets follow the Remember rule) · sessionOnly (no Remember; key + secrets never persisted) · srcIds must include the entry's own id
  * ================================================================= */
 const CONNECTORS = [
   { id: 'local',      platform: 'Claude Code/Desktop', name: 'Claude Code / Desktop', category: 'coding', kind: 'folder',
@@ -1217,6 +1222,14 @@ const CONNECTORS = [
     qualityNote: 'Live check only: Ollama keeps no usage history and no per-request log — exact token counts (prompt_eval_count / eval_count) exist only inside each API response. This card verifies the server (GET /api/tags, /api/ps) and shows what is installed and loaded now. For history, run the one-file proxy docs/tools/ollama-usage-logger.mjs (it forwards requests to Ollama and appends exact per-request JSONL) and pick its output folder below. Desktop-app chats live in db.sqlite (SQLite, no token counts) — not read in this version. If validation says CORS: set OLLAMA_ORIGINS="*" and restart Ollama. Logged models are priced $0 — they run on your hardware (gated on the Ollama platform, not on model name). To see a hosted-equivalent figure, compare the same tokens against a hosted model\'s row in the price list. Ollama used THROUGH a coding tool (Continue.dev, Cline, Aider, Codex --oss) is also $0 when that tool\'s log names the provider.',
     paths: ['server: http://localhost:11434 (OLLAMA_HOST)', 'usage log: ~/.ai-usage/ollama-usage.jsonl (written by the proxy)', 'server.log has request lines but no tokens; db.sqlite has chats but no tokens'],
     links: { get: 'https://ollama.com/download', docs: 'https://docs.ollama.com/api' } },
+  // ---- Wave 2 key-driver connectors (App.connectKey; one global fetcher each) ----
+  { id: 'groq', platform: 'Groq', name: 'Groq', category: 'api', kind: 'api-key',
+    statusEl: 'groq-status', brand: '#f55036', mark: 'Gq', srcIds: ['groq'], keyLS: 'key:groq', fetch: 'fetchGroq',
+    keyLabel: 'Groq API key', keyHint: 'gsk_…',
+    quality: 'validate',
+    qualityNote: 'Validate-only: Groq publishes no usage or spend API, so this card can only confirm that the key works (GET /openai/v1/models — the endpoint allows browser calls) and count the models it can reach. Token counts exist only inside each API response (usage object and x-groq headers), and spend and limits live in the console (Dashboard → Usage by model; Settings → Billing, updated every 10–15 min); no CSV export is documented and the Prometheus metrics endpoint is Enterprise-only. For history, log your own calls into usage-logger JSONL or enter figures through the generic CSV import. The key is sent only to api.groq.com and is saved only if you tick Remember.',
+    paths: ['console.groq.com/dashboard/usage (near-real-time, by model — console only)', 'console.groq.com/settings/billing (spend, limits, Stripe invoices)'],
+    links: { get: 'https://console.groq.com/keys', docs: 'https://console.groq.com/docs/api-reference', usage: 'https://console.groq.com/dashboard/usage' } },
   // ---- Wave 2 link-only cards: no data path a local page can use — honest reason + vendor links; never "connected" ----
   { id: 'amazonq', platform: 'Amazon Q / Kiro', name: 'Amazon Q / Kiro', category: 'coding', kind: 'link-only',
     statusEl: 'amazonq-status', brand: '#ff9900', mark: 'Aq', srcIds: [], quality: 'none',
@@ -1260,6 +1273,8 @@ const HUB_GROUPS = [
 ];
 /* Data-quality badge copy (honesty rule: quality first). */
 const QUALITY_LABEL = { exact: 'exact', estimated: 'estimated', validate: 'validate-only', none: 'no data' };
+/* Key-driver extra fields: `secret: true` (or type 'password') = masked AND stored only under the key's Remember rule, never for sessionOnly cards. */
+const fieldIsSecret = (f) => !!(f && (f.secret || f.type === 'password'));
 
 // deduped: several connectors may share one platform (GitHub Copilot billing + Copilot CLI logs)
 const PLATFORM_ORDER = [...new Set(CONNECTORS.map(c => c.platform).filter(Boolean))]
@@ -2320,6 +2335,14 @@ async function validateOllama(base) {
   return { label: `${n} models installed`, detail: `${n} models installed · ${loaded} loaded now · no usage history on the server (see the note; usage-logger JSONL is read from the folder below)` };
 }
 
+/** Groq validate-only: GET /openai/v1/models with the key (api.groq.com allows browser origins). Groq has no usage or spend API —
+ *  usage lives in the console, so this fetcher returns no rows; the key driver stores the model count as the card label. */
+async function fetchGroq(key) {
+  const j = await fetchJSON('https://api.groq.com/openai/v1/models', { 'Authorization': 'Bearer ' + key });
+  const n = Array.isArray(j && j.data) ? j.data.length : 0;
+  return { label: `${n} models`, detail: `${n} models available to this key · no usage or spend API — usage and billing are in the Groq console (see the links)` };
+}
+
 async function fetchCopilotAll(token) {
   const h = { 'Authorization': 'Bearer ' + token, 'X-GitHub-Api-Version': '2022-11-28', 'Accept': 'application/vnd.github+json' };
   const user = await fetchJSON('https://api.github.com/user', h);
@@ -3220,9 +3243,9 @@ const App = {
     // never touch a card that's currently open INSIDE the connector modal: any render while
     // the user is mid-edit (resize, timer, etc.) would otherwise blank it out from under them.
     for (const c of CONNECTORS) {
-      if (!/^(gemini|copilot|openrouter)$/.test(c.id) && c.kind !== 'folder-log' && c.kind !== 'local-server') continue;
       const src = $('src-' + c.id);
-      if (src && src.parentNode !== $('modal-body')) src.hidden = !Store.connectors[c.id];
+      if (!src || (!/^(gemini|copilot|openrouter)$/.test(c.id) && !src.classList.contains('generic'))) continue;   // generic = every ensureSourceCard kind (folder-log, local-server, link-only, key driver)
+      if (src.parentNode !== $('modal-body')) src.hidden = !Store.connectors[c.id];
     }
   },
 
@@ -3257,6 +3280,7 @@ const App = {
       if (!hasKey) { this.openConnectorModal(id); return; }   // no key anywhere — surface the card, not a silent no-op/network call
       if (inp && !inp.value.trim()) { const saved = LS.get(c.keyLS, null); if (saved) inp.value = saved; }
     }
+    if (c && c.fetch) return this.connectKey(c);   // Wave-2 key driver (the keyLS block above already opened the modal when no key exists anywhere and pre-filled a remembered key)
     const fn = c && c.fetchMethod && this[c.fetchMethod];
     if (typeof fn === 'function') return fn.call(this);
   },
@@ -3265,6 +3289,8 @@ const App = {
     if (c.kind === 'link-only') return;   // never connected, nothing stored — no prompt, no state change
     if (c.keyLS) LS.del(c.keyLS);
     const keyInput = document.getElementById(id + '-key'); if (keyInput) keyInput.value = '';
+    for (const f of c.fields || []) { LS.del('field:' + id + ':' + f.id); const fe = $(id + '-f-' + f.id); if (fe) fe.value = ''; }   // key-driver extra fields: stored values + inputs
+    if (c.fetch) { const rem = $('remember-' + id); if (rem) rem.checked = false; }
     delete Store.connectors[id];
     // an in-flight scan / fetch / server validation for this connector must NOT commit after the disconnect and resurrect it
     this._gen[id] = (this._gen[id] || 0) + 1; this._gen[id + ':server'] = (this._gen[id + ':server'] || 0) + 1;
@@ -3687,9 +3713,46 @@ const App = {
     ];
     if (c.kind === 'link-only' && c.reason) kids.push(el('div', { class: 'note reason', text: 'Why there is no data path: ' + c.reason }));
     if (c.paths && c.paths.length) {
-      const p = el('div', { class: 'note' }, c.kind === 'link-only' ? 'Where to look: ' : 'Where the files live: ');
+      const p = el('div', { class: 'note' }, (c.kind === 'link-only' || c.fetch) ? 'Where to look: ' : 'Where the files live: ');
       c.paths.forEach((s, i) => { if (i) p.appendChild(document.createTextNode(' · ')); p.appendChild(el('code', { text: s })); });
       kids.push(p);
+    }
+    // key-driver cards (api-key / admin-key / cloud-token entries with `fetch`): key input '<id>-key' + optional extra `fields` ('<id>-f-<field>')
+    // + Remember opt-in ('remember-<id>', absent for sessionOnly). Saved values are restored through the .value PROPERTY, never the value
+    // attribute, so a key never appears in outerHTML (95-ui-misc's key-leak rule).
+    if (c.fetch) {
+      const keyEl = el('input', { type: 'password', id: c.id + '-key', placeholder: c.keyHint || '', autocomplete: 'off', spellcheck: 'false', 'aria-label': c.keyLabel || (c.name + ' key') });
+      if (!c.sessionOnly) { const savedKey = LS.get(c.keyLS, null); if (savedKey) keyEl.value = savedKey; }   // sessionOnly: nothing is ever saved, so nothing to restore
+      kids.push(el('div', { class: 'row' },
+        el('label', { class: 'field', for: c.id + '-key', text: c.keyLabel || 'Key' }),
+        keyEl,
+        el('button', { class: 'btn primary', id: c.id + '-validate', text: 'Validate & connect', onclick: () => this.connectKey(c) })));
+      for (const f of c.fields || []) {
+        const fid = c.id + '-f-' + f.id, lsKey = 'field:' + c.id + ':' + f.id;
+        const inp = f.type === 'textarea'
+          ? el('textarea', { id: fid, rows: '3', placeholder: f.placeholder || '', spellcheck: 'false', autocomplete: 'off', 'aria-label': f.label })
+          : el('input', { type: fieldIsSecret(f) ? 'password' : 'text', id: fid, placeholder: f.placeholder || '', spellcheck: 'false', autocomplete: 'off', 'aria-label': f.label });
+        const savedField = (fieldIsSecret(f) && c.sessionOnly) ? null : LS.get(lsKey, null);   // secrets of a sessionOnly card are never stored — never restored either
+        if (savedField) inp.value = savedField;
+        kids.push(el('div', { class: 'row' }, el('label', { class: 'field', for: fid, text: f.label }), inp));
+      }
+      if (c.sessionOnly) {
+        // ONE element with class `session-only` per card: Task 2's check asserts /session only/i on the card text, Tasks 10–12 assert exactly one
+        // `.session-only` whose text contains "kept in this tab only — never saved" — this single line satisfies all of them (Task 10 adds nothing here)
+        kids.push(el('div', { class: 'note session-only', text: 'Session only: the token (and any secret field) is kept in this tab only — never saved. Paste a fresh one when it expires or after a reload (the input hint shows the CLI command).' }));
+      } else {
+        const cb = el('input', { type: 'checkbox', id: 'remember-' + c.id });
+        cb.checked = !!LS.get(c.keyLS, null);
+        cb.addEventListener('change', () => {
+          const k = $(c.id + '-key');
+          if (!cb.checked) { LS.del(c.keyLS); for (const f of c.fields || []) if (fieldIsSecret(f)) LS.del('field:' + c.id + ':' + f.id); }
+          else if (k && k.value.trim()) {
+            LS.set(c.keyLS, k.value.trim());
+            for (const f of c.fields || []) { if (!fieldIsSecret(f)) continue; const fe = $(c.id + '-f-' + f.id); if (fe && fe.value.trim()) LS.set('field:' + c.id + ':' + f.id, fe.value.trim()); }
+          }
+        });
+        kids.push(el('div', { class: 'row' }, el('label', { class: 'inline' }, cb, ' Remember key on this computer')));
+      }
     }
     // dual-driver cards (server validate + usage-log folder) get TWO status lines: '<id>-status' for the server (right under the
     // URL row) and '<id>-scan-status' for the folder scan — the drivers run concurrently (syncConnector / refreshAll) and must never
@@ -3877,6 +3940,51 @@ const App = {
         delete Store.connectors[c.id]; Store.persist();
         status.textContent = `Not running at ${base} — start it and validate again.`;
       }
+      this.render();
+    }
+  },
+
+  /* =================== generic key driver (api-key / admin-key / cloud-token entries with `fetch`) =================== */
+  /** One code path for every key-bearing Wave-2 card: reads '<id>-key' (+ extra `fields` '<id>-f-<field>'), honors the Remember opt-in
+   *  (never for sessionOnly), calls globalThis[c.fetch](key, fields, { days: 90 }) → { label, detail, rows?, billed?, meta? } and stores
+   *  rows → Store.setSource(c.id), billed → Store.setBilled(c.id) (null = soft-fail → stale envelope), then the connector entry. Own gen slot
+   *  this._gen[c.id]: a superseded call (newer connect, disconnect, clear-data) commits nothing and clears only its own placeholder —
+   *  the fetchGemini rule (status.dataset.gen). */
+  async connectKey(c) {
+    const status = $(c.id + '-status');
+    const gen = this._gen[c.id] = (this._gen[c.id] || 0) + 1;
+    const keyEl = $(c.id + '-key');
+    const key = keyEl ? keyEl.value.trim() : '';
+    if (!key) { status.textContent = `Paste ${c.keyLabel ? 'your ' + c.keyLabel : 'a key'} first${c.keyHint ? ' (' + c.keyHint + ')' : ''}.`; return; }
+    const fields = {};
+    for (const f of c.fields || []) { const fe = $(c.id + '-f-' + f.id); fields[f.id] = fe ? fe.value.trim() : ''; }
+    const rem = $('remember-' + c.id);
+    const remember = !c.sessionOnly && !!(rem && rem.checked);
+    if (remember) LS.set(c.keyLS, key);
+    for (const f of c.fields || []) {
+      const lsKey = 'field:' + c.id + ':' + f.id;
+      if (fieldIsSecret(f)) { if (remember && fields[f.id]) LS.set(lsKey, fields[f.id]); }          // secrets follow the key's Remember rule; sessionOnly never persists them
+      else if (fields[f.id]) LS.set(lsKey, fields[f.id]); else LS.del(lsKey);                        // non-secret values (region, subscription id, …) persist for convenience
+    }
+    status.textContent = 'Validating…'; status.dataset.gen = String(gen);
+    try {
+      const fn = globalThis[c.fetch];
+      if (typeof fn !== 'function') throw new Error('No fetcher registered: ' + c.fetch);
+      const res = (await fn(key, fields, { days: 90 })) || {};
+      if (gen !== this._gen[c.id]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
+      if (Array.isArray(res.rows)) Store.setSource(c.id, res.rows, res.meta || {});
+      if (res.billed !== undefined) Store.setBilled(c.id, res.billed);                               // array = fresh (or truthful empty), null = fetch failed → stale envelope
+      Store.setConnector(c.id, { label: res.label || ((c.keyLabel || 'key') + ' · last 4: ' + key.slice(-4)), lastSync: Date.now(), err: null });
+      status.textContent = ''; status.dataset.gen = '';
+      status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
+      status.appendChild(document.createTextNode((res.detail ? res.detail + ' · ' : '') + 'updated ' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })));
+      this.render();
+    } catch (e) {
+      if (gen !== this._gen[c.id]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
+      Store.setConnector(c.id, { err: (e.message || String(e)).slice(0, 80) });
+      status.textContent = ''; status.dataset.gen = '';
+      status.appendChild(el('span', { class: 'err', text: 'Validation failed: ' }));
+      status.appendChild(document.createTextNode(e.message || String(e)));
       this.render();
     }
   },
@@ -4227,6 +4335,12 @@ const App = {
     if (this.dirHandle) jobs.push(this.rescan());
     for (const [id, h] of Object.entries(this._dirHandles)) if (h) jobs.push(this.rescanFolder(id));
     for (const c of CONNECTORS) if (c.kind === 'local-server' && Store.connectors[c.id]) jobs.push(this.connectServer(c));
+    // key-driver cards: a remembered key (input pre-filled from LS at init) re-fetches; sessionOnly cards only while the input still holds a token
+    for (const c of CONNECTORS) {
+      if (!c.fetch) continue;
+      const inp = $(c.id + '-key');
+      if (inp && inp.value.trim() && (c.sessionOnly || LS.get(c.keyLS, null))) jobs.push(this.connectKey(c));
+    }
     for (const c of CONNECTORS) {
       if (!c.keyLS) continue;
       const el2 = document.getElementById(c.id + '-key');
@@ -4262,7 +4376,7 @@ const App = {
     this.wireCollapsibles();
     this.wireInsightHides();
     this.wireLegacyToggle();
-    for (const c of CONNECTORS) if (c.kind === 'folder-log' || c.kind === 'local-server' || c.kind === 'link-only') this.ensureSourceCard(c);
+    for (const c of CONNECTORS) if (c.kind === 'folder-log' || c.kind === 'local-server' || c.kind === 'link-only' || c.fetch) this.ensureSourceCard(c);
     this._hubQuery = $('hub-search').value || '';   // the browser may restore the box's text across a reload — start in sync with it, not empty
     $('hub-search').addEventListener('input', () => { this._hubQuery = $('hub-search').value; this.renderHub(); });
 
