@@ -1373,6 +1373,17 @@ const CONNECTORS = [
     qualityNote: 'Exact tokens + billed dollars for a Claude ENTERPRISE organization only (not Pro, Max or Team): the Analytics API (claude.ai → Organization settings → API, scope read:analytics) reports daily usage per model — uncached input, cache reads / writes, output, requests — and a cost report in cents for usage-based plans (seat-based plans return no cost rows). Data starts 2026-01-01 (the API refuses earlier dates) and is fetched in 31-day windows at up to 60 requests per minute per org. Rows land under the platform "Claude Enterprise (org)", so they never mix with your Anthropic API admin data or your local Claude Code logs. The key is sent with anthropic-dangerous-direct-browser-access, like the Anthropic API card, and is kept in this browser only if you tick Remember.',
     paths: ['GET https://api.anthropic.com/v1/organizations/analytics/usage_report?bucket_width=1d&group_by[]=model (≤31-day windows, paginated)', 'GET https://api.anthropic.com/v1/organizations/analytics/cost_report (amounts in cents; usage-based plans)', 'Enterprise orgs only — no data before 2026-01-01'],
     links: { get: 'https://claude.ai/admin-settings/api-access', docs: 'https://platform.claude.com/docs/en/manage-claude/analytics-api' } },
+  // ---- Wave 2 cloud-token connectors (generic key driver, sessionOnly — the token/key lives only in the inputs; one fetcher each) ----
+  { id: 'azure-openai', platform: 'Azure OpenAI', name: 'Azure OpenAI (Foundry)', category: 'cloud', kind: 'cloud-token', sessionOnly: true,
+    statusEl: 'azure-openai-status', brand: '#0078d4', mark: 'Az', srcIds: ['azure-openai'], keyLS: 'key:azure-openai', fetch: 'fetchAzureOpenAI',   // keyLS is never written (sessionOnly) — named so the key-card code paths treat it like the other key cards
+    keyLabel: 'Entra access token', keyHint: 'az account get-access-token --resource https://management.azure.com --query accessToken -o tsv',
+    fields: [
+      { id: 'resources', label: 'Cognitive Services resource id(s), one per line', type: 'textarea', placeholder: '/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.CognitiveServices/accounts/<name>' },
+      { id: 'scope', label: 'Cost scope (optional)', placeholder: '/subscriptions/<sub>' } ],
+    quality: 'exact',
+    qualityNote: 'Exact tokens per model and UTC day from Azure Monitor metrics (ProcessedPromptTokens / GeneratedTokens, or InputTokens / OutputTokens on newer deployments — never both for the same model-day); request counts are not pulled, so messages show 0, and cache-hit tokens are not split out. Billed dollars per day come from Cost Management (PreTaxCost, service Cognitive Services — every Cognitive Services resource in the scope, so narrow the scope to the resource group that holds only Azure OpenAI) when you give a cost scope; billing lags 8–24 hours, so the last day or two reads low. Azure has no API-key path: paste an Entra access token from the az CLI (about 1 hour; needs Monitoring Reader on the resources and Cost Management Reader on the scope). The token is kept in this tab only — never saved; paste a fresh one after it expires. Metrics keep 93 days.',
+    paths: ['token: az account get-access-token --resource https://management.azure.com --query accessToken -o tsv (about 1 hour)', 'resource id: Azure portal → the Azure OpenAI resource → Properties → Resource ID', 'cost scope: /subscriptions/<id> or /subscriptions/<id>/resourceGroups/<rg>', 'no local usage files (~/.azure holds credentials only)'],
+    links: { docs: 'https://learn.microsoft.com/en-us/azure/foundry/openai/monitor-openai-reference', usage: 'https://portal.azure.com/#view/Microsoft_Azure_CostManagement/Menu/~/costanalysis' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv'] },
 ];
@@ -2896,6 +2907,100 @@ async function fetchDeepSeekBalance(key, fields, opts) {
     + (j && j.is_available === false ? ' · account not available for API calls (balance exhausted?)' : '')
     + ' · no usage history on this endpoint — drop the monthly usage ZIP (platform.deepseek.com/usage → Export monthly data) on Imports for exact tokens and billed amounts';
   return { label, detail };
+}
+
+/* ---------- cloud-token fetchers (Azure / Vertex / Bedrock): pasted CLI token or IAM key, session-only, one fetcher per platform ---------- */
+/** Cloud REST call for the cloud-token fetchers: JSON in → JSON out. 401 → auth.expired (the platform's "mint a new token" message,
+ *  verbatim), 403 → auth.denied (+ the server's own reason when it gives one), any other non-2xx → 'HTTP <status> — <server message>'.
+ *  The bearer token / SigV4 signature travels only inside this request — nothing is logged or stored. */
+async function cloudJSON(url, init = {}, auth = {}) {
+  const res = await fetch(url, init);
+  if (res.ok) return res.status === 204 ? {} : res.json();
+  let detail = '';
+  try {
+    const j = await res.json();
+    detail = String((j && j.error && (typeof j.error === 'string' ? j.error : (j.error.message || j.error.code || j.error.type))) || (j && (j.message || j.Message || j.__type || j.error_description)) || '').slice(0, 140);
+  } catch {}
+  if (res.status === 401 && auth.expired) throw new Error(auth.expired);
+  if (res.status === 403 && auth.denied) throw new Error(auth.denied + (detail ? ` (${detail})` : ''));
+  throw new Error(`HTTP ${res.status}${detail ? ' — ' + detail : ''}`);
+}
+
+/** Azure OpenAI (Microsoft Foundry) — cloud-token fetcher. token: Entra access token (az account get-access-token --resource
+ *  https://management.azure.com), fields: { resources: one Cognitive Services resource id per line, scope?: '/subscriptions/<id>' or a
+ *  resource group }, opts: { days }. (1) per resource: Azure Monitor metrics → exact tokens per ModelName × UTC day. Azure exposes two
+ *  metric generations — ProcessedPromptTokens/GeneratedTokens and the newer InputTokens/OutputTokens — which overlap on some deployments,
+ *  so per model-day and per field the newer metric wins when it has a data point (total > 0), else the older one; never both. Request
+ *  counts are not pulled → msgs 0. (2) when scope is given: Cost Management query → billed PreTaxCost per UsageDate (yyyymmdd) for
+ *  ServiceName 'Cognitive Services' (all Cognitive Services in the scope — narrow the scope to the resource group that holds only
+ *  Azure OpenAI if you also run Speech/Vision there). 401 → 'token expired — mint a new one (az account get-access-token)'. */
+async function fetchAzureOpenAI(token, fields, opts = {}) {
+  const days = Math.min(Math.max(1, opts.days || 90), 90);   // Azure Monitor keeps 93 days of platform metrics
+  const resources = String(fields.resources || '').split(/[\r\n,]+/).map(s => s.trim()).filter(Boolean);
+  if (!resources.length) throw new Error('Enter at least one Cognitive Services resource id (Azure portal → the Azure OpenAI resource → Properties → Resource ID)');
+  for (const r of resources) if (!/^\/subscriptions\/[^/]+\/resourceGroups\/[^/]+\/providers\/Microsoft\.CognitiveServices\/accounts\/[^/]+$/i.test(r)) throw new Error('Not a Cognitive Services resource id: ' + r.slice(0, 60));
+  const scope = String(fields.scope || '').trim().replace(/\/+$/, '');
+  const auth = { expired: 'token expired — mint a new one (az account get-access-token)', denied: 'HTTP 403 — this identity lacks Monitoring Reader / Cost Management Reader on that resource or scope' };
+  const headers = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
+  const iso = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const endMs = Date.now(), startMs = endMs - days * 864e5;
+  // per (day, model): the older metric pair and the newer pair are kept apart, merged below (key = JSON of [day, model] — no separator bytes)
+  const older = new Map(), newer = new Map();
+  const bump = (map, key, field, v) => { let b = map.get(key); if (!b) { b = { in: null, out: null }; map.set(key, b); } b[field] = (b[field] || 0) + v; };
+  const FIELD = { processedprompttokens: ['in', older], generatedtokens: ['out', older], inputtokens: ['in', newer], outputtokens: ['out', newer] };
+  for (const rid of resources) {
+    const url = `https://management.azure.com${rid}/providers/microsoft.insights/metrics?api-version=2024-02-01&metricnames=ProcessedPromptTokens,GeneratedTokens,InputTokens,OutputTokens&timespan=${encodeURIComponent(iso(startMs) + '/' + iso(endMs))}&interval=P1D&aggregation=Total&$filter=${encodeURIComponent("ModelName eq '*'")}`;
+    const j = await cloudJSON(url, { headers }, auth);
+    for (const m of (j && j.value) || []) {
+      const spec = FIELD[String((m.name && m.name.value) || '').toLowerCase()];
+      if (!spec) continue;
+      for (const ts of m.timeseries || []) {
+        const md = (ts.metadatavalues || []).find(x => x && x.name && /^modelname$/i.test(String(x.name.value)));
+        const model = (md && md.value) || 'azure-openai';
+        for (const p of ts.data || []) {
+          if (!p || typeof p.total !== 'number' || !(p.total > 0)) continue;   // Azure omits `total` when there is no data for that day
+          const d = dayKeyUTC(p.timeStamp); if (!d) continue;
+          bump(spec[1], JSON.stringify([d, model]), spec[0], finTok(p.total));
+        }
+      }
+    }
+  }
+  const agg = makeAgg();
+  for (const key of new Set([...older.keys(), ...newer.keys()])) {
+    const [d, model] = JSON.parse(key);
+    const o = older.get(key) || {}, n = newer.get(key) || {};
+    const tin = n.in != null ? n.in : (o.in || 0), tout = n.out != null ? n.out : (o.out || 0);   // newer metric wins per field when it has data
+    if (!tin && !tout) continue;
+    agg.add(d, 'Azure OpenAI', model, { in: tin, out: tout, msgs: 0 });
+  }
+  const rows = agg.rows();
+  let billed;
+  if (scope) {
+    const body = { type: 'ActualCost', timeframe: 'Custom', timePeriod: { from: dayKeyUTC(startMs) + 'T00:00:00Z', to: dayKeyUTC(endMs) + 'T23:59:59Z' },
+      dataset: { granularity: 'Daily', aggregation: { totalCost: { name: 'PreTaxCost', function: 'Sum' } },
+        filter: { dimensions: { name: 'ServiceName', operator: 'In', values: ['Cognitive Services'] } } } };
+    const byDay = new Map();
+    let url = `https://management.azure.com${scope}/providers/Microsoft.CostManagement/query?api-version=2025-03-01`, pages = 0;
+    while (url && pages++ < 20) {   // nextLink pages carry the same POST body
+      const j = await cloudJSON(url, { method: 'POST', headers, body: JSON.stringify(body) }, auth);
+      const props = (j && j.properties) || {};
+      const cols = (props.columns || []).map(c => String(c.name || '').toLowerCase());
+      const iCost = cols.indexOf('pretaxcost'), iDate = cols.indexOf('usagedate');
+      if (iCost < 0 || iDate < 0) throw new Error('Cost Management returned no PreTaxCost / UsageDate columns');
+      for (const r of props.rows || []) {
+        const raw = String(r[iDate] ?? '');   // yyyymmdd number (20260810) — or an ISO string on some API versions
+        const d = /^\d{8}$/.test(raw) ? `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}` : dayKeyUTC(raw);
+        if (!d) continue;
+        byDay.set(d, (byDay.get(d) || 0) + finAmt(parseFloat(r[iCost])));
+      }
+      url = props.nextLink || null;
+    }
+    billed = [...byDay.entries()].map(([d, amount]) => ({ d, amount })).sort((a, b) => a.d < b.d ? -1 : 1);
+  }
+  const nModels = new Set(rows.map(r => r.model)).size;
+  return { label: `${resources.length} resource${resources.length === 1 ? '' : 's'}`,
+    detail: `${rows.length} usage rows · ${nModels} model${nModels === 1 ? '' : 's'} · last ${days} days` + (billed ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from Cost Management` : ' · no cost scope — add one for billed dollars'),
+    rows, ...(billed ? { billed } : {}), meta: { days, resources: resources.length } };
 }
 
 async function fetchCopilotAll(token) {
