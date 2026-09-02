@@ -452,6 +452,23 @@ export async function generate() {
     { name: 'user.json', data: '{"id":"user-1","email":"x@y.z"}' },
     { name: 'chat.html', data: '<html><body>export</body></html>' },
   ]));
+  // T9 — Claude Enterprise Analytics: usage_report + cost_report (Anthropic bucket shape). Days RELATIVE: B = 45 days ago (window 2 of 3), C = 10 days ago, A = 2 days ago (both in window 3 → the stub paginates them).
+  //   usage: B sonnet in 2000 cr 100 cw 0 out 900 req 20 · C opus in 300 cr 0 cw 0 out 250 req 3 · A sonnet in 1000 cr 400 cw 150+50=200 out 700 req 12
+  //   Expected: in = 2000+300+1000 = 3300 · cr = 100+0+400 = 500 · cw = 0+0+200 = 200 · out = 900+250+700 = 1850 · msgs = 20+3+12 = 35 · 3 rows (B/sonnet, C/opus, A/sonnet) · platform 'Claude Enterprise (org)'
+  //   cost (CENTS as decimal strings): B '30' → 0.30 · C '15.5' → 0.155 · A '184.50' → 1.845 → total 2.30 (= 230 cents)
+  const ceDay = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10) + 'T00:00:00Z';
+  const ceBucket = (n, results) => ({ starting_at: ceDay(n), ending_at: ceDay(n - 1), results });
+  const ceUse = (model, u, cr, c5, c1, out, req) => ({ model, uncached_input_tokens: u, cache_read_input_tokens: cr, cache_creation: { ephemeral_5m_input_tokens: c5, ephemeral_1h_input_tokens: c1 }, output_tokens: out, requests: req });
+  w('wave2/claude-enterprise/usage_report.json', JSON.stringify({ data: [
+    ceBucket(45, [ceUse('claude-sonnet-4-5', 2000, 100, 0, 0, 900, 20)]),
+    ceBucket(10, [ceUse('claude-opus-4-1', 300, 0, 0, 0, 250, 3)]),
+    ceBucket(2, [ceUse('claude-sonnet-4-5', 1000, 400, 150, 50, 700, 12)]),
+  ], has_more: false, next_page: null }, null, 1));
+  w('wave2/claude-enterprise/cost_report.json', JSON.stringify({ data: [
+    ceBucket(45, [{ amount: '30', currency: 'USD', model: 'claude-sonnet-4-5', cost_type: 'tokens', token_type: 'uncached_input_tokens' }]),
+    ceBucket(10, [{ amount: '15.5', currency: 'USD', model: 'claude-opus-4-1', cost_type: 'tokens', token_type: 'output_tokens' }]),
+    ceBucket(2, [{ amount: '184.50', currency: 'USD', model: 'claude-sonnet-4-5', cost_type: 'tokens', token_type: 'uncached_input_tokens' }]),
+  ], has_more: false, next_page: null }, null, 1));
 }
 
 if (process.argv[1] === import.meta.filename) await generate();

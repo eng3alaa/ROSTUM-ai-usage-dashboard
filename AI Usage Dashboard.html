@@ -1365,6 +1365,14 @@ const CONNECTORS = [
     qualityNote: 'Exact tokens come only from the monthly usage export: platform.deepseek.com/usage → pick a month → Export monthly data → a ZIP with amount-*.csv (per day / model / API key: cache-miss input, cache-hit input, output tokens, request count) and cost-*.csv (billed amount, USD or CNY) — drop the ZIP, or both CSVs, on Imports; months merge by day/model, so each export adds to the history instead of replacing it. The column layout is documented only by community parsers, so the importer sniffs the headers (the long type/amount rows and a wide per-column shape) and says what it found. The API key itself is validate-only: GET /user/balance (CORS-open) returns the remaining balance (string numbers; the currency may be CNY) and no usage history. Cache-hit tokens are priced at the cache-read rate; DeepSeek prices are August 2026 list prices.',
     paths: ['platform.deepseek.com/usage → Export monthly data → amount-YYYY-MM.csv + cost-YYYY-MM.csv (ZIP)', 'GET https://api.deepseek.com/user/balance (validate only)'],
     links: { get: 'https://platform.deepseek.com/api_keys', docs: 'https://api-docs.deepseek.com/api/get-user-balance/', usage: 'https://platform.deepseek.com/usage' } },
+  // ---- Wave 2 admin-key connector: Claude Enterprise Analytics API (Enterprise orgs only) ----
+  { id: 'claude-enterprise', platform: 'Claude Enterprise (org)', name: 'Claude Enterprise (org analytics)', category: 'chat', kind: 'admin-key',
+    statusEl: 'claude-enterprise-status', brand: '#c96442', mark: 'CE', srcIds: ['claude-enterprise'], keyLS: 'key:claude-enterprise', fetch: 'fetchClaudeEnterprise',
+    keyLabel: 'Analytics API key', keyHint: 'sk-ant-… (claude.ai → Organization settings → API, scope read:analytics — primary owner only)',
+    quality: 'exact',
+    qualityNote: 'Exact tokens + billed dollars for a Claude ENTERPRISE organization only (not Pro, Max or Team): the Analytics API (claude.ai → Organization settings → API, scope read:analytics) reports daily usage per model — uncached input, cache reads / writes, output, requests — and a cost report in cents for usage-based plans (seat-based plans return no cost rows). Data starts 2026-01-01 (the API refuses earlier dates) and is fetched in 31-day windows at up to 60 requests per minute per org. Rows land under the platform "Claude Enterprise (org)", so they never mix with your Anthropic API admin data or your local Claude Code logs. The key is sent with anthropic-dangerous-direct-browser-access, like the Anthropic API card, and is kept in this browser only if you tick Remember.',
+    paths: ['GET https://api.anthropic.com/v1/organizations/analytics/usage_report?bucket_width=1d&group_by[]=model (≤31-day windows, paginated)', 'GET https://api.anthropic.com/v1/organizations/analytics/cost_report (amounts in cents; usage-based plans)', 'Enterprise orgs only — no data before 2026-01-01'],
+    links: { get: 'https://claude.ai/admin-settings/api-access', docs: 'https://platform.claude.com/docs/en/manage-claude/analytics-api' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv'] },
 ];
@@ -2512,7 +2520,10 @@ async function parseDeepSeekUsageZip(entries) {
 /* =================================================================
  * 4) Provider API payloads (fetched directly or imported as JSON files)
  * ================================================================= */
-function parseAnthropicUsage(payload) {
+/** Anthropic bucket shape — Admin usage_report/messages AND the Enterprise Analytics usage_report (identical fields; the
+ *  Analytics report also carries `requests`). `platform` = the row's platform: 'Anthropic API' (default, Admin card) or
+ *  'Claude Enterprise (org)' (Analytics card) — never mixed, each card is its own source. */
+function parseAnthropicUsage(payload, platform = 'Anthropic API') {
   const agg = makeAgg();
   const data = payload && payload.data;
   if (!Array.isArray(data)) throw new Error('Not an Anthropic usage report');
@@ -2524,17 +2535,20 @@ function parseAnthropicUsage(payload) {
       if (typeof r.cache_creation === 'object' && r.cache_creation) {
         cw = Object.values(r.cache_creation).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
       } else cw = r.cache_creation_input_tokens || 0;
-      agg.add(d, 'Anthropic API', model, {
+      agg.add(d, platform, model, {
         in: finTok(r.uncached_input_tokens ?? r.input_tokens ?? 0),
         cw: finTok(cw), cr: finTok(r.cache_read_input_tokens || 0),
         out: finTok(r.output_tokens || 0),
-        msgs: finTok(r.num_requests || r.request_count || 0)
+        msgs: finTok(r.num_requests || r.request_count || r.requests || 0)
       });
     }
   }
   return { rows: agg.rows() };
 }
 
+/** Anthropic cost_report (Admin and Enterprise Analytics): `amount` is a DECIMAL STRING IN THE CURRENCY'S LOWEST UNITS
+ *  (cents for USD) per the docs — "123.45" = $1.2345 — so string/number amounts are divided by 100. An OpenAI-style
+ *  object amount { value, currency } is already in currency units and is taken as-is (the import router feeds both shapes here). */
 function parseAnthropicCost(payload) {
   const billed = new Map();
   const data = payload && payload.data;
@@ -2543,8 +2557,8 @@ function parseAnthropicCost(payload) {
     const d = dayKeyUTC(bucket.starting_at || bucket.ending_at);
     for (const r of bucket.results || []) {
       let amt = 0;
-      if (r.amount && typeof r.amount === 'object') amt = parseFloat(r.amount.value) || 0;
-      else amt = parseFloat(r.amount) || 0;
+      if (r.amount && typeof r.amount === 'object') amt = parseFloat(r.amount.value) || 0;   // {value} → dollars as-is
+      else amt = (parseFloat(r.amount) || 0) / 100;                                         // "cents" string / number → dollars
       billed.set(d, (billed.get(d) || 0) + finAmt(amt));
     }
   }
@@ -2963,6 +2977,50 @@ async function fetchAnthropicAll(key, days) {
     cost = parseAnthropicCost(cmerged);
   } catch (e) { console.warn('anthropic cost report failed', e); }
   return { usage: parseAnthropicUsage(merged), cost };
+}
+
+/* ---------- Claude Enterprise Analytics API (Enterprise orgs; Analytics key, scope read:analytics) ---------- */
+/** Key-driver fetcher: usage_report + cost_report under /v1/organizations/analytics/, daily buckets grouped by model, fetched in
+ *  ≤31-day half-open windows [starting_at, ending_at) aligned to UTC midnight (today included), each window paginated via
+ *  has_more/next_page. starting_at is clamped to 2026-01-01T00:00:00Z (the API refuses earlier dates). Same headers as the
+ *  Anthropic Admin card. Rows carry platform 'Claude Enterprise (org)'; cost amounts are cents (parseAnthropicCost divides). */
+async function fetchClaudeEnterprise(key, fields, opts) {
+  const days = (opts && opts.days) || 90;
+  const headers = { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+  const dayMs = 864e5, now = new Date();
+  const todayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const floor = Date.parse('2026-01-01T00:00:00Z');
+  const startAll = Math.max(todayUTC - days * dayMs, floor);
+  const endAll = todayUTC + dayMs;   // through the end of today (UTC)
+  const iso = (ms) => new Date(ms).toISOString().slice(0, 10) + 'T00:00:00Z';
+  const windows = [];
+  for (let s = startAll; s < endAll;) { const e = Math.min(s + 31 * dayMs, endAll); windows.push([s, e]); s = e; }
+  const pull = async (report) => {
+    const merged = { data: [] };
+    for (const [s, e] of windows) {
+      let page = null;
+      for (let i = 0; i < 40; i++) {
+        const url = new URL('https://api.anthropic.com/v1/organizations/analytics/' + report);
+        url.searchParams.set('starting_at', iso(s)); url.searchParams.set('ending_at', iso(e));
+        url.searchParams.set('bucket_width', '1d');
+        url.searchParams.append('group_by[]', 'model');
+        url.searchParams.set('limit', '31');
+        if (page) url.searchParams.set('page', page);
+        const j = await fetchJSON(url, headers);
+        merged.data.push(...(j.data || []));
+        if (!j.has_more || !j.next_page) break;
+        page = j.next_page;
+      }
+    }
+    return merged;
+  };
+  const usage = parseAnthropicUsage(await pull('usage_report'), 'Claude Enterprise (org)');
+  let billed = null;
+  try { billed = parseAnthropicCost(await pull('cost_report')); } catch (e) { console.warn('claude enterprise cost report failed', e); }
+  const since = iso(startAll).slice(0, 10);
+  return { label: 'Analytics key · last 4: ' + key.slice(-4), rows: usage.rows, billed,
+    detail: `${usage.rows.length} usage rows${billed ? (billed.length ? ' + billed costs' : ' · no cost rows (seat-based plan, or no usage-based charges yet)') : ' · cost report unavailable'} · since ${since} in ${windows.length} window${windows.length === 1 ? '' : 's'}`,
+    meta: { days, since, windows: windows.length } };
 }
 
 async function fetchOpenAIAll(key, days) {

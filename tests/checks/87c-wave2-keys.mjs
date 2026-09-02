@@ -307,6 +307,95 @@ export async function run({ browser, ok }) {
       !fw.missing && fw.driver.status === 'ok' && fw.driver.err === null && /account my-team/.test(fw.driver.label) && /Connected/.test(fw.driver.text) && fw.driver.in === 19800 && fw.driver.out === 4930 && Math.abs(fw.driver.billedTotal - 6.46) < 1e-9 && fw.driver.calls === 9
       && fw.soft.status === 'ok' && fw.soft.err === null && fw.soft.rows === 4 && fw.soft.billed === 0 && /billing summary unavailable/.test(fw.soft.text)
       && fw.kind === 'api-key' && fw.cat === 'api' && fw.quality === 'exact' && fw.card && fw.fields === JSON.stringify([{ id: 'account', label: 'Account id', placeholder: 'e.g. my-team' }]), JSON.stringify({ driver: fw.driver, soft: fw.soft, kind: fw.kind, cat: fw.cat, quality: fw.quality, fields: fw.fields, card: fw.card }));
+
+    // ---- T9a: parseAnthropicCost cents fix + parseAnthropicUsage platform parameter ----
+    const cents = await page.evaluate(() => {
+      const cost = parseAnthropicCost({ data: [
+        { starting_at: '2026-08-02T00:00:00Z', results: [{ amount: '123.45', currency: 'USD' }, { amount: 250, currency: 'USD' }] },   // string + number = lowest units (cents) → 1.2345 + 2.5 = 3.7345
+        { starting_at: '2026-08-03T00:00:00Z', results: [{ amount: { value: '42', currency: 'USD' } }] },                            // OpenAI-style object → already dollars → 42
+      ] });
+      const payload = { data: [{ starting_at: '2026-08-14T00:00:00Z', results: [{ model: 'claude-sonnet-4-5', uncached_input_tokens: 10, cache_read_input_tokens: 4, cache_creation: { ephemeral_5m_input_tokens: 2, ephemeral_1h_input_tokens: 1 }, output_tokens: 7, requests: 3 }] }] };
+      const dflt = parseAnthropicUsage(payload).rows[0], ent = parseAnthropicUsage(payload, 'Claude Enterprise (org)').rows[0];
+      return { cost, dflt: { platform: dflt.platform, in: dflt.in, cr: dflt.cr, cw: dflt.cw, out: dflt.out, msgs: dflt.msgs }, entPlatform: ent.platform };
+    });
+    ok('parseAnthropicCost: string/number amounts are cents → /100 (123.45 + 250 → 3.7345); object {value} amounts unchanged (42)',
+      cents.cost.length === 2 && cents.cost[0].d === '2026-08-02' && Math.abs(cents.cost[0].amount - 3.7345) < 1e-9 && cents.cost[1].d === '2026-08-03' && cents.cost[1].amount === 42, JSON.stringify(cents.cost));
+    ok('parseAnthropicUsage: platform defaults to Anthropic API, explicit platform is used, Analytics `requests` counts as msgs (in=10 cr=4 cw=3 out=7 msgs=3)',
+      cents.dflt.platform === 'Anthropic API' && cents.entPlatform === 'Claude Enterprise (org)' && cents.dflt.in === 10 && cents.dflt.cr === 4 && cents.dflt.cw === 3 && cents.dflt.out === 7 && cents.dflt.msgs === 3, JSON.stringify(cents));
+
+    // ---- T9b: Claude Enterprise connector (windows + pagination + headers + floor) and the Anthropic Admin card through the same parsers ----
+    const ceUsage = JSON.parse(read('wave2', 'claude-enterprise', 'usage_report.json'));
+    const ceCost = JSON.parse(read('wave2', 'claude-enterprise', 'cost_report.json'));
+    const ce = await page.evaluate(async (usageFx, costFx) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const c = connectorById('claude-enterprise');
+      if (typeof fetchClaudeEnterprise !== 'function' || !c || !document.getElementById('claude-enterprise-key')) return { missing: true };
+      const realFetch = window.fetch;
+      const resp = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
+      let calls = [];
+      // stub = a server: returns the fixture buckets whose starting_at falls in [starting_at, ending_at) of the request; when a window holds
+      // more than one bucket the first page carries only the first bucket with has_more/next_page='p2' and page=p2 returns the rest
+      const pick = (fx, u) => { const s = u.searchParams.get('starting_at'), e = u.searchParams.get('ending_at'); return fx.data.filter(b => b.starting_at >= s && b.starting_at < e); };
+      const serve = (fx, u) => {
+        const list = pick(fx, u), page = u.searchParams.get('page');
+        if (!page) return list.length > 1 ? { data: [list[0]], has_more: true, next_page: 'p2' } : { data: list, has_more: false, next_page: null };
+        return { data: list.slice(1), has_more: false, next_page: null };
+      };
+      window.fetch = async (url, init) => {
+        const u = new URL(String(url)); const h = (init && init.headers) || {};
+        calls.push({ url: u.toString(), path: u.pathname, key: h['x-api-key'], ver: h['anthropic-version'], browser: h['anthropic-dangerous-direct-browser-access'], page: u.searchParams.get('page'),
+          s: u.searchParams.get('starting_at'), e: u.searchParams.get('ending_at'), gb: u.searchParams.getAll('group_by[]'), bw: u.searchParams.get('bucket_width'), lim: u.searchParams.get('limit') });
+        if (u.pathname === '/v1/organizations/analytics/usage_report') return resp(serve(usageFx, u));
+        if (u.pathname === '/v1/organizations/analytics/cost_report') return resp(serve(costFx, u));
+        if (u.pathname === '/v1/organizations/usage_report/messages') return resp({ data: [{ starting_at: usageFx.data[2].starting_at, results: [{ model: 'claude-sonnet-4-5', uncached_input_tokens: 5, output_tokens: 2, cache_read_input_tokens: 0, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 } }] }], has_more: false, next_page: null });
+        if (u.pathname === '/v1/organizations/cost_report') return resp({ data: [{ starting_at: usageFx.data[2].starting_at, results: [{ amount: '4200', currency: 'USD', cost_type: 'tokens' }] }], has_more: false, next_page: null });
+        return resp({ error: { message: 'unexpected ' + u.pathname } }, 404);
+      };
+      // 1) direct fetcher
+      const res = await fetchClaudeEnterprise('sk-ant-api03-test', {}, { days: 90 });
+      const t = res.rows.reduce((a, r) => ({ in: a.in + r.in, cr: a.cr + r.cr, cw: a.cw + r.cw, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, cr: 0, cw: 0, out: 0, msgs: 0 });
+      const us = calls.filter(x => x.path.endsWith('/analytics/usage_report')), cs = calls.filter(x => x.path.endsWith('/analytics/cost_report'));
+      const dayA = usageFx.data[2].starting_at.slice(0, 10);
+      const direct = { ...t, n: res.rows.length, platforms: [...new Set(res.rows.map(r => r.platform))], models: [...new Set(res.rows.map(r => r.model))].sort(), billed: res.billed.map(b => [b.d, b.amount]),
+        billedTotal: res.billed.reduce((a, b) => a + b.amount, 0), billedA: (res.billed.find(b => b.d === dayA) || {}).amount, label: res.label, detail: res.detail,
+        nUsage: us.length, nCost: cs.length, paged: us.filter(x => x.page === 'p2').length + cs.filter(x => x.page === 'p2').length,
+        headers: calls.every(x => x.key === 'sk-ant-api03-test' && x.ver === '2023-06-01' && x.browser === 'true'),
+        params: calls.every(x => x.gb.length === 1 && x.gb[0] === 'model' && x.bw === '1d' && x.lim === '31'),
+        windows: calls.every(x => { const s = Date.parse(x.s), e = Date.parse(x.e); return e > s && e - s <= 31 * 864e5 && /T00:00:00Z$/.test(x.s) && /T00:00:00Z$/.test(x.e); }),
+        floorOk: calls.every(x => x.s >= '2026-01-01T00:00:00Z') };
+      // 2) the floor: asking for far more history clamps starting_at to 2026-01-01 (the API refuses earlier dates)
+      calls = [];
+      await fetchClaudeEnterprise('sk-ant-api03-test', {}, { days: 5000 });
+      const floor = { min: calls.map(x => x.s).sort()[0], allAfter: calls.every(x => x.s >= '2026-01-01T00:00:00Z') };
+      // 3) through the key driver
+      calls = [];
+      document.getElementById('claude-enterprise-key').value = 'sk-ant-api03-test';
+      await App.connectKey(c);
+      const st = Store.connectors['claude-enterprise'] || {};
+      const rows = (Store.sources['claude-enterprise'] || {}).rows || [];
+      const driver = { status: Store.connectorStatus(c), label: st.label || null, err: st.err || null, text: document.getElementById('claude-enterprise-status').textContent,
+        in: rows.reduce((a, r) => a + r.in, 0), msgs: rows.reduce((a, r) => a + r.msgs, 0), platforms: [...new Set(rows.map(r => r.platform))], billedTotal: Store.billedRows('claude-enterprise').reduce((a, b) => a + b.amount, 0) };
+      // 4) the existing Anthropic Admin card still yields 'Anthropic API' rows, and its cost_report '4200' (cents) lands as $42
+      document.getElementById('anthropic-key').value = 'sk-ant-admin-test';
+      await App.fetchAnthropic();
+      const arows = (Store.sources.anthropic || {}).rows || [];
+      const admin = { platforms: [...new Set(arows.map(r => r.platform))], in: arows.reduce((a, r) => a + r.in, 0), billed: Store.billedRows('anthropic').map(b => b.amount), text: document.getElementById('anthropic-status').textContent };
+      window.fetch = realFetch;
+      document.getElementById('claude-enterprise-key').value = ''; document.getElementById('anthropic-key').value = '';
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist(); App._render();
+      return { direct, floor, driver, admin, kind: c.kind, cat: c.category, quality: c.quality, platform: c.platform, note: /Enterprise/.test(c.qualityNote || '') && /not Pro, Max or Team/i.test(c.qualityNote || '') && /2026-01-01/.test(c.qualityNote || ''), card: !!document.getElementById('src-claude-enterprise') };
+    }, ceUsage, ceCost);
+    ok('claude-enterprise: usage_report + cost_report in 31-day windows with pagination → in=3300 cw=200 cr=500 out=1850 msgs=35 (3 rows, platform Claude Enterprise (org)); billed 2.30 total / 1.845 on day A (cents→USD)',
+      !ce.missing && ce.direct.in === 3300 && ce.direct.cw === 200 && ce.direct.cr === 500 && ce.direct.out === 1850 && ce.direct.msgs === 35 && ce.direct.n === 3
+      && ce.direct.platforms.length === 1 && ce.direct.platforms[0] === 'Claude Enterprise (org)' && JSON.stringify(ce.direct.models) === JSON.stringify(['claude-opus-4-1', 'claude-sonnet-4-5'])
+      && ce.direct.billed.length === 3 && Math.abs(ce.direct.billedTotal - 2.30) < 1e-9 && Math.abs(ce.direct.billedA - 1.845) < 1e-9 && /Analytics key · last 4: test/.test(ce.direct.label) && /3 usage rows \+ billed costs/.test(ce.direct.detail), JSON.stringify(ce.direct || ce));
+    ok('claude-enterprise: 3 windows + 1 paginated page per report (4+4 calls), x-api-key + anthropic-version + browser-access headers, group_by[]=model/1d/31, UTC-midnight bounds, starting_at floor 2026-01-01',
+      !ce.missing && ce.direct.nUsage === 4 && ce.direct.nCost === 4 && ce.direct.paged === 2 && ce.direct.headers && ce.direct.params && ce.direct.windows && ce.direct.floorOk
+      && ce.floor.min === '2026-01-01T00:00:00Z' && ce.floor.allAfter, JSON.stringify({ d: ce.direct, floor: ce.floor }));
+    ok('claude-enterprise: key driver stores rows + billed under claude-enterprise (admin-key · chat · exact; Enterprise-only copy); Anthropic Admin card still yields Anthropic API rows and cost "4200" → $42',
+      !ce.missing && ce.driver.status === 'ok' && ce.driver.err === null && /Analytics key/.test(ce.driver.label) && /Connected/.test(ce.driver.text) && ce.driver.in === 3300 && ce.driver.msgs === 35 && ce.driver.platforms.length === 1 && ce.driver.platforms[0] === 'Claude Enterprise (org)' && Math.abs(ce.driver.billedTotal - 2.30) < 1e-9
+      && ce.admin.platforms.length === 1 && ce.admin.platforms[0] === 'Anthropic API' && ce.admin.in === 5 && ce.admin.billed.length === 1 && ce.admin.billed[0] === 42 && /Connected/.test(ce.admin.text)
+      && ce.kind === 'admin-key' && ce.cat === 'chat' && ce.quality === 'exact' && ce.platform === 'Claude Enterprise (org)' && ce.note && ce.card, JSON.stringify({ driver: ce.driver, admin: ce.admin, kind: ce.kind, cat: ce.cat, quality: ce.quality, note: ce.note, card: ce.card }));
   } finally {
     await page.close();
   }

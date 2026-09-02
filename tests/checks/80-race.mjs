@@ -50,6 +50,7 @@ export async function run({ browser, ok }) {
       !staleFail.status.includes('Fetch failed') && staleFail.model === 'NEW2',
       JSON.stringify(staleFail));
 
+    // cost stubs use the REAL Anthropic cost_report shape: amount is a decimal string in CENTS ('4200' → $42) — proves the cents→dollars fix (object {value} amounts stay dollars)
     const importRace = await page.evaluate(async () => {
       localStorage.removeItem('aiusage:data');
       Store.sources = {}; Store.billed = {}; Store.projects = [];
@@ -59,7 +60,7 @@ export async function run({ browser, ok }) {
       const p = App.fetchAnthropic();
       await new Promise((r) => setTimeout(r, 10));
       await App.handleImportFiles([new File([JSON.stringify({
-        data: [{ starting_at: '2026-08-02T00:00:00Z', results: [{ amount: { value: '42', currency: 'USD' } }] }]
+        data: [{ starting_at: '2026-08-02T00:00:00Z', results: [{ amount: '4200', currency: 'USD' }] }]
       })], 'cost.json')]);
       await Promise.allSettled([p]);
       await new Promise((r) => setTimeout(r, 300));   // let the late in-flight fetch settle
@@ -78,7 +79,7 @@ export async function run({ browser, ok }) {
       localStorage.removeItem('aiusage:data');
       Store.sources = {}; Store.billed = {}; Store.projects = {} && []; Store.connectors = {};
       // import writes fresh billed data...
-      await App.handleImportFiles([new File([JSON.stringify({ data: [{ starting_at: '2026-08-02T00:00:00Z', results: [{ amount: { value: '42', currency: 'USD' } }] }] })], 'cost.json')]);
+      await App.handleImportFiles([new File([JSON.stringify({ data: [{ starting_at: '2026-08-02T00:00:00Z', results: [{ amount: '4200', currency: 'USD' }] }] })], 'cost.json')]);
       // ...then an ALREADY-IN-FLIGHT fetch resolves with usage OK but cost=null (soft fail)
       window.fetchAnthropicAll = async () => { await new Promise(r => setTimeout(r, 150)); return { usage: { rows: [{ d: '2026-08-11', platform: 'Anthropic API', model: 'claude-sonnet-5', in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }] }, cost: null }; };
       document.getElementById('anthropic-key').value = 'sk-ant-admin-test';
