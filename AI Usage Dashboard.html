@@ -155,6 +155,9 @@ input[type="date"], input[type="text"], input[type="password"], input[type="sear
 .hub-nomatch { color: var(--muted); font-size: 12.5px; margin: 4px 0 8px; }
 .acct .badge { font-size: 9.5px; padding: 0 5px; }
 .badge.q-exact { color: var(--good-text); } .badge.q-estimated { color: var(--serious); } .badge.q-validate { color: var(--muted); font-style: italic; } .badge.q-none { color: var(--muted); } .src.generic .links a { white-space: nowrap; }
+.acct a.btn { text-decoration: none; display: inline-block; }
+.acct.link-only .acct-label { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.src .note.reason { font-weight: 600; color: var(--ink-2); }
 .acct { background: var(--surface-1); border: 1px solid var(--border); border-left: 3px solid var(--acct-brand, var(--border));
         border-radius: 8px; padding: 10px 12px; cursor: pointer; }
 .acct:hover { border-color: var(--baseline); border-left-color: var(--acct-brand, var(--baseline)); }
@@ -1123,6 +1126,8 @@ const Budgets = {
  *                    · parser 'globalFnName' · hint · quality exact|estimated|validate|none · qualityNote · paths [] · links {get,docs,usage}
  *                    · folder-log entries: srcIds must include the entry's own id (scanFiles stores rows under c.id)
  * local-server fields: baseUrl · validate 'globalFnName' (async (base) → {label, detail}) · corsHint ({base} = server URL) · optional patterns/parser for a usage-logger folder
+ * link-only fields (4b): kind 'link-only' · reason (one sentence shown on the hub card: why there is no data path) · quality 'none' · srcIds [] · links {usage, docs, get?}
+ *                    — never "connected", no Connect/Sync/Disconnect; the hub card offers Details (modal) + the vendor usage link only
  * ================================================================= */
 const CONNECTORS = [
   { id: 'local',      platform: 'Claude Code/Desktop', name: 'Claude Code / Desktop', category: 'coding', kind: 'folder',
@@ -1212,6 +1217,25 @@ const CONNECTORS = [
     qualityNote: 'Live check only: Ollama keeps no usage history and no per-request log — exact token counts (prompt_eval_count / eval_count) exist only inside each API response. This card verifies the server (GET /api/tags, /api/ps) and shows what is installed and loaded now. For history, run the one-file proxy docs/tools/ollama-usage-logger.mjs (it forwards requests to Ollama and appends exact per-request JSONL) and pick its output folder below. Desktop-app chats live in db.sqlite (SQLite, no token counts) — not read in this version. If validation says CORS: set OLLAMA_ORIGINS="*" and restart Ollama. Logged models are priced $0 — they run on your hardware (gated on the Ollama platform, not on model name). To see a hosted-equivalent figure, compare the same tokens against a hosted model\'s row in the price list. Ollama used THROUGH a coding tool (Continue.dev, Cline, Aider, Codex --oss) is also $0 when that tool\'s log names the provider.',
     paths: ['server: http://localhost:11434 (OLLAMA_HOST)', 'usage log: ~/.ai-usage/ollama-usage.jsonl (written by the proxy)', 'server.log has request lines but no tokens; db.sqlite has chats but no tokens'],
     links: { get: 'https://ollama.com/download', docs: 'https://docs.ollama.com/api' } },
+  // ---- Wave 2 link-only cards: no data path a local page can use — honest reason + vendor links; never "connected" ----
+  { id: 'amazonq', platform: 'Amazon Q / Kiro', name: 'Amazon Q / Kiro', category: 'coding', kind: 'link-only',
+    statusEl: 'amazonq-status', brand: '#ff9900', mark: 'Aq', srcIds: [], quality: 'none',
+    reason: 'No usage path for a local page: personal accounts (Free tier / Builder ID) have no usage API or export, and the org-admin reports land in S3/CloudWatch behind AWS SigV4.',
+    qualityNote: 'No data: Amazon Q Developer and Kiro expose no personal usage API and no export — the IDE shows remaining monthly limits only, and Kiro individual plans show credit usage on the kiro.dev account page (web only). Pro/Enterprise admins get per-user daily CSVs in S3 (chat messages, suggestions accepted — counts, not tokens or dollars) and CloudWatch metrics, but reading those needs SigV4-signed S3/CloudWatch calls with AWS credentials in the page, which this dashboard does not do. Kiro CLI (ex Q Developer CLI; Linux/macOS/WSL only) keeps conversations in a local data.sqlite3 with an undocumented schema — a possible future folder-log parser, not in this version. Check usage through the vendor links, or enter figures through the generic CSV import.',
+    paths: ['Kiro CLI: ~/.local/share/kiro-cli/data.sqlite3 (Linux) · ~/Library/Application Support/kiro-cli/data.sqlite3 (macOS) · WSL only on Windows', 'Admin reports (Pro tier, SigV4): s3://<bucket>/<prefix>/AWSLogs/<acct>/QDeveloperLogs/by_user_analytic/<region>/<y>/<m>/<d>/'],
+    links: { get: 'https://kiro.dev', usage: 'https://console.aws.amazon.com/amazonq/', docs: 'https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/monitoring-overview.html' } },
+  { id: 'replicate', platform: 'Replicate', name: 'Replicate', category: 'api', kind: 'link-only',
+    statusEl: 'replicate-status', brand: '#1f1f1f', mark: 'Rp', srcIds: [], quality: 'none',
+    reason: 'No usage path from a local page: api.replicate.com sends no CORS headers, so even key validation fails from file:// (verified by preflight), and there is no spend API or CSV export.',
+    qualityNote: 'No data: Replicate\'s API (GET /v1/account, GET /v1/predictions) answers the browser preflight without Access-Control-Allow-Origin, so a page opened from disk cannot call it — not even to validate a key. The predictions list would give per-prediction model, timings and (for official language models) input/output token counts but no cost; billing is compute-time for community models and per-token for official ones, and only the dashboard at replicate.com/account/billing shows spend. No CSV export or spend API is documented. With your own proxy you could list predictions and estimate cost client-side; until then, check the billing page via the link or enter figures through the generic CSV import.',
+    paths: ['replicate.com/account/billing (current usage, spend by model, invoices — web only)', 'API: GET https://api.replicate.com/v1/predictions?created_after=… (CORS-blocked from file://)'],
+    links: { usage: 'https://replicate.com/account/billing', docs: 'https://replicate.com/docs/topics/billing' } },
+  { id: 'windsurf', platform: 'Windsurf', name: 'Windsurf (Codeium)', category: 'coding', kind: 'link-only',
+    statusEl: 'windsurf-status', brand: '#0b9a6d', mark: 'Ws', srcIds: [], quality: 'none',
+    reason: 'No usage path from a local page: individual plans have no usage API or export (the plan page shows prompt credits only), and the Teams/Enterprise analytics API is CORS-blocked and counts credits, not tokens.',
+    qualityNote: 'No data: Windsurf (Codeium, now Cognition) meters prompt credits, never tokens. Individuals see credit consumption on windsurf.com/subscription/usage only — no CSV export, no API. Teams/Enterprise admins can call server.codeium.com/api/v1/UserPageAnalytics with a read-only service key (per-user promptCreditsUsed in cents, current billing cycle only), but the endpoint is CORS-blocked from a page opened from disk and is not available on Free/Pro plans. Local Cascade storage under ~/.codeium/windsurf/ is undocumented and binary, with no token counts or credits. Check credits via the link, or enter figures through the generic CSV import.',
+    paths: ['windsurf.com/subscription/usage (prompt credits, web only)', '%USERPROFILE%\\.codeium\\windsurf\\ (hooks.json, memories — no usage data)', 'Teams/Enterprise: POST https://server.codeium.com/api/v1/UserPageAnalytics (service key in the JSON body; CORS-blocked)'],
+    links: { get: 'https://windsurf.com', usage: 'https://windsurf.com/subscription/usage', docs: 'https://docs.devin.ai/desktop/accounts/api-reference/user-page-analytics' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv'] },
 ];
@@ -3125,8 +3149,10 @@ const App = {
     }
     let tok = 0, cost = 0;
     for (const r of rows) { tok += (r.in||0)+(r.cw||0)+(r.cr||0)+(r.out||0); cost += Pricing.cost(r.model, r); }
-    const card = el('div', { class: 'acct', 'data-connector': c.id, style: { '--acct-brand': c.brand }, tabindex: 0, role: 'button',
-      'aria-label': `${c.name}: ${status === 'ok' ? 'connected' : status === 'warn' ? 'needs attention' : 'not connected'}` },
+    const linkOnly = c.kind === 'link-only';   // honest card: no data path → no Connect/Sync/Disconnect, never "connected"; reason + vendor usage link instead
+    const L = c.links || {};
+    const card = el('div', { class: 'acct' + (linkOnly ? ' link-only' : ''), 'data-connector': c.id, style: { '--acct-brand': c.brand }, tabindex: 0, role: 'button',
+      'aria-label': `${c.name}: ${linkOnly ? 'no data path' : status === 'ok' ? 'connected' : status === 'warn' ? 'needs attention' : 'not connected'}` },
       el('div', { class: 'acct-head' },
         el('span', { class: 'mark', text: c.mark }),
         el('span', { class: 'acct-name', text: c.name }),
@@ -3134,16 +3160,21 @@ const App = {
         el('span', { class: 'dot ' + status }),
         el('button', { class: 'acct-hide', type: 'button', text: '✕', title: 'Hide this card', 'aria-label': 'Hide ' + c.name,
           onclick: (e) => { e.stopPropagation(); View.hideCard(c.id); this.render(); }, onkeydown: (e) => e.stopPropagation() })),
-      el('div', { class: 'acct-label', text: st.err ? ('⚠ ' + st.err) : (st.label || (status === 'off' ? 'Not connected' : '')) }),
+      el('div', { class: 'acct-label', text: linkOnly ? (c.reason || 'No data path') : st.err ? ('⚠ ' + st.err) : (st.label || (status === 'off' ? 'Not connected' : '')) }),
       el('div', { class: 'acct-sync', text: st.lastSync ? ('Synced ' + new Date(st.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : '' }),
       el('div', { class: 'acct-stats', text: rows.length ? `${fmtCompact(tok)} tokens · ${fmtUSD(cost)} (30d)` : '' }),
       (c.platform && Budgets.limits[c.platform]) ? (() => { const s = bst.byPlatform[c.platform]; return el('div', { class: 'budget-bar' + (s.pct >= 100 ? ' over' : s.pct >= 80 ? ' warn' : ''), title: `${fmtUSD(s.spent)} of ${fmtUSD(s.limit)} this month` }, el('div', { class: 'fill', style: { width: Math.min(100, s.pct) + '%' } })); })() : null,
-      el('div', { class: 'acct-actions' },
-        el('button', { class: 'btn small acct-manage', text: status === 'off' ? 'Connect' : 'Manage', onclick: (e) => { e.stopPropagation(); this.openConnectorModal(c.id); } }),
-        status !== 'off' && c.id !== 'imports' ? el('button', { class: 'btn small acct-sync-btn', text: 'Sync', onclick: (e) => { e.stopPropagation(); this.syncConnector(c.id); } }) : null,
-        status !== 'off' ? el('button', { class: 'btn small', text: 'Disconnect', onclick: (e) => { e.stopPropagation(); this.disconnectConnector(c.id); } }) : null));
-    card.addEventListener('click', () => this.drillDown(c));
-    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !(e.target && e.target.closest && e.target.closest('button,a,input'))) this.drillDown(c); });   // Enter on Manage/Sync/Disconnect is the button's own click, not a drill-down
+      linkOnly
+        ? el('div', { class: 'acct-actions' },
+            el('button', { class: 'btn small acct-manage', text: 'Details', onclick: (e) => { e.stopPropagation(); this.openConnectorModal(c.id); } }),
+            L.usage ? el('a', { class: 'btn small acct-usage-link', href: L.usage, target: '_blank', rel: 'noopener', text: 'Vendor usage page ↗', onclick: (e) => e.stopPropagation() }) : null)
+        : el('div', { class: 'acct-actions' },
+            el('button', { class: 'btn small acct-manage', text: status === 'off' ? 'Connect' : 'Manage', onclick: (e) => { e.stopPropagation(); this.openConnectorModal(c.id); } }),
+            status !== 'off' && c.id !== 'imports' ? el('button', { class: 'btn small acct-sync-btn', text: 'Sync', onclick: (e) => { e.stopPropagation(); this.syncConnector(c.id); } }) : null,
+            status !== 'off' ? el('button', { class: 'btn small', text: 'Disconnect', onclick: (e) => { e.stopPropagation(); this.disconnectConnector(c.id); } }) : null));
+    // a link-only card never has rows, so there is nothing to drill into — click / Enter open its Details instead
+    card.addEventListener('click', () => linkOnly ? this.openConnectorModal(c.id) : this.drillDown(c));
+    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !(e.target && e.target.closest && e.target.closest('button,a,input'))) (linkOnly ? this.openConnectorModal(c.id) : this.drillDown(c)); });   // Enter on Manage/Sync/Disconnect is the button's own click, not a drill-down
     return card;
   },
   renderHub() {
@@ -3219,6 +3250,7 @@ const App = {
     const c = connectorById(id);
     if (c && c.kind === 'folder-log') return this.rescanFolder(id);
     if (c && c.kind === 'local-server') { const jobs = [this.connectServer(c)]; if (this._dirHandles[id]) jobs.push(this.rescanFolder(id)); return Promise.all(jobs); }
+    if (c && c.kind === 'link-only') return;   // honest card: nothing to sync
     if (c && c.keyLS) {
       const inp = document.getElementById(id + '-key');
       const hasKey = (inp && inp.value.trim()) || LS.get(c.keyLS, null);
@@ -3230,6 +3262,7 @@ const App = {
   },
   disconnectConnector(id) {
     const c = connectorById(id);
+    if (c.kind === 'link-only') return;   // never connected, nothing stored — no prompt, no state change
     if (c.keyLS) LS.del(c.keyLS);
     const keyInput = document.getElementById(id + '-key'); if (keyInput) keyInput.value = '';
     delete Store.connectors[id];
@@ -3652,8 +3685,9 @@ const App = {
       el('div', { class: 'card-head' }, el('h2', { text: c.name }), el('span', { class: 'badge q-' + q, text: QUALITY_LABEL[q] || q })),
       el('div', { class: 'desc', text: c.qualityNote || '' }),
     ];
+    if (c.kind === 'link-only' && c.reason) kids.push(el('div', { class: 'note reason', text: 'Why there is no data path: ' + c.reason }));
     if (c.paths && c.paths.length) {
-      const p = el('div', { class: 'note' }, 'Where the files live: ');
+      const p = el('div', { class: 'note' }, c.kind === 'link-only' ? 'Where to look: ' : 'Where the files live: ');
       c.paths.forEach((s, i) => { if (i) p.appendChild(document.createTextNode(' · ')); p.appendChild(el('code', { text: s })); });
       kids.push(p);
     }
@@ -3661,7 +3695,7 @@ const App = {
     // URL row) and '<id>-scan-status' for the folder scan — the drivers run concurrently (syncConnector / refreshAll) and must never
     // blank or overwrite each other's line. Single-driver cards keep the one '<id>-status' at the bottom.
     const dual = !!(c.baseUrl && c.patterns);
-    const statusEl = el('div', { class: 'status', id: c.id + '-status', text: 'Not connected.' });
+    const statusEl = el('div', { class: 'status', id: c.id + '-status', text: c.kind === 'link-only' ? 'No data path — nothing to connect here; use the links below.' : 'Not connected.' });
     if (c.baseUrl) {
       kids.push(el('div', { class: 'row' },
         el('input', { type: 'text', id: c.id + '-url', value: LS.get('url:' + c.id, null) || c.baseUrl, 'aria-label': c.name + ' server URL', spellcheck: 'false' }),
@@ -4228,7 +4262,7 @@ const App = {
     this.wireCollapsibles();
     this.wireInsightHides();
     this.wireLegacyToggle();
-    for (const c of CONNECTORS) if (c.kind === 'folder-log' || c.kind === 'local-server') this.ensureSourceCard(c);
+    for (const c of CONNECTORS) if (c.kind === 'folder-log' || c.kind === 'local-server' || c.kind === 'link-only') this.ensureSourceCard(c);
     this._hubQuery = $('hub-search').value || '';   // the browser may restore the box's text across a reload — start in sync with it, not empty
     $('hub-search').addEventListener('input', () => { this._hubQuery = $('hub-search').value; this.renderHub(); });
 

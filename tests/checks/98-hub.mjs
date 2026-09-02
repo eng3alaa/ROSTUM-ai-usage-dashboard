@@ -210,12 +210,12 @@ export async function run({ browser, ok }) {
       App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load(); App._hubQuery = '';
       App._render();
       const box = document.getElementById('hub-search');
-      const total = document.querySelectorAll('#accounts-hub .acct').length;   // 17 registry cards → box shown
+      const total = document.querySelectorAll('#accounts-hub .acct').length;   // every registry card (>12) → box shown
       const boxShownBefore = !box.hidden;
       box.value = 'e'; box.dispatchEvent(new Event('input', { bubbles: true }));
       const matched = [...document.querySelectorAll('#accounts-hub .acct')].map(c => c.dataset.connector);
-      // hide 5 of the matching cards → 12 un-hidden → box hides → query must be dropped
-      for (const id of matched.slice(0, 5)) View.hideCard(id);
+      // hide (total − 12) cards → exactly 12 un-hidden → box hides → query must be dropped (independent of registry size)
+      for (const id of CONNECTORS.map(c => c.id).slice(0, total - 12)) View.hideCard(id);
       App._render();
       const afterHide = { boxHidden: box.hidden, boxValue: box.value, q: App._hubQuery, n: document.querySelectorAll('#accounts-hub .acct').length,
         unhidden: CONNECTORS.filter(c => !View.isCardHidden(c.id)).length, nomatch: !!document.querySelector('#accounts-hub .hub-nomatch') };
@@ -233,16 +233,61 @@ export async function run({ browser, ok }) {
       card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));   // control: Enter on the card itself still drills
       App.drillDown = orig;
       const autocomplete = box.getAttribute('autocomplete');
-      return { total, boxShownBefore, matched: matched.length, afterHide, noMatch, drills, autocomplete, restored: document.querySelectorAll('#accounts-hub .acct').length };
+      return { total, registry: CONNECTORS.length, boxShownBefore, matched: matched.length, afterHide, noMatch, drills, autocomplete, restored: document.querySelectorAll('#accounts-hub .acct').length };
     });
     ok('hub: hiding cards down to ≤12 while a query is typed hides the box AND drops the query (all un-hidden cards render, no stale filter)',
-      hubSearch.total === 17 && hubSearch.boxShownBefore && hubSearch.matched > 5 && hubSearch.matched < 17 &&
+      hubSearch.total === hubSearch.registry && hubSearch.total > 12 && hubSearch.boxShownBefore && hubSearch.matched > 0 && hubSearch.matched < hubSearch.total &&
       hubSearch.afterHide.boxHidden && hubSearch.afterHide.unhidden === 12 && hubSearch.afterHide.n === 12 && hubSearch.afterHide.q === '' && hubSearch.afterHide.boxValue === '' && !hubSearch.afterHide.nomatch,
       JSON.stringify(hubSearch));
     ok('hub: a query matching nothing renders a "No accounts match" note carrying the query text (box stays visible; autocomplete off)',
       hubSearch.noMatch.n === 0 && /No accounts match/.test(hubSearch.noMatch.note || '') && /zzz/.test(hubSearch.noMatch.note || '') && !hubSearch.noMatch.boxHidden &&
-      hubSearch.autocomplete === 'off' && hubSearch.restored === 17, JSON.stringify(hubSearch.noMatch));
+      hubSearch.autocomplete === 'off' && hubSearch.restored === hubSearch.total, JSON.stringify(hubSearch.noMatch));
     ok('hub: Enter on a card action button does not fire the card drill-down (Enter on the card itself still does)', hubSearch.drills === 1, JSON.stringify({ drills: hubSearch.drills }));
+    // 4b T1: link-only cards — off dot, reason as the label, Details + vendor usage link only (no Connect/Sync/Disconnect),
+    // Details opens the modal hosting the generic source card (reason + links), ✕ hides / chip restores, sync is a no-op
+    const lo = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load(); App._hubQuery = ''; document.getElementById('hub-search').value = '';
+      App._render();
+      const c = connectorById('replicate');
+      const card = document.querySelector('#accounts-hub .acct[data-connector="replicate"]');
+      const btns = [...card.querySelectorAll('.acct-actions button')].map(b => b.textContent);
+      const usage = card.querySelector('.acct-actions a');
+      const ui = { dot: card.querySelector('.dot').className, label: card.querySelector('.acct-label').textContent, btns, sync: !!card.querySelector('.acct-sync-btn'),
+        usageHref: usage && usage.getAttribute('href'), usageRel: usage && usage.getAttribute('rel'), group: card.closest('.hub-group').dataset.group, cls: card.className,
+        aria: card.getAttribute('aria-label'), reasonOnCard: card.querySelector('.acct-label').textContent === c.reason, hide: !!card.querySelector('.acct-hide'),
+        groups: { amazonq: document.querySelector('#accounts-hub .acct[data-connector="amazonq"]').closest('.hub-group').dataset.group,
+                  windsurf: document.querySelector('#accounts-hub .acct[data-connector="windsurf"]').closest('.hub-group').dataset.group } };
+      // Details → modal hosts the generic source card with the reason + links; close → card goes home hidden (it is never connected)
+      const dlg = document.getElementById('connector-modal');
+      card.querySelector('.acct-manage').click();
+      const src = dlg.querySelector('#src-replicate');
+      const modal = { open: dlg.open, has: !!src, reason: !!src && src.textContent.includes(c.reason), usageLink: !!src && !!src.querySelector('a[href="' + c.links.usage + '"]'),
+        statusText: document.getElementById('replicate-status').textContent, badge: src && src.querySelector('.badge').textContent };
+      const closed = new Promise(r => dlg.addEventListener('close', r, { once: true }));
+      dlg.close(); await closed;
+      const home = document.querySelector('#sources #src-replicate');
+      const after = { home: !!home, hidden: !!home && home.hidden, status: Store.connectorStatus(c), noState: Store.connectors.replicate === undefined };
+      // ✕ hides the card; the "N hidden — show" chip restores it
+      card.querySelector('.acct-hide').click(); App._render();
+      const gone = !document.querySelector('#accounts-hub .acct[data-connector="replicate"]');
+      const chip = document.querySelector('#hub-chips .hub-hidden-chip');
+      const chipText = chip && chip.textContent;
+      if (chip) chip.click(); App._render();
+      const back = !!document.querySelector('#accounts-hub .acct[data-connector="replicate"]');
+      // sync is a no-op for link-only (unreachable from the UI; guard the API): returns undefined, opens nothing, creates no state
+      const r = App.syncConnector('replicate');
+      const syncNoop = r === undefined && !dlg.open && Store.connectors.replicate === undefined;
+      return { ui, modal, after, gone, chipText, back, syncNoop };
+    });
+    ok('link-only: card shows off dot, reason as label, Details + vendor usage link only (no Connect/Sync/Disconnect); Amazon Q + Windsurf in Coding tools, Replicate in API vendors',
+      /\boff\b/.test(lo.ui.dot) && lo.ui.reasonOnCard && JSON.stringify(lo.ui.btns) === JSON.stringify(['Details']) && !lo.ui.sync && lo.ui.hide &&
+      lo.ui.usageHref === 'https://replicate.com/account/billing' && lo.ui.usageRel === 'noopener' && /link-only/.test(lo.ui.cls) && /no data path/.test(lo.ui.aria) &&
+      lo.ui.group === 'api' && lo.ui.groups.amazonq === 'coding' && lo.ui.groups.windsurf === 'coding', JSON.stringify(lo.ui));
+    ok('link-only: Details opens the modal hosting the generic card (no-data badge, reason, usage link, "No data path" status); close hides it again; sync is a no-op',
+      lo.modal.open && lo.modal.has && lo.modal.reason && lo.modal.usageLink && /no data path/i.test(lo.modal.statusText) && lo.modal.badge === 'no data' &&
+      lo.after.home && lo.after.hidden && lo.after.status === 'off' && lo.after.noState && lo.syncNoop, JSON.stringify({ modal: lo.modal, after: lo.after, syncNoop: lo.syncNoop }));
+    ok('link-only: ✕ hides the card and the hidden chip restores it', lo.gone && /^1 hidden — show$/.test(lo.chipText || '') && lo.back, JSON.stringify({ gone: lo.gone, chipText: lo.chipText, back: lo.back }));
   } finally {
     await page.close();
   }

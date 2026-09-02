@@ -99,6 +99,26 @@ export async function run({ browser, ok }) {
     ok('openrouter: activity denied degrades to credits-only, no error state',
       orNoActivity.err === null && !orNoActivity.hasSrc && /credits/i.test(orNoActivity.statusText),
       JSON.stringify(orNoActivity));
+    // 4b T1: link-only entries never fetch, never get connector state, never prompt (refreshAll / sync / disconnect are no-ops)
+    const lo = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      const ids = ['amazonq', 'replicate', 'windsurf'];
+      const missing = ids.filter(id => !connectorById(id));
+      if (missing.length) return { missing };
+      const origFetch = window.fetch, origConfirm = window.confirm;
+      let fetches = 0, confirms = 0;
+      window.fetch = async () => { fetches++; throw new TypeError('Failed to fetch'); };
+      window.confirm = () => { confirms++; return true; };
+      try {
+        await App.refreshAll();
+        const sync = ids.map(id => App.syncConnector(id));
+        for (const id of ids) App.disconnectConnector(id);
+        return { fetches, confirms, syncUndefined: sync.every(r => r === undefined), noState: ids.every(id => Store.connectors[id] === undefined),
+          statuses: ids.map(id => Store.connectorStatus(connectorById(id))), texts: ids.map(id => document.getElementById(id + '-status').textContent) };
+      } finally { window.fetch = origFetch; window.confirm = origConfirm; }
+    });
+    ok('link-only: refreshAll / syncConnector / disconnectConnector never fetch, never create connector state, never prompt; status stays off and the card says "No data path"',
+      !lo.missing && lo.fetches === 0 && lo.confirms === 0 && lo.syncUndefined && lo.noState && lo.statuses.every(s => s === 'off') && lo.texts.every(t => /no data path/i.test(t)), JSON.stringify(lo));
   } finally {
     await page.close();
   }

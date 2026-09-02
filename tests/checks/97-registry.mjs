@@ -18,6 +18,17 @@ export async function run({ browser, ok }) {
       JSON.stringify(reg.order));
     ok('registry: every connector statusEl resolves to a live element', reg.everyHasCard, '');
 
+    // 4b T1: link-only entries — honest cards with no data path (reason + vendor links; quality none; never connected)
+    const lo = await page.evaluate(() => {
+      const L = CONNECTORS.filter(c => c.kind === 'link-only');
+      return { ids: L.map(c => c.id), platforms: L.map(c => c.platform),
+        every: L.every(c => c.quality === 'none' && typeof c.reason === 'string' && c.reason.length > 20 && !!(c.links && c.links.usage)
+          && Array.isArray(c.srcIds) && c.srcIds.length === 0 && c.statusEl === c.id + '-status' && !!document.getElementById(c.statusEl)
+          && /^no data/i.test(c.qualityNote || '') && !!c.category) };
+    });
+    ok('registry: link-only entries (amazonq, replicate, windsurf) carry quality none, a reason, a vendor usage link, no srcIds, "No data" copy first, and a live status element',
+      ['amazonq', 'replicate', 'windsurf'].every(id => lo.ids.includes(id)) && lo.every &&
+      ['Amazon Q / Kiro', 'Replicate', 'Windsurf'].every(p => lo.platforms.includes(p)), JSON.stringify(lo));
     // subtitle + clear-data must iterate the registry, not hardcoded lists
     const wiring = await page.evaluate(() => {
       localStorage.removeItem('aiusage:data');
