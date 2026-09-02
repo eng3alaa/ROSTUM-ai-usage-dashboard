@@ -245,6 +245,71 @@ export async function generate() {
     totals: { prompt_tokens: 1720, completion_tokens: 415, total_tokens: 2135, request_count: 7 },
     viewer: { user_id: 'local', is_admin: true },
   }, null, 1));
+
+  // T5a — Prometheus text exposition sample for parsePrometheus. Expected: 5 metrics (HELP/TYPE/comment + 'bad line without value' dropped):
+  //   [0] vllm:prompt_tokens_total model_name=meta-llama/Llama-3.1-8B-Instruct value 1.5e+06 → 1500000
+  //   [1] vllm:prompt_tokens_total model_name='quoted "name" \ back' (escapes \" and \\ unescaped) value 42, trailing timestamp ignored
+  //   [2] plain_gauge 7 (no labels) · [3] empty_labels{} 3 (labels = {}) · [4] weird_value{x="y"} +Inf → Infinity
+  w('wave2/prometheus-sample.txt', [
+    '# HELP vllm:prompt_tokens_total Number of prefill tokens processed.',
+    '# TYPE vllm:prompt_tokens_total counter',
+    'vllm:prompt_tokens_total{model_name="meta-llama/Llama-3.1-8B-Instruct"} 1.5e+06',
+    'vllm:prompt_tokens_total{model_name="quoted \\"name\\" \\\\ back"} 42 1723456789000',
+    'plain_gauge 7',
+    'empty_labels{} 3',
+    'weird_value{x="y"} +Inf',
+    'bad line without value',
+    '# a trailing comment',
+    '',
+  ].join('\n'));
+
+  // T5b — vLLM /metrics snapshots. L = Llama counters {in, out, cr, stop, len} (request_success_total split by finished_reason), Q = Qwen {in, out}.
+  //   A (baseline):  L 1000/200/100, stop 3, len 1 · Q 50/10            → first tick seeds the baseline, nothing counted
+  //   B (grew):      L 1600/350/130, stop 5, len 1 · Q 50/10            → deltas L in=600 out=150 cr=30 msgs=(5+1)-(3+1)=2 · Q all 0 (no Qwen row)
+  //   C (restart):   L 120/30/0,     stop 1, len 0 · Q 5/1              → every counter LOWER → nothing added, baseline = C
+  //   D (after):     L 220/60/0,     stop 2, len 0 · Q 5/1              → deltas L in=100 out=30 cr=0 msgs=1 · Q 0
+  //   Running totals after D: in=700 out=180 cr=30 msgs=3, one model (Llama), platform vLLM
+  const LLAMA = 'meta-llama/Llama-3.1-8B-Instruct', QWEN = 'Qwen/Qwen3-8B';
+  const vllmMetrics = (L, Q) => [
+    '# HELP vllm:prompt_tokens_total Number of prefill tokens processed.',
+    '# TYPE vllm:prompt_tokens_total counter',
+    `vllm:prompt_tokens_total{model_name="${LLAMA}"} ${L.in}`,
+    `vllm:prompt_tokens_total{model_name="${QWEN}"} ${Q.in}`,
+    '# HELP vllm:generation_tokens_total Number of generation tokens processed.',
+    '# TYPE vllm:generation_tokens_total counter',
+    `vllm:generation_tokens_total{model_name="${LLAMA}"} ${L.out}`,
+    `vllm:generation_tokens_total{model_name="${QWEN}"} ${Q.out}`,
+    '# HELP vllm:prompt_tokens_cached_total Number of prefill tokens served from the prefix cache.',
+    '# TYPE vllm:prompt_tokens_cached_total counter',
+    `vllm:prompt_tokens_cached_total{model_name="${LLAMA}"} ${L.cr}`,
+    '# HELP vllm:request_success_total Count of successfully processed requests.',
+    '# TYPE vllm:request_success_total counter',
+    `vllm:request_success_total{finished_reason="stop",model_name="${LLAMA}"} ${L.stop}`,
+    `vllm:request_success_total{finished_reason="length",model_name="${LLAMA}"} ${L.len}`,
+    '# HELP vllm:num_requests_running Number of requests currently running on GPU.',
+    '# TYPE vllm:num_requests_running gauge',
+    `vllm:num_requests_running{model_name="${LLAMA}"} 0.0`,
+    '',
+  ].join('\n');
+  w('wave2/vllm-metrics-a.txt', vllmMetrics({ in: '1000.0', out: '200.0', cr: '100.0', stop: '3.0', len: '1.0' }, { in: '50.0', out: '10.0' }));
+  w('wave2/vllm-metrics-b.txt', vllmMetrics({ in: '1.6e+03', out: '350.0', cr: '130.0', stop: '5.0', len: '1.0' }, { in: '50.0', out: '10.0' }));   // exponent form, as real exposition prints large counters
+  w('wave2/vllm-metrics-c.txt', vllmMetrics({ in: '120.0', out: '30.0', cr: '0.0', stop: '1.0', len: '0.0' }, { in: '5.0', out: '1.0' }));
+  w('wave2/vllm-metrics-d.txt', vllmMetrics({ in: '220.0', out: '60.0', cr: '0.0', stop: '2.0', len: '0.0' }, { in: '5.0', out: '1.0' }));
+
+  // T5c — llama-server /metrics (--metrics on): no model label, no request counter. Expected counters: in=4321 out=876 under the /props model_path basename 'Qwen3-8B-Q4_K_M'
+  w('wave2/llamacpp-metrics.txt', [
+    '# HELP llamacpp:prompt_tokens_total Number of prompt tokens processed.',
+    '# TYPE llamacpp:prompt_tokens_total counter',
+    'llamacpp:prompt_tokens_total 4321',
+    '# HELP llamacpp:tokens_predicted_total Number of generation tokens processed.',
+    '# TYPE llamacpp:tokens_predicted_total counter',
+    'llamacpp:tokens_predicted_total 876',
+    '# HELP llamacpp:requests_processing Number of requests processing.',
+    '# TYPE llamacpp:requests_processing gauge',
+    'llamacpp:requests_processing 0',
+    'llamacpp:kv_cache_usage_ratio 0.0123',
+    '',
+  ].join('\n'));
 }
 
 if (process.argv[1] === import.meta.filename) await generate();
