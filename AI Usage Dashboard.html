@@ -661,13 +661,14 @@ progress { width: 160px; height: 8px; }
         <b>ChatGPT</b> data export (<code>conversations.json</code>; tokens estimated from text) · <b>Claude.ai</b> data export (<code>conversations.json</code>; estimated) ·
         <b>Gemini</b> Google Takeout (<code>My Activity/Gemini Apps/MyActivity.json</code> — pick JSON format in Takeout; estimated from text, one record per prompt) ·
         <b>Cursor</b> usage-events CSV (cursor.com/dashboard → Usage → Export CSV; exact tokens, cost only if the column is present) ·
+        <b>DeepSeek API</b> monthly usage ZIP (platform.deepseek.com/usage → Export monthly data; amount-*.csv + cost-*.csv, exact tokens + billed amounts; months merge by day/model, so drop each month as it comes) ·
         API responses saved by the PowerShell commands · or a generic <b>CSV</b>
         (<code>date, platform, model, input_tokens, output_tokens[, cache_read_tokens, cache_write_tokens, cost_usd]</code>) — handy for the Gemini API, which has no usage endpoint.
         Consumer chat apps expose no usage API a local page can call — their usage comes from your data export.
       </div>
       <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Import files">
         Drop files here, or click to choose
-        <input type="file" id="import-files" multiple hidden accept=".json,.csv,.jsonl">
+        <input type="file" id="import-files" multiple hidden accept=".json,.csv,.jsonl,.zip">
       </div>
       <div class="row" style="margin-top:8px">
         <label class="inline">Chat exports priced as if run on
@@ -1356,6 +1357,14 @@ const CONNECTORS = [
     qualityNote: 'Exact tokens and billed dollars: any regular Fireworks key plus your account id reads GET /v1/accounts/{account}/billingUsage (daily prompt / completion tokens per model, serverless and dedicated deployments, fetched in 31-day windows) and GET …/billing/summary?granularity=DAILY (rated USD per day). Token counts arrive as strings and are daily only (no hour); the API caches for a few minutes. Request counts are not part of the export, so the messages metric stays 0 for Fireworks. Find the account id in app.fireworks.ai (Settings, or the first path segment of the console URL); the key is kept in this browser only if you tick Remember.',
     paths: ['GET https://api.fireworks.ai/v1/accounts/{account}/billingUsage?usageType=SERVERLESS|DEDICATED_DEPLOYMENT&groupBy=model_name (≤31-day windows)', 'GET https://api.fireworks.ai/v1/accounts/{account}/billing/summary?granularity=DAILY', 'CLI equivalent: firectl billing get-usage / export-metrics'],
     links: { get: 'https://app.fireworks.ai/settings/users/api-keys', docs: 'https://docs.fireworks.ai/accounts/exporting-usage-and-costs', usage: 'https://app.fireworks.ai/account/billing' } },
+  // ---- Wave 2 API vendor: DeepSeek (key driver validate + monthly usage ZIP through Imports) ----
+  { id: 'deepseek', platform: 'DeepSeek API', name: 'DeepSeek API', category: 'api', kind: 'api-key',
+    statusEl: 'deepseek-status', brand: '#4d6bfe', mark: 'Ds', srcIds: ['deepseek', 'deepseek-usage-zip'], keyLS: 'key:deepseek',
+    fetch: 'fetchDeepSeekBalance', keyLabel: 'API key', keyHint: 'sk-… from platform.deepseek.com/api_keys',
+    quality: 'exact',
+    qualityNote: 'Exact tokens come only from the monthly usage export: platform.deepseek.com/usage → pick a month → Export monthly data → a ZIP with amount-*.csv (per day / model / API key: cache-miss input, cache-hit input, output tokens, request count) and cost-*.csv (billed amount, USD or CNY) — drop the ZIP, or both CSVs, on Imports; months merge by day/model, so each export adds to the history instead of replacing it. The column layout is documented only by community parsers, so the importer sniffs the headers (the long type/amount rows and a wide per-column shape) and says what it found. The API key itself is validate-only: GET /user/balance (CORS-open) returns the remaining balance (string numbers; the currency may be CNY) and no usage history. Cache-hit tokens are priced at the cache-read rate; DeepSeek prices are August 2026 list prices.',
+    paths: ['platform.deepseek.com/usage → Export monthly data → amount-YYYY-MM.csv + cost-YYYY-MM.csv (ZIP)', 'GET https://api.deepseek.com/user/balance (validate only)'],
+    links: { get: 'https://platform.deepseek.com/api_keys', docs: 'https://api-docs.deepseek.com/api/get-user-balance/', usage: 'https://platform.deepseek.com/usage' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv'] },
 ];
@@ -2414,6 +2423,92 @@ function parseCursorUsageCSV(text) {
   return { rows: agg.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })), meta: { rows: n, rejected, unreconciled, splitInput: iInCw >= 0 && iInNoCw >= 0, hasTotal: iTotal >= 0 } };
 }
 
+/* DeepSeek API monthly usage export (platform.deepseek.com/usage → Export monthly data → ZIP: amount-YYYY-MM.csv + cost-YYYY-MM.csv).
+ * The layout is documented only by community parsers (github.com/shajanjp/deepseek-usage, deepseek-usage.xyz) and has changed once
+ * (utc_date YYYY-MM-DD → YYYYMMDD), so both files are sniffed by header. Two shapes are accepted:
+ *   long (seen in the wild): utc_date, model, api_key_name, type, [price,] amount — type ∈ input_cache_miss_tokens | input_cache_hit_tokens |
+ *        output_tokens | request_count; one row per (day, model, key, type). miss → in, hit → cr, output → out, request_count → msgs.
+ *        A price column is read as a PER-UNIT price (price × amount; the community reading) and only used when no cost CSV is present.
+ *   wide: date, model, input/prompt…, cache-hit…, output/completion…, [requests]. ASSUMPTION: the input column is the TOTAL prompt
+ *        tokens and cache-hit a subset → uncached in = input − hit (clamped at 0); a …miss… column, when present, is uncached directly.
+ * `head` = header cells normalized to lowercase_with_underscores. Days are UTC days (the export's own granularity). */
+function isDeepSeekAmountCSV(head, fileName) {
+  const has = (re) => head.some(h => re.test(h));
+  if (!has(/date|^day$/) || !has(/^model/)) return false;
+  if (has(/^type$/) && has(/^amount$/)) return true;                                   // long shape
+  return has(/input|prompt/) && has(/output|completion/) && (has(/cache.*hit|hit/) || /(^|\/)amount-[^/]*\.csv$/i.test(String(fileName || '')));   // wide: a cache-hit column (or the export's file name) keeps generic CSVs out
+}
+function isDeepSeekCostCSV(head, fileName) {
+  const has = (re) => head.some(h => re.test(h));
+  if (/(^|\/)cost-[^/]*\.csv$/i.test(String(fileName || '')) && has(/date/)) return true;
+  return has(/date|^day$/) && has(/^model/) && has(/cost|spend|bill|^total/) && !has(/token|platform|^type$/);
+}
+const deepSeekDay = (raw) => { const s = String(raw || '').trim(); if (/^\d{8}$/.test(s)) return s.slice(0, 4) + '-' + s.slice(4, 6) + '-' + s.slice(6, 8); if (RE_DATEONLY.test(s)) return s; return dayKeyUTC(s); };
+function parseDeepSeekAmountCSV(text) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) throw new Error('Empty CSV');
+  const head = rows[0].map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+  const find = (re) => head.findIndex(h => re.test(h));
+  const iDate = find(/date|^day$/), iModel = find(/^model/), iType = find(/^type$/), iAmount = find(/^amount$/), iPrice = find(/^price/),
+        iMiss = find(/miss/), iIn = iMiss >= 0 ? iMiss : find(/input|prompt/), iHit = find(/cache.*hit|hit/), iOut = find(/output|completion/), iReq = find(/request|count|calls/);
+  if (iDate < 0 || iModel < 0) throw new Error('Not a DeepSeek usage CSV (needs date + model columns)');
+  const long = iType >= 0 && iAmount >= 0;
+  const agg = makeAgg(); const billed = new Map(); let n = 0, rejected = 0;
+  const num = (c, i) => { if (i < 0) return 0; const raw = String(c[i] ?? '').trim(); if (!raw) return 0; const v = Number(raw.replace(/[,\s]/g, '')); if (Number.isFinite(v) && v >= 0) return v; rejected++; return 0; };
+  for (let r = 1; r < rows.length; r++) {
+    const c = rows[r]; const d = deepSeekDay(c[iDate]); if (!d) { rejected++; continue; }
+    const model = String(c[iModel] || '').trim() || 'deepseek';
+    if (long) {
+      const type = String(c[iType] || '').trim().toLowerCase(), amt = num(c, iAmount), t = { in: 0, cr: 0, out: 0, msgs: 0 };
+      if (/miss/.test(type)) t.in = amt; else if (/hit/.test(type)) t.cr = amt; else if (/output|completion/.test(type)) t.out = amt; else if (/request|count/.test(type)) t.msgs = amt; else if (/input|prompt/.test(type)) t.in = amt;
+      else continue;   // an unknown type (a future reasoning_tokens row?) is skipped, not an error
+      agg.add(d, 'DeepSeek API', model, t);
+      if (iPrice >= 0 && !t.msgs) { const p = Number(String(c[iPrice] ?? '').trim()); if (Number.isFinite(p) && p >= 0 && amt) billed.set(d, (billed.get(d) || 0) + p * amt); }
+      n++;
+    } else {
+      const hit = num(c, iHit), inRaw = num(c, iIn);
+      agg.add(d, 'DeepSeek API', model, { in: iMiss >= 0 ? inRaw : Math.max(0, inRaw - hit), cr: hit, out: num(c, iOut), msgs: iReq >= 0 ? num(c, iReq) : 1 });
+      n++;
+    }
+  }
+  return { rows: agg.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })).sort((a, b) => a.d < b.d ? -1 : 1), meta: { rows: n, rejected, hasPrice: iPrice >= 0, shape: long ? 'long' : 'wide' } };
+}
+function parseDeepSeekCostCSV(text) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) throw new Error('Empty CSV');
+  const head = rows[0].map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+  const find = (re) => head.findIndex(h => re.test(h));
+  const iDate = find(/date|^day$/), iCost = find(/cost|spend|bill|^total/), iCur = find(/currency/);
+  if (iDate < 0 || iCost < 0) throw new Error('Not a DeepSeek cost CSV (needs date + cost columns)');
+  const billed = new Map(); let n = 0, rejected = 0, currency = '';
+  for (let r = 1; r < rows.length; r++) {
+    const c = rows[r]; const d = deepSeekDay(c[iDate]); if (!d) { rejected++; continue; }
+    const raw = String(c[iCost] ?? '').trim(); if (raw === '') continue;
+    const v = Number(raw.replace(/[,\s$¥]/g, '')); if (!Number.isFinite(v)) { rejected++; continue; }   // money: negatives allowed (credits)
+    billed.set(d, (billed.get(d) || 0) + v); n++;
+    if (iCur >= 0 && !currency && c[iCur]) currency = String(c[iCur]).trim();
+  }
+  return { billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })).sort((a, b) => a.d < b.d ? -1 : 1), meta: { rows: n, rejected, currency } };
+}
+/** The whole monthly ZIP (entries from readZipEntries): every .csv entry is classified by name or header; rows from all amount
+ *  files are re-aggregated (two amount files may share a day/model); billed = the cost CSVs (the vendor's own figure) when present,
+ *  else price × amount from the amount file, else none. meta.files === 0 ⇒ "this is not a DeepSeek usage ZIP". */
+async function parseDeepSeekUsageZip(entries) {
+  const norm = (cells) => cells.map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+  const rowsAll = [], priceBilled = new Map(), costBilled = new Map(); let n = 0, rejected = 0, amountFiles = 0, costFiles = 0, currency = '';
+  for (const e of entries) {
+    if (!/\.csv$/i.test(e.name) || e.size > 50 * 1024 * 1024) continue;
+    const text = await e.text();
+    const head = norm(parseCSV(text.split(/\r?\n/, 1)[0])[0] || []);
+    if (isDeepSeekAmountCSV(head, e.name)) { const r = parseDeepSeekAmountCSV(text); rowsAll.push(...r.rows); for (const b of r.billed) priceBilled.set(b.d, (priceBilled.get(b.d) || 0) + b.amount); n += r.meta.rows; rejected += r.meta.rejected; amountFiles++; }
+    else if (isDeepSeekCostCSV(head, e.name)) { const r = parseDeepSeekCostCSV(text); for (const b of r.billed) costBilled.set(b.d, (costBilled.get(b.d) || 0) + b.amount); rejected += r.meta.rejected; costFiles++; if (r.meta.currency && !currency) currency = r.meta.currency; }
+  }
+  const agg = makeAgg(); for (const r of rowsAll) agg.add(r.d, r.platform, r.model, r);
+  const billedMap = costFiles ? costBilled : priceBilled;
+  return { rows: agg.rows(), billed: [...billedMap.entries()].map(([d, amount]) => ({ d, amount })).sort((a, b) => a.d < b.d ? -1 : 1),
+    meta: { rows: n, rejected, files: amountFiles + costFiles, amountFiles, costFiles, currency, billedFrom: costFiles ? 'cost CSV' : (priceBilled.size ? 'price column' : 'none') } };
+}
+
 /* =================================================================
  * 4) Provider API payloads (fetched directly or imported as JSON files)
  * ================================================================= */
@@ -2776,6 +2871,19 @@ async function fetchFireworks(key, fields, opts) {
     meta: { days, account, windows: windows.length } };
 }
 
+/** DeepSeek API — GET /user/balance: validate + remaining balance only (no usage history exists on the API; history comes
+ *  from the monthly usage ZIP through Imports). Numbers are strings; the currency may be CNY — both are shown as reported. */
+async function fetchDeepSeekBalance(key, fields, opts) {
+  const j = await fetchJSON('https://api.deepseek.com/user/balance', { 'Authorization': 'Bearer ' + key, 'Accept': 'application/json' });
+  const infos = Array.isArray(j && j.balance_infos) ? j.balance_infos : [];
+  const money = (v) => { const n = Number(v); return Number.isFinite(n) ? n.toFixed(2) : String(v == null ? '?' : v); };
+  const label = infos.length ? `balance ${money(infos[0].total_balance)} ${infos[0].currency || ''}`.trim() : (j && j.is_available === false ? 'no balance' : 'validated');
+  const detail = (infos.length ? infos.map(b => `${b.currency || '?'}: total ${money(b.total_balance)} (granted ${money(b.granted_balance)}, topped up ${money(b.topped_up_balance)})`).join(' · ') : 'key accepted')
+    + (j && j.is_available === false ? ' · account not available for API calls (balance exhausted?)' : '')
+    + ' · no usage history on this endpoint — drop the monthly usage ZIP (platform.deepseek.com/usage → Export monthly data) on Imports for exact tokens and billed amounts';
+  return { label, detail };
+}
+
 async function fetchCopilotAll(token) {
   const h = { 'Authorization': 'Bearer ' + token, 'X-GitHub-Api-Version': '2022-11-28', 'Accept': 'application/vnd.github+json' };
   const user = await fetchJSON('https://api.github.com/user', h);
@@ -2922,6 +3030,52 @@ do {
 } while ($r.has_more)
 @{ data = $all } | ConvertTo-Json -Depth 12 | Out-File "$env:USERPROFILE\\Desktop\\openai-usage.json" -Encoding utf8
 Write-Host "Saved to Desktop\\openai-usage.json"`;
+}
+
+/* ---------- ZIP reader (no library): DeepSeek monthly usage export, chat-app export archives ---------- */
+/** Minimal ZIP reader. Reads the tail (EOCD + central directory) up front and each entry's bytes lazily from File.slice.
+ *  Methods 0 (stored) and 8 (deflate-raw via DecompressionStream); anything else, encrypted entries (flag bit 0) and ZIP64
+ *  (0xFFFFFFFF sizes/offsets) throw Error('ZIP entry uses an unsupported method — unzip it first'). Sizes come from the
+ *  central directory, so entries written with a data descriptor (flag bit 3) read fine. Names are decoded as UTF-8.
+ *  → [{ name, size, method, bytes(): Promise<Uint8Array>, text(): Promise<string> }] (directory entries are skipped). */
+async function readZipEntries(file) {
+  const size = file.size;
+  if (size < 22) throw new Error('Not a ZIP file (too small)');
+  const tailLen = Math.min(size, 65536 + 22);   // EOCD = 22 bytes + a comment of at most 64 KB
+  const tail = new Uint8Array(await file.slice(size - tailLen, size).arrayBuffer());
+  const dv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+  let eocd = -1;
+  for (let i = tail.length - 22; i >= 0; i--) { if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; } }
+  if (eocd < 0) throw new Error('Not a ZIP file (no end-of-central-directory record)');
+  const count = dv.getUint16(eocd + 10, true), cdSize = dv.getUint32(eocd + 12, true), cdOff = dv.getUint32(eocd + 16, true);
+  if (count === 0xFFFF || cdSize === 0xFFFFFFFF || cdOff === 0xFFFFFFFF) throw new Error('ZIP entry uses an unsupported method — unzip it first');   // ZIP64
+  const cd = new Uint8Array(await file.slice(cdOff, cdOff + cdSize).arrayBuffer());
+  const cdv = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
+  const dec = new TextDecoder('utf-8');
+  const entries = [];
+  let p = 0;
+  for (let i = 0; i < count && p + 46 <= cd.length; i++) {
+    if (cdv.getUint32(p, true) !== 0x02014b50) throw new Error('Not a ZIP file (bad central directory)');
+    const flags = cdv.getUint16(p + 8, true), method = cdv.getUint16(p + 10, true);
+    const csize = cdv.getUint32(p + 20, true), usize = cdv.getUint32(p + 24, true);
+    const n = cdv.getUint16(p + 28, true), m = cdv.getUint16(p + 30, true), k = cdv.getUint16(p + 32, true);
+    const lho = cdv.getUint32(p + 42, true);
+    const name = dec.decode(cd.subarray(p + 46, p + 46 + n));
+    p += 46 + n + m + k;
+    if (name.endsWith('/')) continue;   // directory entry
+    const unsupported = (flags & 1) !== 0 || csize === 0xFFFFFFFF || usize === 0xFFFFFFFF || (method !== 0 && method !== 8);
+    const bytes = async () => {
+      if (unsupported) throw new Error('ZIP entry uses an unsupported method — unzip it first');
+      const lh = new DataView(await file.slice(lho, lho + 30).arrayBuffer());
+      if (lh.getUint32(0, true) !== 0x04034b50) throw new Error('Not a ZIP file (bad local header)');
+      const start = lho + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);   // local name + extra lengths may differ from the central ones
+      const blob = file.slice(start, start + csize);
+      if (method === 0) return new Uint8Array(await blob.arrayBuffer());
+      return new Uint8Array(await new Response(blob.stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+    };
+    entries.push({ name, size: usize, method, bytes, text: async () => new TextDecoder('utf-8').decode(await bytes()) });
+  }
+  return entries;
 }
 
 /* ---------- import router (drop zone) ---------- */
@@ -4671,18 +4825,115 @@ const App = {
     }
   },
 
+  /** One parsed JSON document → its import branch. `f` = { name, size } (a File, or a ZIP-entry wrapper — name then reads
+   *  "archive.zip/entry.json"). Pushes its own note. Returns the number of imports (0 = recognized but nothing landed, e.g. an
+   *  all-empty report) or null when the shape is not recognized (the caller words that: loose file vs. ZIP entry). */
+  async _importJson(obj, f, notes) {
+    const kind = sniffJSON(obj, f.name);
+    let imported = 0;
+    if (kind === 'chatgpt-export' || kind === 'chatgpt-export-wrapped') {
+      const conv = kind === 'chatgpt-export' ? obj : obj.conversations;
+      // big exports parse off the main thread so the tab doesn't freeze; small ones stay
+      // inline — worker startup (Blob + postMessage round trip) isn't worth it for them.
+      const res = f.size > 8 * 1024 * 1024 ? await parseInWorker('chatgpt', JSON.stringify(conv)) : parseChatGPTExport(conv);
+      Store.setSource('chatgpt', res.rows, res.meta);
+      notes.push(`${f.name}: ChatGPT export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens)`);
+      imported++;
+    } else if (kind === 'claudeai-export') {
+      const assumedModel = $('assumed-claude-model').value;
+      const res = f.size > 8 * 1024 * 1024 ? await parseInWorker('claudeai', JSON.stringify(obj), assumedModel) : parseClaudeAiExport(obj, assumedModel);
+      Store.setSource('claudeai', res.rows, res.meta);
+      notes.push(`${f.name}: Claude.ai export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens)`);
+      imported++;
+    } else if (kind === 'gemini-takeout') {
+      const res = parseGeminiTakeout(obj);
+      Store.setSource('gemini-takeout', res.rows, res.meta);
+      notes.push(`${f.name}: Gemini Takeout — ${fmtInt(res.meta.msgs)} prompts (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} non-Gemini/undated record(s) skipped` : ''})`);
+      imported++;
+    } else if (kind === 'anthropic-usage') {
+      const res = parseAnthropicUsage(obj);
+      this._gen.anthropic++;   // an import supersedes any in-flight fetch — it must not overwrite this
+      Store.setSource('anthropic', res.rows, {});
+      notes.push(`${f.name}: Anthropic usage report — ${res.rows.length} rows`);
+      imported++;
+    } else if (kind === 'anthropic-cost') {
+      this._gen.anthropic++;   // an import supersedes any in-flight fetch — it must not overwrite this
+      Store.setBilled('anthropic', parseAnthropicCost(obj));
+      notes.push(`${f.name}: Anthropic billed costs imported`);
+      imported++;
+    } else if (kind === 'openai-usage') {
+      const res = parseOpenAIUsage(obj);
+      this._gen.openai++;   // an import supersedes any in-flight fetch — it must not overwrite this
+      Store.setSource('openai', res.rows, {});
+      notes.push(`${f.name}: OpenAI usage report — ${res.rows.length} rows`);
+      imported++;
+    } else if (kind === 'openai-cost') {
+      this._gen.openai++;   // an import supersedes any in-flight fetch — it must not overwrite this
+      Store.setBilled('openai', parseOpenAICost(obj));
+      notes.push(`${f.name}: OpenAI billed costs imported`);
+      imported++;
+    } else if (kind === 'empty-report') {
+      notes.push(`${f.name}: recognized usage/cost report, but every day in it is empty — nothing to import`);
+    } else {
+      return null;
+    }
+    return imported;
+  },
+
   async handleImportFiles(files) {
     const status = $('import-status');
     clear(status);
     const notes = [];
     const jsonlFiles = [];
     let imported = 0;   // count of successful import branches — only these justify a connected 'imports' card
+    // DeepSeek API usage export (monthly ZIP, or its loose amount-/cost- CSVs): every month is a separate export, so rows MERGE by
+    // (day, model) and billed by day — importing August never deletes July. Rows live under the deepseek connector's srcId
+    // 'deepseek-usage-zip' (platform 'DeepSeek API'), not under Imports; the deepseek card reads connected through the export alone.
+    const landDeepSeek = (res, label) => {
+      const keyOf = (r) => JSON.stringify([r.d, r.model]);
+      const prev = Store.sources['deepseek-usage-zip'] || { rows: [], meta: {} };
+      if (res.rows.length) {
+        const merged = new Map(prev.rows.map(r => [keyOf(r), r]));
+        for (const r of res.rows) merged.set(keyOf(r), r);
+        Store.setSource('deepseek-usage-zip', [...merged.values()], { buckets: merged.size, rows: ((prev.meta || {}).rows || 0) + res.meta.rows, rejected: res.meta.rejected, files: ((prev.meta || {}).files || 0) + res.meta.files, currency: res.meta.currency || (prev.meta || {}).currency || '' });
+      }
+      if (res.billed.length) {
+        const bm = new Map(Store.billedRows('deepseek-usage-zip').map(b => [b.d, b]));
+        for (const b of res.billed) bm.set(b.d, b);   // same-day re-import replaces
+        Store.setBilled('deepseek-usage-zip', [...bm.values()].sort((a, b2) => a.d < b2.d ? -1 : 1));
+      }
+      if (!Store.connectors.deepseek) Store.setConnector('deepseek', { label: 'usage export (no key)', lastSync: Date.now(), err: null });
+      const what = res.rows.length ? `${fmtInt(res.meta.rows)} rows (exact tokens; months merge by day/model)` : 'no token rows';
+      const money = res.billed.length ? ` + billed amounts from the ${res.meta.billedFrom || 'cost CSV'}${res.meta.currency ? ' in ' + res.meta.currency + (res.meta.currency !== 'USD' ? ' (shown as-is in the $ fields)' : '') : ''}`
+        : (res.rows.length ? ' — no cost file: drop the month\'s cost-*.csv too for billed amounts' : '');
+      notes.push(`${label}: DeepSeek API usage export — ${what}${money}` + (res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric, negative or undated)` : ''));
+      imported++;
+    };
     for (const f of files) {
       try {
         status.appendChild(el('div', { text: `Parsing ${f.name}…` }));
         if (f.size > 200 * 1024 * 1024) status.appendChild(el('div', { text: `${f.name} is ${Math.round(f.size / 1048576)} MB — this may take a minute; the tab may briefly freeze.` }));
         await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));   // paint before blocking parse
         if (f.name.endsWith('.jsonl')) { jsonlFiles.push({ path: f.name, file: f }); continue; }
+        if (/\.zip$/i.test(f.name)) {
+          // ZIP archives, read in-page (no library): DeepSeek's monthly usage export (amount-*.csv + cost-*.csv) and chat-app exports
+          // as downloaded (ChatGPT / Claude.ai conversations.json, Perplexity thread JSON, a DeepSeek chat archive). Entries we do not
+          // know (user.json, chat.html, …) are skipped quietly; an archive with nothing we know gets one honest note.
+          const entries = await readZipEntries(f);
+          let handled = 0;
+          const ds = await parseDeepSeekUsageZip(entries);
+          if (ds.meta.files) { landDeepSeek(ds, `${f.name} (${ds.meta.amountFiles} amount + ${ds.meta.costFiles} cost CSV)`); handled++; }
+          for (const e of entries) {
+            if (!/\.json$/i.test(e.name) || e.size > 200 * 1024 * 1024) continue;
+            if (/(^|\/)shared_conversations\.json$/i.test(e.name)) continue;   // ChatGPT's shared-links file has conversations.json's shape and would replace it
+            let obj; try { obj = JSON.parse(await e.text()); } catch (err) { notes.push(`${f.name}/${e.name}: failed — ${err.message || err}`); continue; }
+            const r = await this._importJson(obj, { name: f.name + '/' + e.name, size: e.size }, notes);
+            if (r === null) continue;
+            handled++; imported += r;
+          }
+          if (!handled) notes.push(`${f.name}: ZIP — no recognized files (${entries.length} ${entries.length === 1 ? 'entry' : 'entries'})`);
+          continue;
+        }
         if (f.name.endsWith('.csv')) {
           const csvText = await f.text();
           const headCells = (parseCSV(csvText.split(/\r?\n/, 1)[0])[0] || []).map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
@@ -4695,6 +4946,16 @@ const App = {
               + (res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric or negative)` : '')
               + (res.meta.unreconciled ? ` — ${res.meta.unreconciled} row${res.meta.unreconciled === 1 ? '' : 's'} did not reconcile with Total Tokens (additive reading kept)` : ''));
             imported++;
+            continue;
+          }
+          if (isDeepSeekAmountCSV(headCells, f.name)) {
+            const r = parseDeepSeekAmountCSV(csvText);
+            landDeepSeek({ rows: r.rows, billed: r.billed, meta: { ...r.meta, files: 1, billedFrom: r.billed.length ? 'price column' : 'none' } }, f.name);
+            continue;
+          }
+          if (isDeepSeekCostCSV(headCells, f.name)) {
+            const r = parseDeepSeekCostCSV(csvText);
+            landDeepSeek({ rows: [], billed: r.billed, meta: { ...r.meta, files: 1, billedFrom: 'cost CSV' } }, f.name);
             continue;
           }
           const res = parseGenericCSV(csvText);
@@ -4713,54 +4974,8 @@ const App = {
           imported++;
           continue;
         }
-        const obj = JSON.parse(await f.text());
-        const kind = sniffJSON(obj, f.name);
-        if (kind === 'chatgpt-export' || kind === 'chatgpt-export-wrapped') {
-          const conv = kind === 'chatgpt-export' ? obj : obj.conversations;
-          // big exports parse off the main thread so the tab doesn't freeze; small ones stay
-          // inline — worker startup (Blob + postMessage round trip) isn't worth it for them.
-          const res = f.size > 8 * 1024 * 1024 ? await parseInWorker('chatgpt', JSON.stringify(conv)) : parseChatGPTExport(conv);
-          Store.setSource('chatgpt', res.rows, res.meta);
-          notes.push(`${f.name}: ChatGPT export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens)`);
-          imported++;
-        } else if (kind === 'claudeai-export') {
-          const assumedModel = $('assumed-claude-model').value;
-          const res = f.size > 8 * 1024 * 1024 ? await parseInWorker('claudeai', JSON.stringify(obj), assumedModel) : parseClaudeAiExport(obj, assumedModel);
-          Store.setSource('claudeai', res.rows, res.meta);
-          notes.push(`${f.name}: Claude.ai export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens)`);
-          imported++;
-        } else if (kind === 'gemini-takeout') {
-          const res = parseGeminiTakeout(obj);
-          Store.setSource('gemini-takeout', res.rows, res.meta);
-          notes.push(`${f.name}: Gemini Takeout — ${fmtInt(res.meta.msgs)} prompts (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} non-Gemini/undated record(s) skipped` : ''})`);
-          imported++;
-        } else if (kind === 'anthropic-usage') {
-          const res = parseAnthropicUsage(obj);
-          this._gen.anthropic++;   // an import supersedes any in-flight fetch — it must not overwrite this
-          Store.setSource('anthropic', res.rows, {});
-          notes.push(`${f.name}: Anthropic usage report — ${res.rows.length} rows`);
-          imported++;
-        } else if (kind === 'anthropic-cost') {
-          this._gen.anthropic++;   // an import supersedes any in-flight fetch — it must not overwrite this
-          Store.setBilled('anthropic', parseAnthropicCost(obj));
-          notes.push(`${f.name}: Anthropic billed costs imported`);
-          imported++;
-        } else if (kind === 'openai-usage') {
-          const res = parseOpenAIUsage(obj);
-          this._gen.openai++;   // an import supersedes any in-flight fetch — it must not overwrite this
-          Store.setSource('openai', res.rows, {});
-          notes.push(`${f.name}: OpenAI usage report — ${res.rows.length} rows`);
-          imported++;
-        } else if (kind === 'openai-cost') {
-          this._gen.openai++;   // an import supersedes any in-flight fetch — it must not overwrite this
-          Store.setBilled('openai', parseOpenAICost(obj));
-          notes.push(`${f.name}: OpenAI billed costs imported`);
-          imported++;
-        } else if (kind === 'empty-report') {
-          notes.push(`${f.name}: recognized usage/cost report, but every day in it is empty — nothing to import`);
-        } else {
-          notes.push(`${f.name}: format not recognized`);
-        }
+        const r = await this._importJson(JSON.parse(await f.text()), f, notes);
+        if (r === null) notes.push(`${f.name}: format not recognized`); else imported += r;
       } catch (e) {
         notes.push(`${f.name}: failed — ${e.message || e}`);
       }

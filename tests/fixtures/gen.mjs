@@ -1,9 +1,39 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 
 const OUT = path.join(import.meta.dirname, 'out');
 
 const jl = (o) => JSON.stringify(o);
+
+// ---- minimal ZIP writer for Wave 2 fixtures: local headers + central directory + EOCD, CRC32 (table), stored or deflate-raw entries ----
+const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = (buf) => { let c = 0xFFFFFFFF; for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+/** files: [{ name, data: string|Buffer, deflate?: boolean, method?: number }] → Buffer holding a valid .zip (DOS date fixed at 2026-08-01;
+ *  `method` overrides the stored/deflate choice to write an entry the reader must refuse, e.g. 12 = bzip2 — data is left raw). */
+function zipBuffer(files) {
+  const locals = [], centrals = []; let off = 0;
+  const dosTime = 0, dosDate = ((2026 - 1980) << 9) | (8 << 5) | 1;
+  for (const f of files) {
+    const nameB = Buffer.from(f.name, 'utf8'), raw = Buffer.isBuffer(f.data) ? f.data : Buffer.from(f.data, 'utf8');
+    const method = f.method != null ? f.method : (f.deflate ? 8 : 0), data = method === 8 ? zlib.deflateRawSync(raw) : raw, crc = crc32(raw);
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(0x0800, 6); lh.writeUInt16LE(method, 8);
+    lh.writeUInt16LE(dosTime, 10); lh.writeUInt16LE(dosDate, 12); lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(data.length, 18); lh.writeUInt32LE(raw.length, 22);
+    lh.writeUInt16LE(nameB.length, 26); lh.writeUInt16LE(0, 28);
+    const ch = Buffer.alloc(46);
+    ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(0x0800, 8); ch.writeUInt16LE(method, 10);
+    ch.writeUInt16LE(dosTime, 12); ch.writeUInt16LE(dosDate, 14); ch.writeUInt32LE(crc, 16); ch.writeUInt32LE(data.length, 20); ch.writeUInt32LE(raw.length, 24);
+    ch.writeUInt16LE(nameB.length, 28); ch.writeUInt16LE(0, 30); ch.writeUInt16LE(0, 32); ch.writeUInt16LE(0, 34); ch.writeUInt16LE(0, 36); ch.writeUInt32LE(0, 38); ch.writeUInt32LE(off, 42);
+    locals.push(lh, nameB, data); centrals.push(ch, nameB);
+    off += lh.length + nameB.length + data.length;
+  }
+  const cdBuf = Buffer.concat(centrals), cdOff = off;
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(0, 4); eocd.writeUInt16LE(0, 6); eocd.writeUInt16LE(files.length, 8); eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt32LE(cdBuf.length, 12); eocd.writeUInt32LE(cdOff, 16); eocd.writeUInt16LE(0, 20);
+  return Buffer.concat([...locals, cdBuf, eocd]);
+}
 
 export async function generate() {
   fs.rmSync(OUT, { recursive: true, force: true });
@@ -370,6 +400,58 @@ export async function generate() {
     { category: 'DEDICATED_DEPLOYMENT', usageBuckets: [{ startTime: fwDay(3) + 'T00:00:00Z', amount: '4.50', currency: 'USD' }] },
     { category: 'TRAINING', usageBuckets: [{ startTime: fwDay(200) + 'T00:00:00Z', amount: '9.99', currency: 'USD' }] },
   ] }, null, 1));
+  // ---- Plan 4b fixtures (wave2/): ZIP reader + DeepSeek API monthly usage export (Task 8) ----
+  // T8a — ZIP reader round-trip: one stored entry (9 bytes), one deflate-raw entry (3000 chars), one entry with an unsupported method (12 = bzip2 → bytes() must throw)
+  w('wave2/zip/mini.zip', zipBuffer([
+    { name: 'hello.txt', data: 'hello zip' },
+    { name: 'data/long.txt', data: 'abc'.repeat(1000), deflate: true },
+    { name: 'weird.bin', data: 'x', method: 12 },
+  ]));
+  // T8b — DeepSeek API monthly usage export (platform.deepseek.com/usage → Export monthly data). Long shape as seen by community parsers:
+  //   utc_date (YYYYMMDD or YYYY-MM-DD), model, api_key_name, type (input_cache_miss_tokens | input_cache_hit_tokens | output_tokens | request_count), amount.
+  //   July: in = 100000 (chat, miss) + 3000 (reasoner, miss) + 500 (chat key2, miss) = 103500 · cr = 50000 + 0 = 50000 · out = 20000 + 8000 + 0 ('abc' rejected) = 28000
+  //         msgs = 12 + 2 = 14 (request_count rows only) · buckets (day, model) = 3 [(07-10 chat), (07-11 reasoner), (07-11 chat — key1 + key2 merge)] · amount rows = 10 · rejected = 1 ('abc')
+  //   cost-2026-07.csv: 07-10 → 0.05 · 07-11 → 0.02 + 0.001 = 0.021 ('notanumber' rejected → rejected total 2) · currency USD
+  w('wave2/deepseek/usage-2026-07.zip', zipBuffer([
+    { name: 'amount-2026-07.csv', deflate: true, data: [
+      'utc_date,model,api_key_name,type,amount',
+      '20260710,deepseek-chat,key1,input_cache_miss_tokens,100000',
+      '20260710,deepseek-chat,key1,input_cache_hit_tokens,50000',
+      '20260710,deepseek-chat,key1,output_tokens,20000',
+      '20260710,deepseek-chat,key1,request_count,12',
+      '20260711,deepseek-reasoner,key1,input_cache_miss_tokens,3000',
+      '20260711,deepseek-reasoner,key1,input_cache_hit_tokens,0',
+      '20260711,deepseek-reasoner,key1,output_tokens,8000',
+      '20260711,deepseek-reasoner,key1,request_count,2',
+      '20260711,deepseek-chat,key2,output_tokens,abc',
+      '20260711,deepseek-chat,key2,input_cache_miss_tokens,500',
+    ].join('\n') + '\n' },
+    { name: 'cost-2026-07.csv', data: [
+      'utc_date,model,api_key_name,currency,cost',
+      '2026-07-10,deepseek-chat,key1,USD,0.05',
+      '2026-07-11,deepseek-reasoner,key1,USD,0.02',
+      '2026-07-11,deepseek-chat,key2,USD,0.001',
+      '2026-07-11,deepseek-chat,key2,USD,notanumber',
+    ].join('\n') + '\n' },
+    { name: 'README.txt', data: 'exported from platform.deepseek.com' },
+  ]));
+  //   August (second month; dashed dates; stored amount + deflated cost): in 1000 · cr 200 · out 300 · msgs 3 · cost 0.0006
+  //   After both imports: in 104500 · cr 50200 · out 28300 · msgs 17 · buckets 4 · billed days 3, sum 0.05 + 0.021 + 0.0006 = 0.0716
+  const dsAmountAug = ['utc_date,model,api_key_name,type,amount', '2026-08-10,deepseek-chat,key1,input_cache_miss_tokens,1000', '2026-08-10,deepseek-chat,key1,input_cache_hit_tokens,200',
+    '2026-08-10,deepseek-chat,key1,output_tokens,300', '2026-08-10,deepseek-chat,key1,request_count,3'].join('\n') + '\n';
+  const dsCostAug = 'utc_date,model,api_key_name,currency,cost\n2026-08-10,deepseek-chat,key1,USD,0.0006\n';
+  w('wave2/deepseek/usage-2026-08.zip', zipBuffer([{ name: 'amount-2026-08.csv', data: dsAmountAug }, { name: 'cost-2026-08.csv', data: dsCostAug, deflate: true }]));
+  w('wave2/deepseek/amount-2026-08.csv', dsAmountAug);   // the same CSVs dropped loose must merge into the same (day, model) keys — nothing doubles
+  w('wave2/deepseek/cost-2026-08.csv', dsCostAug);
+  // T8c — a ChatGPT export ZIP as downloaded (conversations.json + extras). One conversation: user 40 chars → in 10, assistant 80 chars → out 20, model gpt-5.4, 1 reply
+  const gptSec = (iso) => T(iso) / 1000;
+  w('wave2/zip/chatgpt-export.zip', zipBuffer([
+    { name: 'conversations.json', deflate: true, data: JSON.stringify([{ title: 'c', create_time: gptSec('2026-08-10T09:00:00.000Z'), current_node: 'n2', mapping: {
+      n1: { id: 'n1', parent: null, children: ['n2'], message: { id: 'm1', author: { role: 'user' }, create_time: gptSec('2026-08-10T09:00:00.000Z'), content: { content_type: 'text', parts: ['x'.repeat(40)] } } },
+      n2: { id: 'n2', parent: 'n1', children: [], message: { id: 'm2', author: { role: 'assistant' }, create_time: gptSec('2026-08-10T09:00:05.000Z'), content: { content_type: 'text', parts: ['y'.repeat(80)] }, metadata: { model_slug: 'gpt-5.4' } } } } }]) },
+    { name: 'user.json', data: '{"id":"user-1","email":"x@y.z"}' },
+    { name: 'chat.html', data: '<html><body>export</body></html>' },
+  ]));
 }
 
 if (process.argv[1] === import.meta.filename) await generate();
