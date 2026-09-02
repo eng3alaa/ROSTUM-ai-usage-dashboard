@@ -229,6 +229,22 @@ export async function generate() {
     '2026-08-11T10:05:00.000Z,Included,gpt-5.4,No,abc,10,0,5,15',
     '2026-08-11T10:10:00.000Z,Included,gpt-5.4,No,200,100,50,30,999',
   ].join('\n') + '\n');
+
+  // ---- Plan 4b (Wave 2) fixtures: wave2/ subtree ----
+  // T4 — LocalAI GET /api/usage?period=all. 4 buckets: one model on two UTC days, two models on one day, one bucket with a garbage count.
+  //   Rows (UTC day / model): 2026-08-10 llama-3.2-3b in=1200 out=300 msgs=4 · 2026-08-10 qwen3-8b in=500 out=100 msgs=1
+  //                           2026-08-11 llama-3.2-3b in=20 out=10 msgs=1 · 2026-08-11 qwen3-8b ('abc' prompt_tokens → 0) in=0 out=5 msgs=1
+  //   Payload totals: in = 1200+500+20+0 = 1720 · out = 300+100+10+5 = 415 · msgs = 4+1+1+1 = 7 · 4 buckets · 2 models · earliest day 2026-08-10
+  w('wave2/localai-usage.json', JSON.stringify({
+    usage: [
+      { bucket: '2026-08-10T00:00:00Z', model: 'llama-3.2-3b', prompt_tokens: 1200, completion_tokens: 300, total_tokens: 1500, request_count: 4 },
+      { bucket: '2026-08-10T00:00:00Z', model: 'qwen3-8b', prompt_tokens: 500, completion_tokens: 100, total_tokens: 600, request_count: 1 },
+      { bucket: '2026-08-11T00:00:00Z', model: 'llama-3.2-3b', prompt_tokens: 20, completion_tokens: 10, total_tokens: 30, request_count: 1 },
+      { bucket: '2026-08-11T00:00:00Z', model: 'qwen3-8b', prompt_tokens: 'abc', completion_tokens: 5, total_tokens: 5, request_count: 1 },
+    ],
+    totals: { prompt_tokens: 1720, completion_tokens: 415, total_tokens: 2135, request_count: 7 },
+    viewer: { user_id: 'local', is_admin: true },
+  }, null, 1));
 }
 
 if (process.argv[1] === import.meta.filename) await generate();

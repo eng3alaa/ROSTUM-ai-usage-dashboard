@@ -1128,6 +1128,7 @@ const Budgets = {
  *                    · parser 'globalFnName' · hint · quality exact|estimated|validate|none · qualityNote · paths [] · links {get,docs,usage}
  *                    · folder-log entries: srcIds must include the entry's own id (scanFiles stores rows under c.id)
  * local-server fields: baseUrl · validate 'globalFnName' (async (base) → {label, detail}) · corsHint ({base} = server URL) · optional patterns/parser for a usage-logger folder
+ *   4b: validate may also return { rows, meta?, billed? } — connectServer stores them under c.id (LocalAI /api/usage history); a validator error with e.answered = true is the server's own message (503 stats disabled), shown verbatim instead of the CORS guess
  * link-only fields (4b): kind 'link-only' · reason (one sentence shown on the hub card: why there is no data path) · quality 'none' · srcIds [] · links {usage, docs, get?}
  *                    — never "connected", no Connect/Sync/Disconnect; the hub card offers Details (modal) + the vendor usage link only
  * key-driver fields (4b): kind api-key|admin-key|cloud-token · fetch 'globalFnName' (async (key, fields, {days}) → {label, detail, rows?, billed?, meta?}) · keyLS 'key:<id>'
@@ -1292,6 +1293,15 @@ const CONNECTORS = [
     qualityNote: 'Validate-only, with a caveat: Perplexity offers no balance or usage endpoint for Sonar keys, and GET /v1/models is unauthenticated — so this card can only confirm the API is reachable, it cannot verify your key (only a paid completion would). Usage, per-model cost and invoices are on the API console Billing tab (no export). The org-admin analytics endpoint covers the "Computer" product only, not Sonar spend, so it is not used here.',
     paths: ['GET https://api.perplexity.ai/v1/models (unauthenticated — reachability only)', 'spend: perplexity.ai/account/api → Billing (no export)'],
     links: { get: 'https://www.perplexity.ai/account/api', docs: 'https://docs.perplexity.ai/api-reference/models-get', usage: 'https://www.perplexity.ai/account/api' } },
+  // ---- Wave 2 local-server connectors (server-side history / metrics-poll) ----
+  { id: 'localai', platform: 'LocalAI', name: 'LocalAI', category: 'local', kind: 'local-server',
+    statusEl: 'localai-status', brand: '#2f80ed', mark: 'La', srcIds: ['localai'],
+    baseUrl: 'http://localhost:8080', validate: 'validateLocalAI',
+    corsHint: 'Something answered at {base} but this page could not read it — LocalAI\'s default CORS allows any origin (LOCALAI_CORS unset); if it runs with --cors=true, add this page\'s origin to --cors-allow-origins (file:// pages send Origin: null, so "*" is the practical value), restart LocalAI, then validate again. If LocalAI runs with --api-keys, GET /api/usage needs that key and this card sends none.',
+    quality: 'exact',
+    qualityNote: 'Exact tokens and request counts from LocalAI\'s built-in usage history (GET /api/usage?period=all — LocalAI v4.4+, mid-2026: per-bucket prompt / completion tokens and request_count per model), refreshed into this card on every Validate, Sync and Refresh; no cost is reported. Without --auth that history is an in-memory ring buffer that a LocalAI restart empties — the dashboard keeps days older than the fresh payload from earlier syncs, but the restart day may undercount; start LocalAI with --auth for a durable SQLite store, and never with --disable-stats (the endpoint then answers 503 and this card says so). CORS is permissive by default (LOCALAI_CORS unset → any origin); with --cors=true add this page\'s origin to --cors-allow-origins. If --api-keys is set, GET /api/usage needs the key and this card sends none — validate against a keyless local instance or use LocalAI\'s own Usage page. LocalAI rows are priced $0 — they run on your hardware (gated on the LocalAI platform, not on model name); llama.cpp also defaults to port 8080, so an HTTP 404 here usually means another server owns that port.',
+    paths: ['server: http://localhost:8080 (LOCALAI_ADDRESS / --address)', 'history: GET /api/usage?period=all (in-memory unless --auth; 503 with --disable-stats)', 'also on the server: GET /metrics localai_tokens_total (not used by this card)'],
+    links: { get: 'https://localai.io/basics/getting_started/', docs: 'https://localai.io/docs/reference/cli-reference/' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv'] },
 ];
@@ -2376,6 +2386,36 @@ async function validateOllama(base) {
   const n = Array.isArray(tags && tags.models) ? tags.models.length : 0;
   const loaded = ps && Array.isArray(ps.models) ? ps.models.length : 0;
   return { label: `${n} models installed`, detail: `${n} models installed · ${loaded} loaded now · no usage history on the server (see the note; usage-logger JSONL is read from the folder below)` };
+}
+
+/** LocalAI history: GET /api/usage?period=all → { usage: [{ bucket, model, prompt_tokens, completion_tokens, total_tokens, request_count }] }.
+ *  Exact tokens + request counts per UTC day bucket. 503 = --disable-stats (the server answered → e.answered, not a CORS guess).
+ *  Without --auth the server keeps an in-memory ring buffer that a restart empties: rows for days OLDER than the fresh payload are kept
+ *  from earlier syncs (Store.sources.localai), days the payload covers are replaced (never doubled); an empty payload keeps everything. */
+async function validateLocalAI(base) {
+  const res = await fetch(base + '/api/usage?period=all', { cache: 'no-store' });
+  if (res.status === 503) { const e = new Error('LocalAI answered 503 on /api/usage: usage stats are disabled (--disable-stats) — restart LocalAI without that flag, then validate again.'); e.answered = true; throw e; }
+  if (!res.ok) { const e = new Error(`HTTP ${res.status} on /api/usage — not a LocalAI v4.4+ server? (llama.cpp and other servers also default to port 8080)`); e.answered = true; throw e; }
+  const j = await res.json();
+  const list = Array.isArray(j && j.usage) ? j.usage : [];
+  const agg = makeAgg(); const models = new Set(); let tin = 0, tout = 0, minDay = null;
+  for (const u of list) {
+    if (!u || typeof u !== 'object') continue;
+    const b = typeof u.bucket === 'number' && u.bucket < 1e12 ? u.bucket * 1000 : u.bucket;   // epoch seconds → ms; ISO strings pass through
+    const d = dayKeyUTC(b); if (!d) continue;                                                  // provider day buckets are UTC days
+    const model = String(u.model || 'unknown');
+    const t = { in: finTok(+u.prompt_tokens || 0), out: finTok(+u.completion_tokens || 0), msgs: finTok(+u.request_count || 0) };
+    agg.add(d, 'LocalAI', model, t); models.add(model); tin += t.in; tout += t.out;
+    if (!minDay || d < minDay) minDay = d;
+  }
+  const existing = ((Store.sources.localai || {}).rows || []);
+  const kept = minDay ? existing.filter(r => r.d < minDay) : existing;
+  const fresh = agg.rows();
+  const n = list.length, nm = models.size;
+  return { label: `history: ${n} bucket${n === 1 ? '' : 's'}`,
+    detail: `${n} usage bucket${n === 1 ? '' : 's'} · ${fmtInt(tin)} in / ${fmtInt(tout)} out tokens · ${nm} model${nm === 1 ? '' : 's'} · all-time history from /api/usage`
+      + (kept.length ? ` (+ ${kept.length} older row${kept.length === 1 ? '' : 's'} kept from earlier syncs)` : ''),
+    rows: kept.concat(fresh), meta: { buckets: n, period: 'all', msgs: fresh.reduce((a, r) => a + r.msgs, 0) } };
 }
 
 /** Groq validate-only: GET /openai/v1/models with the key (api.groq.com allows browser origins). Groq has no usage or spend API —
@@ -4007,6 +4047,9 @@ const App = {
       if (typeof fn !== 'function') throw new Error('No validator registered: ' + c.validate);
       const res = await fn(base);
       if (gen !== this._gen[slot]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
+      // 4b: history-capable validators (LocalAI /api/usage) hand back rows (+ optional billed) — stored under c.id like scanFiles / connectKey do
+      if (Array.isArray(res.rows)) Store.setSource(c.id, res.rows, res.meta || {});
+      if (Array.isArray(res.billed)) Store.setBilled(c.id, res.billed);
       // per-half errors: this driver owns serverErr, scanFiles owns scanErr; the hub's err = serverErr || scanErr (merged from the
       // previous entry) so whichever half settles last never wipes the other half's message (CORS hint vs. a working usage-log folder)
       Store.setConnector(c.id, { serverLabel: res.label, label: this._dualLabel(c.id, { serverLabel: res.label }), lastSync: Date.now(), serverErr: null, err: (Store.connectors[c.id] || {}).scanErr || null });
@@ -4016,10 +4059,17 @@ const App = {
       this.render();
     } catch (e) {
       if (gen !== this._gen[slot]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }
-      const up = await probeServer(base).catch(() => false);
+      // 4b: a validator that got a real HTTP answer marks its error `answered` (LocalAI 503 = stats disabled; llama.cpp 404 = --metrics off) —
+      // that is the server's own message, not a CORS guess: skip the reachability probe and show it verbatim below
+      const up = e && e.answered ? false : await probeServer(base).catch(() => false);
       if (gen !== this._gen[slot]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }
       status.textContent = ''; status.dataset.gen = '';
-      if (up) {
+      if (e && e.answered) {
+        const serverErr = String(e.message || e).slice(0, 80);
+        Store.setConnector(c.id, { serverErr, err: serverErr, serverLabel: null, label: this._dualLabel(c.id, { serverLabel: null }) });   // attention, server half
+        status.appendChild(el('span', { class: 'err', text: 'Server answered: ' }));
+        status.appendChild(document.createTextNode(e.message || String(e)));
+      } else if (up) {
         // the probe only proves SOMETHING answered at base (any HTTP server, a proxy, another app on the port) — a CORS block by
         // this server is the likely reason the validator failed, not a certainty: say so, keep the fix instruction
         const name = c.name || 'the server';
