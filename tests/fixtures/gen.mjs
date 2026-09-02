@@ -310,6 +310,41 @@ export async function generate() {
     'llamacpp:kv_cache_usage_ratio 0.0123',
     '',
   ].join('\n'));
+
+  // T6 (4b) — Jan threads/<id>/messages.jsonl. estTok = round(chars/4); input = previous user text (always estimated → every row est:1);
+  //   output = metadata.tokenCount (also accepted inside metadata.tokenSpeed{}) when present, else estTok(text).
+  //   t1/a1: user 40 chars → in 10 · text 100 chars but tokenCount 30 → out 30 · model message.model.id 'llama3.2-3b-instruct' · created_at ms 2026-08-10T09:00Z
+  //   t1/a2: user 24 chars (plain-string content) → in 6 · text 52 chars, no tokenCount → out 13 · model metadata.model 'qwen3-4b' · created = unix SECONDS 1786396200 (= 2026-08-10T21:10:00Z)
+  //   t2/a1: user 8 chars → in 2 · text 200 chars but tokenSpeed.tokenCount 45 → out 45 · no model anywhere → 'jan' · created_at ms 2026-08-12T09:00Z
+  //   Expected: in=10+6+2=18 out=30+13+45=88 msgs=3 files=2 badLines=1 (one non-JSON line) · a system line is ignored · models [jan, llama3.2-3b-instruct, qwen3-4b]
+  w('wave2/jan/threads/t1/messages.jsonl', [
+    jl({ id: 'u1', object: 'thread.message', thread_id: 't1', role: 'user', content: [{ type: 'text', text: { value: 'x'.repeat(40), annotations: [] } }], status: 'ready', created_at: T('2026-08-10T08:59:00.000Z') }),
+    jl({ id: 'a1', object: 'thread.message', thread_id: 't1', role: 'assistant', content: [{ type: 'text', text: { value: 'y'.repeat(100), annotations: [] } }], status: 'ready', created_at: T('2026-08-10T09:00:00.000Z'), model: { id: 'llama3.2-3b-instruct', engine: 'llamacpp' }, metadata: { tokenCount: 30, tokenSpeed: 25.5 } }),
+    'not json at all',
+    jl({ id: 'u2', thread_id: 't1', role: 'user', content: 'x'.repeat(24), created: 1786396140 }),
+    jl({ id: 'a2', thread_id: 't1', role: 'assistant', content: [{ type: 'text', text: 'y'.repeat(52) }], created: 1786396200, metadata: { model: 'qwen3-4b' } }),
+  ].join('\n') + '\n');
+  w('wave2/jan/threads/t2/messages.jsonl', [
+    jl({ id: 'u1', thread_id: 't2', role: 'user', content: 'ab'.repeat(4), created_at: T('2026-08-12T08:59:00.000Z') }),
+    jl({ id: 'a1', thread_id: 't2', role: 'assistant', content: [{ type: 'text', text: { value: 'z'.repeat(200) } }], created_at: T('2026-08-12T09:00:00.000Z'), metadata: { tokenSpeed: { message: 'a1', tokenSpeed: 30.1, tokenCount: 45, lastTimestamp: T('2026-08-12T09:00:05.000Z') } } }),
+    jl({ id: 's1', thread_id: 't2', role: 'system', content: 'ignored' }),
+  ].join('\n') + '\n');
+  w('wave2/jan/threads/t1/thread.json', JSON.stringify({ id: 't1', title: 'test thread', assistants: [{ id: 'jan', model: { id: 'llama3.2-3b-instruct' } }] }));   // not matched by the pattern — ignored
+  // T6 (4b) — text-generation-webui history JSON. Both sides estimated (est:1); the '<|BEGIN-VISIBLE-CHAT|>' greeting pair is not a generation → skipped;
+  //   timestamps are LOCAL time strings ('YYYY-MM-DD HH:MM:SS') → day/hour exactly as written in every timezone.
+  //   chat pair1: user 40 → in 10, reply 80 → out 20 · pair2: 16 → 4, 120 → 30 · both model 'Qwen3-8B-Q4_K_M.gguf', hour 9 → one row in=14 out=50 msgs=2
+  //   instruct pair: 8 → 2, 60 → 15 · no model_name → 'text-generation-webui', hour 10
+  //   Expected: in=16 out=65 msgs=3 files=3 badLines=1 (bad.json) · rows=2 · days 2026-08-10 / 2026-08-11 · hours [9, 10]
+  w('wave2/tgwebui/user_data/logs/chat/Assistant/20260810-09-12-33.json', JSON.stringify({
+    internal: [['<|BEGIN-VISIBLE-CHAT|>', 'How can I help you today?'], ['u'.repeat(40), 'a'.repeat(80)], ['u'.repeat(16), 'a'.repeat(120)]],
+    visible: [['', 'How can I help you today?'], ['u'.repeat(40), 'a'.repeat(80)], ['u'.repeat(16), 'a'.repeat(120)]],
+    metadata: { assistant_0: { timestamp: '2026-08-10 09:12:00' }, user_1: { timestamp: '2026-08-10 09:12:33' }, assistant_1: { timestamp: '2026-08-10 09:12:40', model_name: 'Qwen3-8B-Q4_K_M.gguf' },
+      user_2: { timestamp: '2026-08-10 09:15:00' }, assistant_2: { timestamp: '2026-08-10 09:15:20', model_name: 'Qwen3-8B-Q4_K_M.gguf', versions: [{ content: 'older regeneration', timestamp: '2026-08-10 09:15:10' }] } } }, null, 1));
+  w('wave2/tgwebui/user_data/logs/chat/Assistant/bad.json', '{');
+  w('wave2/tgwebui/user_data/logs/instruct/20260811-10-00-00.json', JSON.stringify({
+    internal: [['q'.repeat(8), 'r'.repeat(60)]], visible: [['q'.repeat(8), 'r'.repeat(60)]],
+    metadata: { user_0: { timestamp: '2026-08-11 10:00:00' }, assistant_0: { timestamp: '2026-08-11 10:00:05' } } }, null, 1));
+  w('wave2/tgwebui/user_data/logs/chat_state.json', JSON.stringify({ unique_id: 'x' }));   // not matched (no chat/ or instruct/ dir) — ignored
 }
 
 if (process.argv[1] === import.meta.filename) await generate();

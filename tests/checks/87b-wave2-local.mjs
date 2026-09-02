@@ -189,6 +189,139 @@ export async function run({ browser, ok }) {
       lc.off.status === 'ok' && /--metrics/.test(lc.off.text) && lc.off.base === null && lc.off.pollErr && lc.off.pollErr.answered && /--metrics/.test(lc.off.pollErr.msg)
       && lc.kind === 'local-server' && lc.cat === 'local' && lc.quality === 'exact' && lc.poll === 'pollLlamaCpp' && lc.base === 'http://localhost:8080' && JSON.stringify(lc.srcIds) === JSON.stringify(['llamacpp']) && lc.statusEl === 'llamacpp-status'
       && lc.card && lc.cors && lc.note, JSON.stringify({ off: lc.off, cors: lc.cors, note: lc.note, card: lc.card }));
+    // ---- T6 (4b): GPT4All validate-only local-server ----
+    const g4 = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const c = connectorById('gpt4all'); if (!c) throw new Error('no gpt4all entry');
+      const origFetch = fetchJSON, origProbe = probeServer;
+      window.fetchJSON = async (url) => { const u = String(url); if (u === 'http://localhost:4891/v1/models') return { object: 'list', data: [{ id: 'Llama 3 8B Instruct', object: 'model' }, { id: 'Phi-3 Mini Instruct', object: 'model' }] }; throw new Error('unexpected ' + u); };
+      await App.connectServer(c);
+      const up = { label: (Store.connectors.gpt4all || {}).label, status: Store.connectorStatus(c), text: document.getElementById('gpt4all-status').textContent, url: LS.get('url:gpt4all', null) };
+      // server off (the default): fetch fails AND the probe fails → off, "not running", no error state
+      window.fetchJSON = async () => { throw new TypeError('Failed to fetch'); };
+      window.probeServer = async () => false;
+      await App.connectServer(c);
+      const down = { has: !!Store.connectors.gpt4all, status: Store.connectorStatus(c), text: document.getElementById('gpt4all-status').textContent };
+      window.fetchJSON = origFetch; window.probeServer = origProbe;
+      App.renderHub();
+      const card = document.getElementById('src-gpt4all');
+      const out = { up, down, kind: c.kind, cat: c.category, platform: c.platform, quality: c.quality, badge: card && card.querySelector('.badge').textContent,
+        card: !!card && !!document.getElementById('gpt4all-url') && !!document.getElementById('gpt4all-validate') && !document.getElementById('gpt4all-pick') && !document.getElementById('gpt4all-scan-status'),
+        hub: !!document.querySelector('#accounts-hub .hub-group[data-group="local"] .acct[data-connector="gpt4all"]'),
+        note: /validate-only/i.test(c.qualityNote) && /no usage history/i.test(c.qualityNote) && /Enable Local API Server/.test(c.qualityNote) && /off by default/i.test(c.qualityNote),
+        localPlatform: LOCAL_PLATFORMS.has('GPT4All') };
+      Store.sources = {}; Store.connectors = {}; Store.persist();
+      return out;
+    });
+    ok('gpt4all: validate-only local-server card (no folder UI) — stubbed GET /v1/models → "2 models", connected; URL persisted; quality badge validate-only; Local runners group',
+      g4.up.label === '2 models' && g4.up.status === 'ok' && /Connected/.test(g4.up.text) && /validate-only|no usage history/i.test(g4.up.text) && g4.up.url === 'http://localhost:4891'
+      && g4.kind === 'local-server' && g4.cat === 'local' && g4.platform === 'GPT4All' && g4.quality === 'validate' && g4.badge === 'validate-only' && g4.card && g4.hub && g4.note && g4.localPlatform, JSON.stringify(g4));
+    ok('gpt4all: server off (default) → off / "not running", no error state', !g4.down.has && g4.down.status === 'off' && /not running/i.test(g4.down.text), JSON.stringify(g4.down));
+
+    // ---- T6 (4b): Jan — threads folder-log (estimated) + Local API Server validate ----
+    const janA = read('wave2', 'jan', 'threads', 't1', 'messages.jsonl'), janB = read('wave2', 'jan', 'threads', 't2', 'messages.jsonl'), janT = read('wave2', 'jan', 'threads', 't1', 'thread.json');
+    const jn = await page.evaluate(async (a, b, tj) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const c = connectorById('jan'); if (!c) throw new Error('no jan entry');
+      const mk = () => [
+        { path: 'threads/t1/messages.jsonl', file: new File([a], 'messages.jsonl') },
+        { path: 'threads/t1/thread.json', file: new File([tj], 'thread.json') },
+        { path: 'threads/t2/messages.jsonl', file: new File([b], 'messages.jsonl') },
+      ];
+      // parser directly: per-row shape
+      const res = await parseJanThreads(mk(), null, new Set(), c);
+      const t = res.rows.reduce((x, r) => ({ in: x.in + r.in, out: x.out + r.out, msgs: x.msgs + r.msgs }), { in: 0, out: 0, msgs: 0 });
+      const byModel = Object.fromEntries(res.rows.map(r => [r.model, r]));
+      const exp = { 'llama3.2-3b-instruct': dayKey(new Date('2026-08-10T09:00:00.000Z')), 'qwen3-4b': dayKey(new Date(1786396200 * 1000)), jan: dayKey(new Date('2026-08-12T09:00:00.000Z')) };
+      const daysOk = Object.entries(exp).every(([m, d]) => byModel[m] && byModel[m].d === d);
+      // card copy before any scan (dual-driver card: server line + folder line)
+      const pickText = document.getElementById('jan-pick').textContent, scanDefault = document.getElementById('jan-scan-status').textContent;
+      // through the card: scanFiles routes messages.jsonl by pattern, lands rows under 'jan'
+      await App.scanFiles(c, mk());
+      const src = Store.sources.jan;
+      const scanned = { in: src ? src.rows.reduce((x, r) => x + r.in, 0) : 0, label: (Store.connectors.jan || {}).label, status: Store.connectorStatus(c), text: document.getElementById('jan-scan-status').textContent,
+        cost: src ? src.rows.map(r => Pricing.cost(r.model, r)) : null };
+      // server half: stubbed GET /v1/models
+      const origFetch = fetchJSON, origProbe = probeServer;
+      window.fetchJSON = async (url) => { const u = String(url); if (u === 'http://127.0.0.1:1337/v1/models') return { object: 'list', data: [{ id: 'llama3.2-3b-instruct' }, { id: 'qwen3-4b' }, { id: 'gemma-3-4b-it' }] }; throw new Error('unexpected ' + u); };
+      await App.connectServer(c);
+      const server = { label: (Store.connectors.jan || {}).label, status: Store.connectorStatus(c), text: document.getElementById('jan-status').textContent };
+      window.fetchJSON = origFetch; window.probeServer = origProbe;
+      App.renderHub();
+      const out = { ...t, files: res.meta.files, badLines: res.meta.badLines, rows: res.rows.length, models: [...new Set(res.rows.map(r => r.model))].sort(), platform: res.rows[0].platform,
+        allEst: res.rows.every(r => r.est === 1), allHour: res.rows.every(r => r.hour != null), byModel: { llama: byModel['llama3.2-3b-instruct'], qwen: byModel['qwen3-4b'], jan: byModel.jan }, daysOk,
+        pickText, scanDefault, scanned, server, kind: c.kind, cat: c.category, quality: c.quality, hint: c.hint, badge: document.querySelector('#src-jan .badge').textContent,
+        card: !!document.getElementById('src-jan') && !!document.getElementById('jan-url') && !!document.getElementById('jan-validate') && !!document.getElementById('jan-pick') && !!document.getElementById('jan-scan-status'),
+        hub: !!document.querySelector('#accounts-hub .hub-group[data-group="local"] .acct[data-connector="jan"]'),
+        note: /^Estimated/.test(c.qualityNote) && /tokenCount/.test(c.qualityNote) && /messages\.jsonl/.test(c.qualityNote) && /est\./.test(c.qualityNote) };
+      Store.sources = {}; Store.connectors = {}; Store.persist();
+      return out;
+    }, janA, janB, janT);
+    ok('jan: threads/*/messages.jsonl → est. in=18 out=88 msgs=3 (tokenCount wins for output, both metadata shapes; input = previous user text); files=2 badLines=1; model from message.model.id / metadata.model / "jan"; day from created_at (ms) and created (s); hours present',
+      jn.in === 18 && jn.out === 88 && jn.msgs === 3 && jn.files === 2 && jn.badLines === 1 && jn.rows === 3 && JSON.stringify(jn.models) === JSON.stringify(['jan', 'llama3.2-3b-instruct', 'qwen3-4b']) && jn.platform === 'Jan'
+      && jn.allEst && jn.allHour && jn.daysOk && jn.byModel.llama.in === 10 && jn.byModel.llama.out === 30 && jn.byModel.qwen.in === 6 && jn.byModel.qwen.out === 13 && jn.byModel.jan.in === 2 && jn.byModel.jan.out === 45, JSON.stringify(jn));
+    ok('jan: one dual-driver card (folder "Jan data" + server) — scanFiles lands 18 input tokens under jan (2 files, $0 rows), stubbed /v1/models → "3 models"; estimated badge; honest note; Local runners group',
+      jn.kind === 'local-server' && jn.cat === 'local' && jn.quality === 'estimated' && jn.badge === 'estimated' && jn.card && jn.hub && jn.note && /messages\.jsonl/.test(jn.hint)
+      && jn.pickText === 'Choose Jan data folder…' && jn.scanDefault === 'No Jan data folder chosen.'
+      && jn.scanned.in === 18 && jn.scanned.label === '2 files' && jn.scanned.status === 'ok' && /Connected/.test(jn.scanned.text) && /3 messages/.test(jn.scanned.text) && /1 unreadable/.test(jn.scanned.text) && Array.isArray(jn.scanned.cost) && jn.scanned.cost.every(x => x === 0)
+      && jn.server.label === '3 models · 2 files' && jn.server.status === 'ok' && /Connected/.test(jn.server.text) && /no usage history/i.test(jn.server.text), JSON.stringify(jn));
+
+    // ---- T6 (4b): text-generation-webui — logs folder-log (estimated) + API validate (CORS-blocked from file:// without --listen) ----
+    const tgA = read('wave2', 'tgwebui', 'user_data', 'logs', 'chat', 'Assistant', '20260810-09-12-33.json'), tgBad = read('wave2', 'tgwebui', 'user_data', 'logs', 'chat', 'Assistant', 'bad.json'),
+      tgI = read('wave2', 'tgwebui', 'user_data', 'logs', 'instruct', '20260811-10-00-00.json'), tgS = read('wave2', 'tgwebui', 'user_data', 'logs', 'chat_state.json');
+    const tg = await page.evaluate(async (a, bad, inst, st) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const c = connectorById('tgwebui'); if (!c) throw new Error('no tgwebui entry');
+      const mk = () => [
+        { path: 'user_data/logs/chat/Assistant/20260810-09-12-33.json', file: new File([a], '20260810-09-12-33.json') },
+        { path: 'user_data/logs/chat/Assistant/bad.json', file: new File([bad], 'bad.json') },
+        { path: 'user_data/logs/instruct/20260811-10-00-00.json', file: new File([inst], '20260811-10-00-00.json') },
+        { path: 'user_data/logs/chat_state.json', file: new File([st], 'chat_state.json') },   // not matched by the pattern
+      ];
+      const res = await parseTgwebuiLogs(mk(), null, new Set(), c);
+      const t = res.rows.reduce((x, r) => ({ in: x.in + r.in, out: x.out + r.out, msgs: x.msgs + r.msgs }), { in: 0, out: 0, msgs: 0 });
+      const rows = res.rows.slice().sort((x, y) => x.d < y.d ? -1 : 1).map(r => ({ d: r.d, hour: r.hour, model: r.model, in: r.in, out: r.out, msgs: r.msgs, est: r.est }));
+      await App.scanFiles(c, mk());
+      const src = Store.sources.tgwebui;
+      const scanned = { in: src ? src.rows.reduce((x, r) => x + r.in, 0) : 0, label: (Store.connectors.tgwebui || {}).label, status: Store.connectorStatus(c), text: document.getElementById('tgwebui-scan-status').textContent, cost: src ? src.rows.map(r => Pricing.cost(r.model, r)) : null };
+      // server half: running without --listen → fetch is CORS-blocked (TypeError) but the no-cors probe answers → attention + the --listen fix
+      const origFetch = fetchJSON, origProbe = probeServer;
+      window.fetchJSON = async () => { throw new TypeError('Failed to fetch'); };
+      window.probeServer = async () => true;
+      await App.connectServer(c);
+      const cors = { err: (Store.connectors.tgwebui || {}).err, status: Store.connectorStatus(c), text: document.getElementById('tgwebui-status').textContent, label: (Store.connectors.tgwebui || {}).label };
+      // started with --listen: GET /v1/models works
+      window.fetchJSON = async (url) => { const u = String(url); if (u === 'http://127.0.0.1:5000/v1/models') return { object: 'list', data: [{ id: 'Qwen3-8B-Q4_K_M.gguf' }] }; throw new Error('unexpected ' + u); };
+      await App.connectServer(c);
+      const server = { label: (Store.connectors.tgwebui || {}).label, status: Store.connectorStatus(c), text: document.getElementById('tgwebui-status').textContent };
+      window.fetchJSON = origFetch; window.probeServer = origProbe;
+      App.renderHub();
+      const out = { ...t, files: res.meta.files, badLines: res.meta.badLines, rows, platform: res.rows[0].platform, scanned, cors, server, kind: c.kind, cat: c.category, quality: c.quality, badge: document.querySelector('#src-tgwebui .badge').textContent,
+        card: !!document.getElementById('src-tgwebui') && !!document.getElementById('tgwebui-url') && !!document.getElementById('tgwebui-validate') && !!document.getElementById('tgwebui-pick') && !!document.getElementById('tgwebui-scan-status'),
+        hub: !!document.querySelector('#accounts-hub .hub-group[data-group="local"] .acct[data-connector="tgwebui"]'),
+        note: /^Estimated/.test(c.qualityNote) && /no token counts/i.test(c.qualityNote) && /--listen/.test(c.corsHint) && /--public-api/.test(c.corsHint) && /file:\/\//.test(c.corsHint) };
+      Store.sources = {}; Store.connectors = {}; Store.persist();
+      return out;
+    }, tgA, tgBad, tgI, tgS);
+    ok('tgwebui: logs/chat + logs/instruct history JSON → est. in=16 out=65 msgs=3 in 2 rows (greeting pair skipped; local timestamps → days 08-10/08-11, hours 9/10; model_name or "text-generation-webui"); files=3 badLines=1',
+      tg.in === 16 && tg.out === 65 && tg.msgs === 3 && tg.files === 3 && tg.badLines === 1 && tg.rows.length === 2 && tg.platform === 'text-generation-webui'
+      && tg.rows[0].d === '2026-08-10' && tg.rows[0].hour === 9 && tg.rows[0].model === 'Qwen3-8B-Q4_K_M.gguf' && tg.rows[0].in === 14 && tg.rows[0].out === 50 && tg.rows[0].msgs === 2 && tg.rows[0].est === 1
+      && tg.rows[1].d === '2026-08-11' && tg.rows[1].hour === 10 && tg.rows[1].model === 'text-generation-webui' && tg.rows[1].in === 2 && tg.rows[1].out === 15 && tg.rows[1].est === 1, JSON.stringify(tg));
+    ok('tgwebui: dual-driver card — scanFiles lands 16 input tokens under tgwebui (3 files, $0 rows); CORS-blocked API → attention with the --listen / --public-api fix; with --listen → "1 models"; estimated badge; Local runners group',
+      tg.kind === 'local-server' && tg.cat === 'local' && tg.quality === 'estimated' && tg.badge === 'estimated' && tg.card && tg.hub && tg.note
+      && tg.scanned.in === 16 && tg.scanned.label === '3 files' && tg.scanned.status === 'ok' && /Connected/.test(tg.scanned.text) && /3 messages/.test(tg.scanned.text) && /1 unreadable/.test(tg.scanned.text) && tg.scanned.cost.every(x => x === 0)
+      && /CORS/.test(tg.cors.err || '') && tg.cors.status === 'warn' && /--listen/.test(tg.cors.text) && /--public-api/.test(tg.cors.text) && /Blocked/.test(tg.cors.text) && tg.cors.label === '3 files'
+      && tg.server.label === '1 models · 3 files' && tg.server.status === 'ok' && /Connected/.test(tg.server.text), JSON.stringify(tg));
+
+    // ---- T6 (4b): pricing — the three new local platforms are $0 by platform (LOCAL_PLATFORMS), hosted rows untouched ----
+    const pz = await page.evaluate(() => {
+      Pricing.load();
+      const big = { in: 1_000_000, out: 1_000_000, cw: 0, cr: 0 };
+      return { gpt4all: Pricing.cost('Llama 3 8B Instruct', { ...big, platform: 'GPT4All' }), jan: Pricing.cost('llama3.2-3b-instruct', { ...big, platform: 'Jan' }), tg: Pricing.cost('Qwen3-8B-Q4_K_M.gguf', { ...big, platform: 'text-generation-webui' }),
+        hosted: Pricing.cost('claude-sonnet-5', { ...big, platform: 'Anthropic API' }), locals: [...LOCAL_PLATFORMS].filter(p => ['GPT4All', 'Jan', 'text-generation-webui'].includes(p)).length, order: ['GPT4All', 'Jan', 'text-generation-webui'].every(p => PLATFORM_ORDER.includes(p)) };
+    });
+    ok('pricing: GPT4All / Jan / text-generation-webui rows cost $0 by platform (category local → LOCAL_PLATFORMS); PLATFORM_ORDER derives them; hosted rows still priced',
+      pz.gpt4all === 0 && pz.jan === 0 && pz.tg === 0 && pz.hosted > 0 && pz.locals === 3 && pz.order, JSON.stringify(pz));
   } finally {
     await page.close();
   }

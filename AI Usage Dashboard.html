@@ -1128,6 +1128,7 @@ const Budgets = {
  *                    · parser 'globalFnName' · hint · quality exact|estimated|validate|none · qualityNote · paths [] · links {get,docs,usage}
  *                    · folder-log entries: srcIds must include the entry's own id (scanFiles stores rows under c.id)
  * local-server fields: baseUrl · validate 'globalFnName' (async (base) → {label, detail}) · corsHint ({base} = server URL) · optional patterns/parser for a usage-logger folder
+ *                      · folderLabel (dual-driver cards only: noun for the folder button / folder status line, default 'usage-log' — e.g. 'Jan data', 'user_data')
  *   4b: poll 'globalFnName' (async (base) → { counters: { [model]: { in, out, cr?, msgs? } }, label? }) + pollEvery ms (default 60000) — metrics-poll driver (App.startPoll / _pollTick) diffs cumulative counters into today's rows, baseline in LS 'poll:<id>'
  *   4b: validate may also return { rows, meta?, billed? } — connectServer stores them under c.id (LocalAI /api/usage history); a validator error with e.answered = true is the server's own message (503 stats disabled), shown verbatim instead of the CORS guess
  * link-only fields (4b): kind 'link-only' · reason (one sentence shown on the hub card: why there is no data path) · quality 'none' · srcIds [] · links {usage, docs, get?}
@@ -1319,6 +1320,33 @@ const CONNECTORS = [
     qualityNote: 'Exact tokens while this page is open: llama-server started with --metrics (LLAMA_ARG_ENDPOINT_METRICS=1) exposes cumulative llamacpp:prompt_tokens_total / llamacpp:tokens_predicted_total, and this card polls /metrics every 60 s and adds the differences to today\'s rows (current hour); without --metrics the card validates (GET /props, /health) but counts nothing and says so. /metrics carries no model label in single-model mode — the model name is read from GET /props (model_path basename; router mode\'s per-model label is used when present) — and no request counter, so message counts stay 0. Counters are process-lifetime only: a restart resets them (usage between the restart and the next poll is lost, never negative) and usage while this page was closed lands in the hour you reconnect; polling starts on Validate & connect, Sync or Refresh (never on page load) and stops when the tab closes. CORS is open by default, but --tools / --agent / --mcp-servers-* restrict it to localhost origins (file:// is blocked → pass --cors-origins "*"); an --api-key is not sent by this card — run it keyless on localhost. llama.cpp rows are priced $0 — they run on your hardware (gated on the llama.cpp platform, not on model name); LocalAI also defaults to port 8080.',
     paths: ['server: http://localhost:8080 (llama-server --host/--port)', 'counters: GET /metrics — only with --metrics (LLAMA_ARG_ENDPOINT_METRICS=1): llamacpp:prompt_tokens_total, llamacpp:tokens_predicted_total', 'model name: GET /props model_path · no usage history; --log-file is unstructured console text'],
     links: { get: 'https://github.com/ggml-org/llama.cpp/releases', docs: 'https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md' } },
+  // ---- Wave 2 local runners (Task 6 of Plan 4b): validate-only server / estimated chat history ----
+  { id: 'gpt4all', platform: 'GPT4All', name: 'GPT4All', category: 'local', kind: 'local-server',
+    statusEl: 'gpt4all-status', brand: '#1f9d55', mark: 'G4', srcIds: ['gpt4all'],
+    baseUrl: 'http://localhost:4891', validate: 'validateGpt4All',
+    corsHint: 'Something answered at {base} but this page could not read it. GPT4All\'s Local API Server answers with Access-Control-Allow-Origin: *, so this is probably another program on that port (or a build without CORS): check Settings > Application > Advanced for the server port, then validate again.',
+    quality: 'validate',
+    qualityNote: 'Validate-only: GPT4All keeps no usage history — exact prompt_tokens / completion_tokens exist only inside each API response, and the app\'s own chats are stored as binary Qt .chat files without token counts, so nothing retrospective can be read. This card only checks that the Local API Server answers (GET /v1/models) and shows how many models it lists. The server is off by default: turn it on under Settings > Application > Advanced > Enable Local API Server (port 4891, 127.0.0.1 only, no auth; it sends CORS * so a file:// page can call it). Local models are $0 — they run on your hardware. The project has been dormant since early 2025.',
+    paths: ['server: http://localhost:4891/v1 (Settings > Application > Advanced > Enable Local API Server)', 'chats: %LOCALAPPDATA%\\nomic.ai\\GPT4All\\*.chat (binary, no tokens — not read)'],
+    links: { get: 'https://gpt4all.io', docs: 'https://docs.gpt4all.io/gpt4all_api_server/home.html' } },
+  { id: 'jan', platform: 'Jan', name: 'Jan', category: 'local', kind: 'local-server',
+    statusEl: 'jan-status', brand: '#4f8cff', mark: 'Jn', srcIds: ['jan'],
+    baseUrl: 'http://127.0.0.1:1337', validate: 'validateJan',
+    corsHint: 'Something answered at {base} but this page could not read it — either Jan\'s Local API Server has CORS switched off (it is on by default: Settings > Local API Server), or it requires the API key you set there (this card sends none — clear the key to validate from this page), or another program owns the port.',
+    patterns: [/(^|\/)messages\.jsonl$/i], parser: 'parseJanThreads', folderLabel: 'Jan data', hint: 'threads/*/messages.jsonl (pick the Jan data folder)',
+    quality: 'estimated',
+    qualityNote: 'Estimated: Jan\'s thread files (threads/<thread_id>/messages.jsonl in the Jan data folder) record each assistant message\'s output tokenCount in its metadata when the app wrote one, but never the prompt tokens — input is estimated from the previous user message\'s text (chars ÷ 4) and output falls back to the same estimate when tokenCount is missing, so every row is marked est. and totals are a lower bound (context re-sent with each turn is not counted). Model comes from the message (model.id) or its metadata and defaults to "jan". The live check calls the Local API Server (GET /v1/models at http://127.0.0.1:1337 — CORS is on by default; if you set an API key there, clear it to validate from this page); the server has no history endpoint. Local models are $0 — they run on your hardware.',
+    paths: ['%APPDATA%\\Jan\\data\\threads\\<thread_id>\\messages.jsonl (Windows)', '~/Library/Application Support/Jan/data/threads/ (macOS)', '~/.local/share/Jan/data/threads/ (Linux)', 'older installs: ~/jan/threads/ — the data folder is set in Settings > General'],
+    links: { get: 'https://jan.ai', docs: 'https://www.jan.ai/docs/desktop/data-folder' } },
+  { id: 'tgwebui', platform: 'text-generation-webui', name: 'text-generation-webui', category: 'local', kind: 'local-server',
+    statusEl: 'tgwebui-status', brand: '#f0783c', mark: 'Tg', srcIds: ['tgwebui'],
+    baseUrl: 'http://127.0.0.1:5000', validate: 'validateTgwebui',
+    corsHint: 'Something answered at {base} but this page could not read it. Without --listen or --public-api, text-generation-webui\'s API only allows http://localhost and http://127.0.0.1 origins, and a page opened from a file:// URL (Origin: null) is blocked by CORS — start the server with --api --listen (or --public-api), then validate again. If you set --api-key, note this card sends no key.',
+    patterns: [/(^|\/)logs\/(chat|instruct)\/.*\.json$/i], parser: 'parseTgwebuiLogs', folderLabel: 'user_data', hint: 'logs/chat/<character>/*.json and logs/instruct/*.json (pick the user_data folder, or the install folder)',
+    quality: 'estimated',
+    qualityNote: 'Estimated: oobabooga\'s web UI keeps history files (user_data/logs/chat/<character>/*.json, user_data/logs/instruct/*.json) with every user/assistant pair with a timestamp and model_name per turn but no token counts — both sides are estimated from text (chars ÷ 4), so every row is marked est.; input counts only the user turn (not the re-sent context), so totals are a lower bound. The live check calls the OpenAI-compatible API (GET /v1/models; start the UI with --api, port 5000): it has no history endpoint and its /v1/billing/usage is a stub that always returns 0. From a file:// page the API is CORS-blocked unless the server runs with --listen or --public-api. Local models are $0 — they run on your hardware.',
+    paths: ['<install>\\user_data\\logs\\chat\\<character>\\<id>.json (chat / chat-instruct)', '<install>\\user_data\\logs\\instruct\\<id>.json', 'server: http://127.0.0.1:5000 (--api; --api-port / OPENEDAI_PORT change it)'],
+    links: { get: 'https://github.com/oobabooga/text-generation-webui', docs: 'https://github.com/oobabooga/text-generation-webui/wiki/12-%E2%80%90-OpenAI-API' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv'] },
 ];
@@ -2034,6 +2062,80 @@ async function parseLmStudioConversations(files, onProgress) {
   return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines, addedIds: [] } };
 }
 
+/** Jan — <data folder>/threads/<thread_id>/messages.jsonl: one JSON message per line { id, thread_id, role, content, created_at|created
+ *  (ms, or unix seconds in older builds), model?{id}, metadata?{ tokenCount | tokenSpeed{tokenCount}, model? } }. content is
+ *  [{type:'text', text:{value}}] (or text as a string, or a plain string). Output = metadata tokenCount when present (Jan writes only
+ *  the OUTPUT count), else estTok(text); input = estTok(previous user message in the thread) — always estimated → est:1 on every row.
+ *  Model: message.model.id → metadata.model → metadata.assistant.model → 'jan'. sid = 'jan:<thread_id>' (folder name). */
+async function parseJanThreads(files, onProgress, seen = new Set(), c) {
+  const agg = makeAgg(); let msgs = 0; const k = { lines: 0, badLines: 0 };
+  const list = files.filter(f => /(^|\/)messages\.jsonl$/i.test(f.path));
+  const textOf = (content) => {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    return content.map(p => { if (!p) return ''; if (typeof p === 'string') return p; if (typeof p.text === 'string') return p.text; if (p.text && typeof p.text.value === 'string') return p.text.value; return ''; }).join('\n');
+  };
+  const idOf = (v) => (v && typeof v === 'object') ? (typeof v.id === 'string' ? v.id : '') : (typeof v === 'string' ? v : '');
+  const when = (m, fallback) => {
+    let v = m.created_at ?? m.created ?? m.updated_at ?? m.updated;
+    if (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v.trim())) v = +v;
+    if (typeof v === 'number' && v > 0) return new Date(v < 1e12 ? v * 1000 : v);   // unix seconds vs milliseconds
+    if (typeof v === 'string') { const d = new Date(v); if (!isNaN(d)) return d; }
+    return new Date(fallback);
+  };
+  for (let fi = 0; fi < list.length; fi++) {
+    const { path, file } = list[fi];
+    const sid = 'jan:' + (path.split('/').slice(-2, -1)[0] || path);
+    let lastUser = '';
+    await eachJsonl(file, (m) => {
+      const role = String(m.role || '').toLowerCase();
+      const text = textOf(m.content);
+      if (role === 'user') { lastUser = text; return; }
+      if (role !== 'assistant') return;
+      const md = m.metadata && typeof m.metadata === 'object' ? m.metadata : {};
+      const tc = md.tokenCount ?? (md.tokenSpeed && typeof md.tokenSpeed === 'object' ? md.tokenSpeed.tokenCount : undefined);
+      const out = tc != null && tc !== '' && Number.isFinite(+tc) && +tc >= 0 ? +tc : estTok(text.length);
+      const model = idOf(m.model) || idOf(md.model) || idOf(md.assistant && md.assistant.model) || 'jan';
+      const ts = when(m, file.lastModified);
+      agg.add(dayKey(ts), (c && c.platform) || 'Jan', model, { in: estTok(lastUser.length), out, msgs: 1, est: 1 }, sid, ts.getHours());
+      msgs++;
+    }, k);
+    if (onProgress) onProgress(fi + 1, list.length);
+  }
+  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds: [] } };
+}
+
+/** text-generation-webui — user_data/logs/chat/<character>/<id>.json and logs/instruct/<id>.json (whole-file JSON):
+ *  { internal: [[user, assistant], …], visible, metadata: { 'user_<i>': {timestamp}, 'assistant_<i>': {timestamp, model_name, versions?} } }.
+ *  No token counts → in = estTok(user), out = estTok(assistant) per pair, est:1; model = metadata['assistant_i'].model_name || the platform
+ *  name; timestamps are LOCAL time strings ('YYYY-MM-DD HH:MM:SS') → parsed as local. The '<|BEGIN-VISIBLE-CHAT|>' greeting pair is
+ *  not a generation and is skipped; only the current text of a regenerated turn counts (versions[] ignored). */
+async function parseTgwebuiLogs(files, onProgress, seen = new Set(), c) {
+  const agg = makeAgg(); let msgs = 0, lines = 0, badLines = 0;
+  const list = files.filter(f => /(^|\/)logs\/(chat|instruct)\/.*\.json$/i.test(f.path));
+  const parseTs = (s) => { if (typeof s !== 'string') return null; const d = new Date(s.trim().replace(' ', 'T')); return isNaN(d) ? null : d; };
+  for (let fi = 0; fi < list.length; fi++) {
+    const { path, file } = list[fi];
+    let obj; try { obj = JSON.parse(await file.text()); } catch { badLines++; continue; }
+    if (!obj || typeof obj !== 'object' || !Array.isArray(obj.internal)) { badLines++; continue; }
+    lines++;
+    const md = obj.metadata && typeof obj.metadata === 'object' ? obj.metadata : {};
+    const sid = 'tgwebui:' + path.replace(/\.json$/i, '');
+    obj.internal.forEach((pair, i) => {
+      if (!Array.isArray(pair)) return;
+      const user = typeof pair[0] === 'string' ? pair[0] : '', reply = typeof pair[1] === 'string' ? pair[1] : '';
+      if (user === '<|BEGIN-VISIBLE-CHAT|>') return;
+      const am = md['assistant_' + i] || {}, um = md['user_' + i] || {};
+      const ts = parseTs(am.timestamp) || parseTs(um.timestamp);
+      agg.add(dayKey(ts || file.lastModified), (c && c.platform) || 'text-generation-webui', String(am.model_name || 'text-generation-webui'),
+        { in: estTok(user.length), out: estTok(reply.length), msgs: 1, est: 1 }, sid, ts ? ts.getHours() : undefined);
+      msgs++;
+    });
+    if (onProgress) onProgress(fi + 1, list.length);
+  }
+  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines, addedIds: [] } };
+}
+
 /** ScanCache key prefix — bump whenever a parser's OUTPUT changes for unchanged bytes (cached per-file entries
  *  would otherwise serve pre-fix rows forever for finished files). History: 'scan:' → v3 (per-hour granularity,
  *  connector-prefixed signatures) → v4 (Roo/Cline inclusive tokensIn + per-request model, local:1 flags, Gemini CLI
@@ -2584,6 +2686,27 @@ async function validateLlamaCpp(base) {
   try { const p = await pollLlamaCpp(base); metricsNote = `counting tokens from /metrics while this page is open (${p.label})`; }
   catch (e) { metricsNote = `${e.message || e} — tokens are NOT counted until then`; }
   return { label: model || 'llama-server', detail: `${model ? 'model ' + model : 'llama-server healthy'} · ${metricsNote} · no history on the server` };
+}
+
+/** GPT4All live validate: GET /v1/models on the app's Local API Server (off by default; CORS * when on). No history endpoint. */
+async function validateGpt4All(base) {
+  const j = await fetchJSON(base + '/v1/models', {});
+  const n = Array.isArray(j && j.data) ? j.data.length : 0;
+  return { label: `${n} models`, detail: `${n} models listed · validate-only: no usage history on the server and the app's .chat files carry no token counts` };
+}
+/** Jan live validate: GET /v1/models on the Local API Server (CORS on by default; an optional API key is NOT sent). No history endpoint —
+ *  thread history comes from the data folder (parseJanThreads). */
+async function validateJan(base) {
+  const j = await fetchJSON(base + '/v1/models', {});
+  const n = Array.isArray(j && j.data) ? j.data.length : 0;
+  return { label: `${n} models`, detail: `${n} models listed · no usage history on the server — thread history (estimated) is read from the Jan data folder below` };
+}
+/** text-generation-webui live validate: GET /v1/models on the --api server (CORS-blocked from file:// unless --listen / --public-api).
+ *  No history endpoint (/v1/billing/usage is a stub) — history comes from user_data/logs (parseTgwebuiLogs). */
+async function validateTgwebui(base) {
+  const j = await fetchJSON(base + '/v1/models', {});
+  const n = Array.isArray(j && j.data) ? j.data.length : 0;
+  return { label: `${n} models`, detail: `${n} models listed · no usage history on the server — chat/instruct logs (estimated) are read from the user_data folder below` };
 }
 
 async function fetchCopilotAll(token) {
@@ -3545,7 +3668,7 @@ const App = {
       if (c.poll) { this.stopPoll(c); LS.del('poll:' + id); }   // metrics-poll: stop the loop and forget the counter baseline (a reconnect starts from the current counters)
       delete this._dirHandles[id]; IDB.del('dir:' + id);   // unconditional: a handle may be persisted in IDB without being restored into memory (denied permission, early disconnect)
       const rs = $(id + '-rescan'); if (rs) rs.hidden = true; const s = $(c.statusEl); if (s) { s.textContent = 'Not connected.'; s.dataset.gen = ''; }
-      const ss = $(id + '-scan-status'); if (ss) ss.textContent = 'No usage-log folder chosen.';   // dual-driver cards: reset the folder line too
+      const ss = $(id + '-scan-status'); if (ss) ss.textContent = 'No ' + (c.folderLabel || 'usage-log') + ' folder chosen.';   // dual-driver cards: reset the folder line too (same noun as ensureSourceCard)
     }
     if (confirm(`Also delete ${c.name}'s stored usage data? OK = delete, Cancel = keep the data.`)) {
       for (const sid of c.srcIds) delete Store.sources[sid];
@@ -4014,14 +4137,14 @@ const App = {
       const fb = el('input', { type: 'file', id: c.id + '-fallback', webkitdirectory: '', multiple: '', hidden: '' });
       fb.addEventListener('change', (e) => { const files = [...e.target.files].map(f => ({ path: f.webkitRelativePath || f.name, file: f })); e.target.value = ''; if (files.length) this.scanFiles(c, files); });
       kids.push(el('div', { class: 'row' },
-        el('button', { class: 'btn' + (c.baseUrl ? '' : ' primary'), id: c.id + '-pick', text: c.baseUrl ? 'Choose usage-log folder…' : 'Choose folder…', onclick: () => this.pickFolderFor(c) }),
+        el('button', { class: 'btn' + (c.baseUrl ? '' : ' primary'), id: c.id + '-pick', text: c.baseUrl ? 'Choose ' + (c.folderLabel || 'usage-log') + ' folder…' : 'Choose folder…', onclick: () => this.pickFolderFor(c) }),
         el('button', { class: 'btn rescan', id: c.id + '-rescan', text: 'Re-scan', hidden: '', onclick: () => this.rescanFolder(c.id) }),
         el('progress', { id: c.id + '-progress', max: '100', value: '0', hidden: '' }),
         fb));
       const link = el('a', { href: '#', text: 'use the classic folder chooser' });
       link.addEventListener('click', (e) => { e.preventDefault(); fb.click(); });
       kids.push(el('div', { class: 'note' }, 'Files are read in your browser only. Looking for: ' + (c.hint || 'log files') + '. If the folder picker does not open, ', link, ' instead.'));
-      if (dual) kids.push(el('div', { class: 'status', id: c.id + '-scan-status', text: 'No usage-log folder chosen.' }));
+      if (dual) kids.push(el('div', { class: 'status', id: c.id + '-scan-status', text: 'No ' + (c.folderLabel || 'usage-log') + ' folder chosen.' }));
     }
     if (!dual) kids.push(statusEl);
     const L = c.links || {}, ln = [];
