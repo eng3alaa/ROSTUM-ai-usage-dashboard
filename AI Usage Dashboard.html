@@ -1384,6 +1384,16 @@ const CONNECTORS = [
     qualityNote: 'Exact tokens per model and UTC day from Azure Monitor metrics (ProcessedPromptTokens / GeneratedTokens, or InputTokens / OutputTokens on newer deployments — never both for the same model-day); request counts are not pulled, so messages show 0, and cache-hit tokens are not split out. Billed dollars per day come from Cost Management (PreTaxCost, service Cognitive Services — every Cognitive Services resource in the scope, so narrow the scope to the resource group that holds only Azure OpenAI) when you give a cost scope; billing lags 8–24 hours, so the last day or two reads low. Azure has no API-key path: paste an Entra access token from the az CLI (about 1 hour; needs Monitoring Reader on the resources and Cost Management Reader on the scope). The token is kept in this tab only — never saved; paste a fresh one after it expires. Metrics keep 93 days.',
     paths: ['token: az account get-access-token --resource https://management.azure.com --query accessToken -o tsv (about 1 hour)', 'resource id: Azure portal → the Azure OpenAI resource → Properties → Resource ID', 'cost scope: /subscriptions/<id> or /subscriptions/<id>/resourceGroups/<rg>', 'no local usage files (~/.azure holds credentials only)'],
     links: { docs: 'https://learn.microsoft.com/en-us/azure/foundry/openai/monitor-openai-reference', usage: 'https://portal.azure.com/#view/Microsoft_Azure_CostManagement/Menu/~/costanalysis' } },
+  { id: 'vertex', platform: 'Google Vertex AI', name: 'Google Vertex AI', category: 'cloud', kind: 'cloud-token', sessionOnly: true,
+    statusEl: 'vertex-status', brand: '#34a853', mark: 'Vx', srcIds: ['vertex'], keyLS: 'key:vertex', fetch: 'fetchVertexAI',   // keyLS never written (sessionOnly)
+    keyLabel: 'gcloud access token', keyHint: 'gcloud auth print-access-token',
+    fields: [
+      { id: 'project', label: 'GCP project id', placeholder: 'my-project-123' },
+      { id: 'billingTable', label: 'BigQuery billing export table (optional)', placeholder: 'project.dataset.gcp_billing_export_v1_XXXX' } ],
+    quality: 'exact',
+    qualityNote: 'Exact tokens per publisher model (Gemini, Claude on Vertex, …) from Cloud Monitoring\'s aiplatform token_count metric, summed per model and input/output type in 24-hour windows ending at the time you sync (attributed to the UTC date of the window end); request counts are not pulled, so messages show 0. Billed dollars only come from a Cloud Billing export to BigQuery (service Vertex AI, per usage day): give the export table and the same token runs the query — there is no Cloud Billing REST endpoint for incurred cost, so without the export the card is tokens-only. Vertex has no API-key path: paste an OAuth access token from the gcloud CLI (about 1 hour; needs roles/monitoring.viewer, plus bigquery.jobUser and dataViewer for cost). The token is kept in this tab only — never saved; paste a fresh one after it expires. This is a different product and bill from the Gemini (Google AI Studio) API card.',
+    paths: ['token: gcloud auth print-access-token (about 1 hour)', 'project id: console.cloud.google.com → project selector', 'billing export: Billing → Billing export → BigQuery export → dataset; table gcp_billing_export_v1_<billing account id>', 'no local usage files (~/.config/gcloud holds credentials only)'],
+    links: { docs: 'https://docs.cloud.google.com/monitoring/api/metrics_gcp_a_b', usage: 'https://console.cloud.google.com/billing' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv'] },
 ];
@@ -3001,6 +3011,68 @@ async function fetchAzureOpenAI(token, fields, opts = {}) {
   return { label: `${resources.length} resource${resources.length === 1 ? '' : 's'}`,
     detail: `${rows.length} usage rows · ${nModels} model${nModels === 1 ? '' : 's'} · last ${days} days` + (billed ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from Cost Management` : ' · no cost scope — add one for billed dollars'),
     rows, ...(billed ? { billed } : {}), meta: { days, resources: resources.length } };
+}
+
+/** Google Vertex AI — cloud-token fetcher. token: OAuth access token (gcloud auth print-access-token), fields: { project, billingTable? },
+ *  opts: { days }. (1) Cloud Monitoring timeSeries.list for aiplatform.googleapis.com/publisher/online_serving/token_count, aligned to
+ *  86400 s (ALIGN_SUM), summed across series (REDUCE_SUM), grouped by model_user_id and the metric's `type` label (input | output) →
+ *  exact tokens per publisher model. Monitoring anchors alignment windows to interval.endTime (= the sync time), so each point is the 24 h
+ *  ending then, attributed to the UTC date of (window end − 1 s). Request counts are not pulled → msgs 0. (2) when billingTable is given:
+ *  BigQuery jobs.query against the Cloud Billing export (service.description 'Vertex AI') → billed per usage day; there is no Cloud Billing
+ *  REST endpoint for incurred cost, the export is the only path. 401 → 'token expired — mint a new one (gcloud auth print-access-token)';
+ *  403 → token rejected (expired or missing roles). API keys are not accepted by either API. */
+async function fetchVertexAI(token, fields, opts = {}) {
+  const days = Math.max(1, opts.days || 90);
+  const project = String(fields.project || '').trim();
+  if (!/^[a-z0-9][a-z0-9\-:.]{4,}$/i.test(project)) throw new Error('Enter the GCP project id (e.g. my-project-123)');
+  const table = String(fields.billingTable || '').trim();
+  if (table && !/^[\w\-]+\.[\w\-]+\.[\w\-]+$/.test(table)) throw new Error('Billing table must look like project.dataset.table (letters, digits, _ and - only)');   // also keeps the SQL below injection-free
+  const auth = { expired: 'token expired — mint a new one (gcloud auth print-access-token)', denied: 'token rejected (403) — expired, or missing roles/monitoring.viewer (bigquery.jobUser for cost); mint a new one' };
+  const headers = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
+  const endMs = Date.now(), startMs = endMs - days * 864e5;
+  const agg = makeAgg();
+  let pageToken = null, pages = 0;
+  do {
+    const q = new URLSearchParams();
+    q.set('filter', 'metric.type="aiplatform.googleapis.com/publisher/online_serving/token_count"');
+    q.set('interval.startTime', new Date(startMs).toISOString());
+    q.set('interval.endTime', new Date(endMs).toISOString());
+    q.set('aggregation.alignmentPeriod', '86400s');
+    q.set('aggregation.perSeriesAligner', 'ALIGN_SUM');
+    q.set('aggregation.crossSeriesReducer', 'REDUCE_SUM');
+    q.append('aggregation.groupByFields', 'resource.labels.model_user_id');
+    q.append('aggregation.groupByFields', 'metric.labels.type');
+    if (pageToken) q.set('pageToken', pageToken);
+    const j = await cloudJSON(`https://monitoring.googleapis.com/v3/projects/${encodeURIComponent(project)}/timeSeries?${q}`, { headers }, auth);
+    for (const s of (j && j.timeSeries) || []) {
+      const type = String((((s.metric || {}).labels) || {}).type || '').toLowerCase();
+      const field = type === 'input' ? 'in' : type === 'output' ? 'out' : null;
+      if (!field) continue;   // any other label value is not a token bucket this row model can place
+      const model = (((s.resource || {}).labels) || {}).model_user_id || 'vertex-ai';
+      for (const p of s.points || []) {
+        const v = (p && p.value) || {};
+        const n = finTok(Number(v.int64Value ?? v.doubleValue ?? 0));
+        if (!n) continue;
+        const end = Date.parse(((p.interval || {}).endTime) || '');
+        if (!Number.isFinite(end)) continue;
+        agg.add(dayKeyUTC(end - 1000), 'Google Vertex AI', model, { [field]: n, msgs: 0 });
+      }
+    }
+    pageToken = (j && j.nextPageToken) || null;
+  } while (pageToken && ++pages < 50);
+  const rows = agg.rows();
+  let billed;
+  if (table) {
+    const body = { query: "SELECT DATE(usage_start_time) d, SUM(cost) c FROM `" + table + "` WHERE service.description = 'Vertex AI' AND usage_start_time >= TIMESTAMP('" + dayKeyUTC(startMs) + "') GROUP BY d ORDER BY d", useLegacySql: false, timeoutMs: 30000, maxResults: 1000 };
+    const j = await cloudJSON(`https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(project)}/queries`, { method: 'POST', headers, body: JSON.stringify(body) }, auth);
+    if (j && j.jobComplete === false) throw new Error('BigQuery did not finish within 30 s — sync again');
+    billed = ((j && j.rows) || []).map(r => { const f = r.f || []; return { d: String((f[0] || {}).v || ''), amount: finAmt(parseFloat((f[1] || {}).v)) }; })
+      .filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x.d)).sort((a, b) => a.d < b.d ? -1 : 1);
+  }
+  const nModels = new Set(rows.map(r => r.model)).size;
+  return { label: project,
+    detail: `${rows.length} usage rows · ${nModels} model${nModels === 1 ? '' : 's'} · last ${days} days` + (billed ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from the billing export` : ' · no billing table — add the BigQuery export table for billed dollars'),
+    rows, ...(billed ? { billed } : {}), meta: { days, project } };
 }
 
 async function fetchCopilotAll(token) {

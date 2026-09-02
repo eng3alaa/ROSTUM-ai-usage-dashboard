@@ -491,6 +491,30 @@ export async function generate() {
   w('wave2/azure/cost.json', JSON.stringify({ id: '/subscriptions/s1/providers/Microsoft.CostManagement/query/abc', name: 'abc', type: 'Microsoft.CostManagement/query',
     properties: { nextLink: null, columns: [{ name: 'PreTaxCost', type: 'Number' }, { name: 'UsageDate', type: 'Number' }, { name: 'Currency', type: 'String' }],
       rows: [[12.34, 20260810, 'USD'], [0.5, 20260811, 'USD'], [1.16, 20260811, 'USD']] } }, null, 1));
+  // T11 — Cloud Monitoring timeSeries.list, TWO pages (page 1 carries nextPageToken 'p2'). Points are 24-h aligned windows; the fetcher
+  //   attributes each to the UTC date of (endTime − 1 s): endTime 2026-08-11T12:00Z → 08-11, 2026-08-10T12:00Z → 08-10.
+  //   page 1: gemini-2.5-pro input 5000 (08-11) + 3000 (08-10); output 700 (08-11) + 400 (08-10)
+  //   page 2: gemini-2.5-flash input 1200 (08-11), output 150 (08-11); a series WITHOUT model_user_id → model 'vertex-ai', input 10 (08-10);
+  //           a point with an empty value {} → ignored
+  //   Expected: in = 5000+3000+1200+10 = 9210 · out = 700+400+150 = 1250 · 4 rows (pro 08-10, pro 08-11, flash 08-11, vertex-ai 08-10) · 3 models
+  const vxPt = (start, end, v) => ({ interval: { startTime: start, endTime: end }, value: { int64Value: String(v) } });
+  const vxSeries = (type, model, points) => ({ metric: { labels: { type, request_type: 'shared' }, type: 'aiplatform.googleapis.com/publisher/online_serving/token_count' },
+    resource: { type: 'aiplatform.googleapis.com/PublisherModel', labels: model ? { model_user_id: model, project_id: 'proj-a', location: 'us-central1' } : { project_id: 'proj-a', location: 'us-central1' } },
+    metricKind: 'DELTA', valueType: 'INT64', points });
+  w('wave2/vertex/timeseries-1.json', JSON.stringify({ timeSeries: [
+    vxSeries('input', 'gemini-2.5-pro', [vxPt('2026-08-10T12:00:00Z', '2026-08-11T12:00:00Z', 5000), vxPt('2026-08-09T12:00:00Z', '2026-08-10T12:00:00Z', 3000)]),
+    vxSeries('output', 'gemini-2.5-pro', [vxPt('2026-08-10T12:00:00Z', '2026-08-11T12:00:00Z', 700), vxPt('2026-08-09T12:00:00Z', '2026-08-10T12:00:00Z', 400)]),
+  ], nextPageToken: 'p2', unit: '1' }, null, 1));
+  w('wave2/vertex/timeseries-2.json', JSON.stringify({ timeSeries: [
+    vxSeries('input', 'gemini-2.5-flash', [vxPt('2026-08-10T12:00:00Z', '2026-08-11T12:00:00Z', 1200)]),
+    vxSeries('output', 'gemini-2.5-flash', [vxPt('2026-08-10T12:00:00Z', '2026-08-11T12:00:00Z', 150)]),
+    vxSeries('input', null, [vxPt('2026-08-09T12:00:00Z', '2026-08-10T12:00:00Z', 10)]),
+    vxSeries('input', 'gemini-2.5-pro', [{ interval: { startTime: '2026-08-11T12:00:00Z', endTime: '2026-08-12T12:00:00Z' }, value: {} }]),
+  ], unit: '1' }, null, 1));
+  // T11 — BigQuery jobs.query response for the billing-export query. Expected billed: 08-10 = 1.23 · 08-11 = 2.5
+  w('wave2/vertex/bigquery.json', JSON.stringify({ kind: 'bigquery#queryResponse', schema: { fields: [{ name: 'd', type: 'DATE', mode: 'NULLABLE' }, { name: 'c', type: 'FLOAT', mode: 'NULLABLE' }] },
+    jobReference: { projectId: 'proj-a', jobId: 'job_x', location: 'US' }, totalRows: '2', rows: [{ f: [{ v: '2026-08-10' }, { v: '1.23' }] }, { f: [{ v: '2026-08-11' }, { v: '2.5' }] }],
+    totalBytesProcessed: '1024', jobComplete: true, cacheHit: false }, null, 1));
 }
 
 if (process.argv[1] === import.meta.filename) await generate();
