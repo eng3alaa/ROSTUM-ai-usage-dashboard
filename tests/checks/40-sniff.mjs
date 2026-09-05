@@ -41,8 +41,19 @@ export async function run({ browser, ok }) {
         sniffJSON(meta, 'message_1.json'), sniffJSON(px, 'threads.json'), sniffJSON({ threads: px }, 'export.json'),
         sniffJSON({ conversations: [{ mapping: {} }] }, 'c.json'), sniffJSON({ conversations: [] }, 'c.json'), sniffJSON({ conversations: [{ messages: [{ role: 'user', created_at: 1 }] }] }, 'c.json')];
     });
-    ok('sniff: grok-export / deepseek-chat-export (file name or source gated; plain conversations.json → unknown) / meta-ai-export / perplexity-export (array + {threads}); ChatGPT wrapped needs mapping trees',
-      JSON.stringify(k2) === JSON.stringify(['grok-export', 'deepseek-chat-export', 'unknown', 'deepseek-chat-export', 'meta-ai-export', 'perplexity-export', 'perplexity-export', 'chatgpt-export-wrapped', 'chatgpt-export-wrapped', 'unknown']), JSON.stringify(k2));
+    ok('sniff: grok-export / deepseek-chat-export (file name or source gated; plain conversations.json → unknown) / meta-ai-export / perplexity-export (array + {threads}); ChatGPT wrapped needs mapping trees; {conversations:[]} is empty-export (must not replace an earlier ChatGPT import)',
+      JSON.stringify(k2) === JSON.stringify(['grok-export', 'deepseek-chat-export', 'unknown', 'deepseek-chat-export', 'meta-ai-export', 'perplexity-export', 'perplexity-export', 'chatgpt-export-wrapped', 'empty-export', 'unknown']), JSON.stringify(k2));
+    // {data:[…]} wrappers: a chat export's data[] is not a provider report — provider buckets carry results[] / start_time / starting_at; DeepSeek chat accepts create_time on messages or the conversation
+    const k3 = await page.evaluate(() => {
+      const dsChat = [{ id: 'c1', messages: [{ role: 'user', content: 'x', inserted_at: '2026-08-10T09:00:00Z' }] }];
+      const dsCreate = [{ id: 'c2', create_time: 1786000000, model: 'deepseek-reasoner', messages: [{ role: 'user', content: 'x', create_time: 1786000000 }, { role: 'assistant', content: 'y' }] }];
+      const dsConvTime = [{ id: 'c3', create_time: '2026-08-12T10:00:00Z', messages: [{ role: 'user', content: 'x' }, { role: 'assistant', content: 'y' }] }];
+      const px = [{ query: 'q', answer: 'a', created_at: '2026-08-10T09:00:00Z' }];
+      return [sniffJSON({ data: dsChat }, 'deepseek-export.json'), sniffJSON({ data: px }, 'perplexity.json'), sniffJSON({ source: 'deepseek', data: dsCreate }, 'x.json'), sniffJSON(dsCreate, 'deepseek.json'), sniffJSON(dsConvTime, 'deepseek.json'),
+        sniffJSON({ data: [{ starting_at: '2026-08-01T00:00:00Z', results: [] }] }, 'r.json'), sniffJSON({ data: [{ start_time: 1780000000, results: [] }] }, 'r.json'), sniffJSON({ data: [{ foo: 1 }] }, 'r.json'), sniffJSON({ data: dsChat }, 'conversations.json')];
+    });
+    ok('sniff: {data:[…]} routes DeepSeek chat (name/source-gated; create_time on messages or the conversation accepted) and Perplexity exports; real provider buckets still read empty-report; an unknown data[] stays unknown',
+      JSON.stringify(k3) === JSON.stringify(['deepseek-chat-export', 'perplexity-export', 'deepseek-chat-export', 'deepseek-chat-export', 'deepseek-chat-export', 'empty-report', 'empty-report', 'unknown', 'unknown']), JSON.stringify(k3));
   } finally {
     await page.close();
   }

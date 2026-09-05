@@ -2633,24 +2633,25 @@ function parseGrokExport(obj) {
   return { rows: agg.rows(), meta: { msgs, convs: convs.length, skipped } };
 }
 /** chat.deepseek.com export (shape undocumented → tolerant): an array of conversations, or {conversations|data:[…]}, each with
- *  messages[{role|sender, content|text, inserted_at|created_at|timestamp, model?}]. Assistant messages → rows; model = message.model
- *  or 'deepseek-chat'; a message without a time falls back to the conversation's; none → skipped and counted. */
+ *  messages[{role|sender, content|text, inserted_at|created_at|create_time|timestamp, model?}]. Assistant messages → rows; model = message.model,
+ *  else the conversation's model, else 'deepseek-chat'; a message without a time falls back to the conversation's; none → skipped and counted. */
+const dsChatTime = (o) => exportTimestamp(o.inserted_at != null ? o.inserted_at : o.created_at != null ? o.created_at : o.create_time != null ? o.create_time : o.timestamp);
 function parseDeepSeekChatExport(obj) {
   const agg = makeAgg(); let msgs = 0, skipped = 0;
   const convs = Array.isArray(obj) ? obj : (obj && (Array.isArray(obj.conversations) ? obj.conversations : Array.isArray(obj.data) ? obj.data : [])) || [];
   for (const c of convs) {
     if (!c || typeof c !== 'object') continue;
     const list = Array.isArray(c.messages) ? c.messages : [];
-    const convTs = exportTimestamp(c.inserted_at != null ? c.inserted_at : c.created_at != null ? c.created_at : c.timestamp);
+    const convTs = dsChatTime(c);
     let lastUser = 0;
     for (const m of list) {
       if (!m || typeof m !== 'object') continue;
       const chars = exportText(m.content != null ? m.content : m.text).length;
       const role = String(m.role || m.sender || '').toLowerCase();
       if (role !== 'assistant') { if (role === 'user' || role === 'human') lastUser = chars; continue; }
-      const ts = exportTimestamp(m.inserted_at != null ? m.inserted_at : m.created_at != null ? m.created_at : m.timestamp) || convTs;
+      const ts = dsChatTime(m) || convTs;
       if (!ts) { skipped++; continue; }
-      agg.add(ts.d, 'DeepSeek chat', String(m.model || 'deepseek-chat'), { in: estTok(lastUser), out: estTok(chars), msgs: 1, est: 1 }, undefined, ts.hour);
+      agg.add(ts.d, 'DeepSeek chat', String(m.model || c.model || 'deepseek-chat'), { in: estTok(lastUser), out: estTok(chars), msgs: 1, est: 1 }, undefined, ts.hour);
       msgs++;
     }
   }
@@ -2850,7 +2851,9 @@ function parseCursorUsageCSV(text) {
 
 /* DeepSeek API monthly usage export (platform.deepseek.com/usage → Export monthly data → ZIP: amount-YYYY-MM.csv + cost-YYYY-MM.csv).
  * The layout is documented only by community parsers (github.com/shajanjp/deepseek-usage, deepseek-usage.xyz) and has changed once
- * (utc_date YYYY-MM-DD → YYYYMMDD), so both files are sniffed by header. Two shapes are accepted:
+ * (utc_date YYYY-MM-DD → YYYYMMDD, then start_time_iso / end_time_iso in place of utc_date — the day is the UTC day of start_time_iso, end_time_iso is
+ * ignored), so both files are sniffed by header. The cost file is claimed on positive evidence only (the cost-*.csv name, or a header the export writes:
+ * utc_date / api_key_name / currency / start_time_iso / wallet_type) and never when a token alias is present — date,model,cost CSVs are the generic importer's. Two shapes are accepted:
  *   long (seen in the wild): utc_date, model, api_key_name, type, [price,] amount — type ∈ input_cache_miss_tokens | input_cache_hit_tokens |
  *        output_tokens | request_count; one row per (day, model, key, type). miss → in, hit → cr, output → out, request_count → msgs.
  *        A price column is read as a PER-UNIT price (price × amount; the community reading) and only used when no cost CSV is present.
@@ -2859,14 +2862,16 @@ function parseCursorUsageCSV(text) {
  * `head` = header cells normalized to lowercase_with_underscores. Days are UTC days (the export's own granularity). */
 function isDeepSeekAmountCSV(head, fileName) {
   const has = (re) => head.some(h => re.test(h));
-  if (!has(/date|^day$/) || !has(/^model/)) return false;
+  if (!has(/date|^day$|^start_time/) || !has(/^model/)) return false;   // utc_date (older layout) or start_time_iso (newer)
   if (has(/^type$/) && has(/^amount$/)) return true;                                   // long shape
   return has(/input|prompt/) && has(/output|completion/) && (has(/cache.*hit|hit/) || /(^|\/)amount-[^/]*\.csv$/i.test(String(fileName || '')));   // wide: a cache-hit column (or the export's file name) keeps generic CSVs out
 }
 function isDeepSeekCostCSV(head, fileName) {
   const has = (re) => head.some(h => re.test(h));
-  if (/(^|\/)cost-[^/]*\.csv$/i.test(String(fileName || '')) && has(/date/)) return true;
-  return has(/date|^day$/) && has(/^model/) && has(/cost|spend|bill|^total/) && !has(/token|platform|^type$/);
+  // a token/usage column of any spelling (generic aliases in / out / input / output / prompt_tokens / completion_tokens / cache_read, Cursor, the amount file's type) means "not a cost file"
+  if (has(/^(in|out)$|input|output|prompt|completion|cache|token|platform|provider|^type$/)) return false;
+  if (!has(/date|^day$|^start_time/) || !has(/cost|spend|bill|^total/)) return false;
+  return /(^|\/)cost-[^/]*\.csv$/i.test(String(fileName || '')) || has(/^utc_date$|^api_key_name$|^currency$|^start_time_iso$|^wallet_type$/);   // positive evidence only
 }
 const deepSeekDay = (raw) => { const s = String(raw || '').trim(); if (/^\d{8}$/.test(s)) return s.slice(0, 4) + '-' + s.slice(4, 6) + '-' + s.slice(6, 8); if (RE_DATEONLY.test(s)) return s; return dayKeyUTC(s); };
 function parseDeepSeekAmountCSV(text) {
@@ -2874,7 +2879,7 @@ function parseDeepSeekAmountCSV(text) {
   if (rows.length < 2) throw new Error('Empty CSV');
   const head = rows[0].map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
   const find = (re) => head.findIndex(h => re.test(h));
-  const iDate = find(/date|^day$/), iModel = find(/^model/), iType = find(/^type$/), iAmount = find(/^amount$/), iPrice = find(/^price/),
+  const iDate = find(/date|^day$|^start_time/), iModel = find(/^model/), iType = find(/^type$/), iAmount = find(/^amount$/), iPrice = find(/^price/),
         iMiss = find(/miss/), iIn = iMiss >= 0 ? iMiss : find(/input|prompt/), iHit = find(/cache.*hit|hit/), iOut = find(/output|completion/), iReq = find(/request|count|calls/);
   if (iDate < 0 || iModel < 0) throw new Error('Not a DeepSeek usage CSV (needs date + model columns)');
   const long = iType >= 0 && iAmount >= 0;
@@ -2903,7 +2908,7 @@ function parseDeepSeekCostCSV(text) {
   if (rows.length < 2) throw new Error('Empty CSV');
   const head = rows[0].map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
   const find = (re) => head.findIndex(h => re.test(h));
-  const iDate = find(/date|^day$/), iCost = find(/cost|spend|bill|^total/), iCur = find(/currency/);
+  const iDate = find(/date|^day$|^start_time/), iCost = find(/cost|spend|bill|^total/), iCur = find(/currency/);
   if (iDate < 0 || iCost < 0) throw new Error('Not a DeepSeek cost CSV (needs date + cost columns)');
   const billed = new Map(); let n = 0, rejected = 0, currency = '';
   for (let r = 1; r < rows.length; r++) {
@@ -3913,10 +3918,12 @@ async function readZipEntries(file) {
 /* ---------- import router (drop zone) ---------- */
 function sniffJSON(obj, fileName) {
   // Wave 2 chat-export shapes (checked after the provider reports and the ChatGPT / Claude.ai / Takeout arrays)
-  const dsConv = (x) => !!(x && Array.isArray(x.messages) && x.messages.some(m => m && m.role && (m.inserted_at != null || m.created_at != null)));
+  const dsTime = (o) => !!o && (o.inserted_at != null || o.created_at != null || o.create_time != null);
+  const dsConv = (x) => !!(x && Array.isArray(x.messages) && x.messages.some(m => m && m.role && (dsTime(m) || dsTime(x))));   // a message time, or the conversation's (the parser's fallback)
   const dsMark = (o, name) => /deepseek/i.test(String(name || '')) || (!!o && !Array.isArray(o) && /deepseek/i.test(String(o.source || o.platform || o.provider || '')));   // generic "conversations with messages" JSON must not be mis-routed: DeepSeek needs the name or a source mark
   const pxItem = (x) => !!(x && typeof x === 'object' && ('query' in x || 'query_str' in x || 'question' in x) && ('answer' in x || 'response' in x || 'text' in x));
-  if (obj && Array.isArray(obj.data) && obj.data.length) {
+  // provider usage/cost reports only when the buckets look like buckets (results[] / start_time / starting_at) — a chat export's {data:[…]} falls through to the export sniffs below
+  if (obj && Array.isArray(obj.data) && obj.data.length && obj.data.some(b => b && (Array.isArray(b.results) || typeof b.start_time === 'number' || typeof b.starting_at === 'string'))) {
     // find the first bucket that actually has results — providers emit empty buckets for zero-usage days
     const withResult = obj.data.find(b => b && Array.isArray(b.results) && b.results.length);
     const isUnixBucket = obj.data.some(b => b && typeof b.start_time === 'number');
@@ -3939,8 +3946,10 @@ function sniffJSON(obj, fileName) {
     const dsList = convs || (Array.isArray(obj.data) ? obj.data : null);
     if (dsList && dsConv(dsList[0]) && dsMark(obj, fileName)) return 'deepseek-chat-export';
     if (Array.isArray(obj.participants) && Array.isArray(obj.messages) && (obj.participants.some(p => /meta\s*ai/i.test(p && p.name)) || obj.messages.some(m => /meta\s*ai/i.test(m && m.sender_name)))) return 'meta-ai-export';
-    if (Array.isArray(obj.threads) && obj.threads[0] && (pxItem(obj.threads[0]) || (Array.isArray(obj.threads[0].entries) && pxItem(obj.threads[0].entries[0])))) return 'perplexity-export';
-    if (convs && (!convs.length || (convs[0] && convs[0].mapping))) return 'chatgpt-export-wrapped';   // only ChatGPT mapping trees — any other {conversations:[…]} stays unknown
+    const pxList = Array.isArray(obj.threads) ? obj.threads : Array.isArray(obj.data) ? obj.data : null;   // {threads:[…]} or {data:[…]} — parsePerplexityExport reads both
+    if (pxList && pxList[0] && (pxItem(pxList[0]) || (Array.isArray(pxList[0].entries) && pxItem(pxList[0].entries[0])))) return 'perplexity-export';
+    if (convs && !convs.length) return 'empty-export';   // an empty {conversations:[]} (ChatGPT / Grok / DeepSeek chat alike) never reaches a parser, so it cannot replace an earlier import
+    if (convs && convs[0] && convs[0].mapping) return 'chatgpt-export-wrapped';   // only ChatGPT mapping trees — any other {conversations:[…]} stays unknown
   }
   return 'unknown';
 }
@@ -5789,6 +5798,8 @@ const App = {
       imported++;
     } else if (kind === 'empty-report') {
       notes.push(`${f.name}: recognized usage/cost report, but every day in it is empty — nothing to import`);
+    } else if (kind === 'empty-export') {
+      notes.push(`${f.name}: empty export — nothing to import`);
     } else {
       return null;
     }
@@ -5803,7 +5814,8 @@ const App = {
     let imported = 0;   // count of successful import branches — only these justify a connected 'imports' card
     // DeepSeek API usage export (monthly ZIP, or its loose amount-/cost- CSVs): every month is a separate export, so rows MERGE by
     // (day, model) and billed by day — importing August never deletes July. Rows live under the deepseek connector's srcId
-    // 'deepseek-usage-zip' (platform 'DeepSeek API'), not under Imports; the deepseek card reads connected through the export alone.
+    // 'deepseek-usage-zip' (platform 'DeepSeek API'), not under Imports; the deepseek card reads connected through the export alone — so the
+    // file is listed in the Imports notes but never counted in the Imports card's "N file(s) imported" (that count is what connects that card).
     const landDeepSeek = (res, label) => {
       const keyOf = (r) => JSON.stringify([r.d, r.model]);
       const prev = Store.sources['deepseek-usage-zip'] || { rows: [], meta: {} };
@@ -5817,12 +5829,13 @@ const App = {
         for (const b of res.billed) bm.set(b.d, b);   // same-day re-import replaces
         Store.setBilled('deepseek-usage-zip', [...bm.values()].sort((a, b2) => a.d < b2.d ? -1 : 1));
       }
-      if (!Store.connectors.deepseek) Store.setConnector('deepseek', { label: 'usage export (no key)', lastSync: Date.now(), err: null });
+      // a sync of the deepseek card: lastSync moves on every import (a keyed card must not read "needs attention" 7 days after its last balance check); a keyed label and any key error are kept
+      Store.setConnector('deepseek', { label: (Store.connectors.deepseek || {}).label || 'usage export (no key)', lastSync: Date.now() });
       const what = res.rows.length ? `${fmtInt(res.meta.rows)} rows (exact tokens; months merge by day/model)` : 'no token rows';
       const money = res.billed.length ? ` + billed amounts from the ${res.meta.billedFrom || 'cost CSV'}${res.meta.currency ? ' in ' + res.meta.currency + (res.meta.currency !== 'USD' ? ' (shown as-is in the $ fields)' : '') : ''}`
         : (res.rows.length ? ' — no cost file: drop the month\'s cost-*.csv too for billed amounts' : '');
       notes.push(`${label}: DeepSeek API usage export — ${what}${money}` + (res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric, negative or undated)` : ''));
-      imported++;
+      // no imported++ — not an Imports-card import (see above)
     };
     for (const f of files) {
       try {

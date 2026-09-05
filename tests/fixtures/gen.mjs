@@ -479,6 +479,26 @@ export async function generate() {
   w('wave2/deepseek/usage-2026-08.zip', zipBuffer([{ name: 'amount-2026-08.csv', data: dsAmountAug }, { name: 'cost-2026-08.csv', data: dsCostAug, deflate: true }]));
   w('wave2/deepseek/amount-2026-08.csv', dsAmountAug);   // the same CSVs dropped loose must merge into the same (day, model) keys — nothing doubles
   w('wave2/deepseek/cost-2026-08.csv', dsCostAug);
+  //   September — the newer export layout: start_time_iso / end_time_iso instead of utc_date (the day is the UTC day of start_time_iso; end_time_iso is ignored),
+  //   the cost file carries wallet_type + currency. in = 2000 + 300 = 2300 · cr = 500 · out = 700 + 900 = 1600 · msgs = 4 + 1 = 5 · amount rows = 7 · buckets 2 [(09-01 chat), (09-02 reasoner)]
+  //   cost-2026-09.csv: 09-01 → 0.0012 · 09-02 → 0.0031 · USD · rejected 0
+  w('wave2/deepseek/usage-2026-09.zip', zipBuffer([
+    { name: 'amount-2026-09.csv', deflate: true, data: [
+      'start_time_iso,end_time_iso,model,api_key_name,type,amount',
+      '2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,deepseek-chat,key1,input_cache_miss_tokens,2000',
+      '2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,deepseek-chat,key1,input_cache_hit_tokens,500',
+      '2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,deepseek-chat,key1,output_tokens,700',
+      '2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,deepseek-chat,key1,request_count,4',
+      '2026-09-02T00:00:00Z,2026-09-03T00:00:00Z,deepseek-reasoner,key1,input_cache_miss_tokens,300',
+      '2026-09-02T00:00:00Z,2026-09-03T00:00:00Z,deepseek-reasoner,key1,output_tokens,900',
+      '2026-09-02T00:00:00Z,2026-09-03T00:00:00Z,deepseek-reasoner,key1,request_count,1',
+    ].join('\n') + '\n' },
+    { name: 'cost-2026-09.csv', data: [
+      'start_time_iso,end_time_iso,model,api_key_name,wallet_type,currency,cost',
+      '2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,deepseek-chat,key1,topped_up,USD,0.0012',
+      '2026-09-02T00:00:00Z,2026-09-03T00:00:00Z,deepseek-reasoner,key1,granted,USD,0.0031',
+    ].join('\n') + '\n' },
+  ]));
   // T8c — a ChatGPT export ZIP as downloaded (conversations.json + extras). One conversation: user 40 chars → in 10, assistant 80 chars → out 20, model gpt-5.4, 1 reply
   const gptSec = (iso) => T(iso) / 1000;
   w('wave2/zip/chatgpt-export.zip', zipBuffer([
@@ -593,7 +613,9 @@ export async function generate() {
   // T13b — DeepSeek chat export (chat.deepseek.com → Settings → Data → Export data). Tolerant shape: array of conversations with messages[{role, content, inserted_at|created_at, model?}].
   //   c1: user 40 → assistant 80 (in 10, out 20, model deepseek-reasoner) · user 20 → assistant 8 (in 5, out 2; epoch SECONDS; no model → deepseek-chat) ·
   //   c2: user content[] 'abcd' → 'ok!!!' (in 1, out 1) · assistant with created_at null and no conversation time → skipped.
-  //   Expected: in=16 out=23 msgs=3 convs=2 skipped=1 · platform 'DeepSeek chat' · models deepseek-chat + deepseek-reasoner · est
+  //   c3: create_time (epoch seconds) on the conversation and the user message, model on the conversation only: user 12 → assistant 16 with no time and no model of its own
+  //       (in 3, out 4; the row lands on the conversation's create_time as the conversation's model deepseek-reasoner).
+  //   Expected: in=19 out=27 msgs=4 convs=3 skipped=1 · platform 'DeepSeek chat' · models deepseek-chat + deepseek-reasoner · est
   w('wave2/deepseek/deepseek-conversations.json', JSON.stringify([
     { id: 'c1', title: 'hello', inserted_at: '2026-08-10T09:00:00.000Z', messages: [
       { role: 'user', content: 'x'.repeat(40), inserted_at: '2026-08-10T09:00:00.000Z' },
@@ -604,6 +626,9 @@ export async function generate() {
       { role: 'user', content: [{ type: 'text', text: 'abcd' }], created_at: '2026-08-11T08:00:00.000Z' },
       { role: 'assistant', content: 'ok!!!', created_at: '2026-08-11T08:00:03.000Z' },
       { role: 'assistant', content: 'no time', created_at: null } ] },
+    { id: 'c3', title: 'three', create_time: T('2026-08-12T10:00:00.000Z') / 1000, model: 'deepseek-reasoner', messages: [
+      { role: 'user', content: 'p'.repeat(12), create_time: T('2026-08-12T10:00:00.000Z') / 1000 },
+      { role: 'assistant', content: 'q'.repeat(16) } ] },
   ], null, 1));
   // T13c — Meta AI thread (Download your information, JSON → message_1.json; Facebook DYI shape, newest first).
   //   sorted ascending: 08-09 'Here is the image' 17 chars (out 4, no preceding user → in 0) · user 40 → Meta AI 80 (in 10, out 20) · user 20 → Meta AI 8 (in 5, out 2) · one undated Meta AI message → skipped.

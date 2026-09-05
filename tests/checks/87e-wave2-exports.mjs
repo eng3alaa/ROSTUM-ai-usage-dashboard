@@ -102,6 +102,44 @@ export async function run({ browser, ok }) {
     ok('deepseek: registry entry is an api-key card (fetch fetchDeepSeekBalance, keyLS key:deepseek) in API vendors with srcIds [deepseek, deepseek-usage-zip], quality exact, copy states export-first / balance validate-only / months merge; Imports accepts .zip',
       ds.reg.kind === 'api-key' && ds.reg.fetch === 'fetchDeepSeekBalance' && ds.reg.keyLS === 'key:deepseek' && ds.reg.cat === 'api' && ds.reg.platform === 'DeepSeek API' && JSON.stringify(ds.reg.srcIds) === JSON.stringify(['deepseek', 'deepseek-usage-zip'])
       && ds.reg.quality === 'exact' && ds.reg.copy && ds.reg.statusEl && ds.reg.inHub && /\.zip/.test(ds.reg.accept || ''), JSON.stringify(ds.reg));
+    // ---- fix set: newer export layout (start_time_iso / end_time_iso, no utc_date) + landDeepSeek connector semantics ----
+    const ds2 = await page.evaluate(async (zSep, zJul, zGpt) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      const c = connectorById('deepseek');
+      const toFile = (b, name) => new File([Uint8Array.from(atob(b), ch => ch.charCodeAt(0))], name, { type: 'application/zip' });
+      const sum = (rows) => rows.reduce((a, r) => ({ in: a.in + r.in, cr: a.cr + r.cr, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, cr: 0, out: 0, msgs: 0 });
+      const src = () => Store.sources['deepseek-usage-zip'];
+      const note = () => document.getElementById('import-status').textContent;
+      try {
+        // (1) newer layout: both sniffers take start_time_iso as the date column (the cost file by header alone — wallet_type / currency — under any name); generic cost CSVs and a cost-*.csv with token columns are refused
+        const head = (s) => (parseCSV(s.split(/\r?\n/, 1)[0])[0] || []).map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+        const sniff = { amount: isDeepSeekAmountCSV(head('start_time_iso,end_time_iso,model,api_key_name,type,amount\n'), 'x.csv'), cost: isDeepSeekCostCSV(head('start_time_iso,end_time_iso,model,api_key_name,wallet_type,currency,cost\n'), 'x.csv'),
+          genericA: isDeepSeekCostCSV(['date', 'provider', 'model', 'in', 'out', 'cost'], 'x.csv'), genericB: isDeepSeekCostCSV(['date', 'model', 'cost_usd'], 'x.csv'), genericC: isDeepSeekCostCSV(['date', 'model', 'prompt_tokens', 'completion_tokens', 'cost'], 'cost-2026-08.csv') };
+        await App.handleImportFiles([toFile(zSep, 'usage-2026-09.zip')]);
+        const sep = src() ? { t: sum(src().rows), days: [...new Set(src().rows.map(r => r.d))].sort(), billed: Store.billedRows('deepseek-usage-zip'), meta: src().meta, note: note() } : { none: note() };   // guarded: an unrecognized ZIP must not abort the later checks
+        // (2) a key-connected card whose last balance check is 8 days old reads "needs attention"; a usage import is a sync of this card → ok again, the keyed label kept
+        Store.setConnector('deepseek', { label: 'balance 12.30 USD', lastSync: Date.now() - 8 * 864e5 });
+        const before = Store.connectorStatus(c);
+        await App.handleImportFiles([toFile(zJul, 'usage-2026-07.zip')]);
+        const after = { status: Store.connectorStatus(c), label: Store.connectors.deepseek.label, fresh: Date.now() - Store.connectors.deepseek.lastSync < 60e3 };
+        // (3) the Imports card: a DeepSeek-only import leaves it off (the rows live under the deepseek card's srcIds); a mixed batch counts only the ChatGPT ZIP, the note still lists the DeepSeek file
+        Store.sources = {}; Store.billed = {}; Store.connectors = {};
+        await App.handleImportFiles([toFile(zJul, 'usage-2026-07.zip')]);
+        const only = { imports: Store.connectors.imports === undefined, deepseek: Store.connectorStatus(c), note: note() };
+        await App.handleImportFiles([toFile(zGpt, 'chatgpt-export.zip'), toFile(zSep, 'usage-2026-09.zip')]);
+        const mixed = { label: (Store.connectors.imports || {}).label, note: note() };
+        return { sniff, sep, before, after, only, mixed };
+      } finally {
+        Store.sources = {}; Store.connectors = {}; Store.billed = {}; Store.persist(); App._render();
+      }
+    }, b64('wave2', 'deepseek', 'usage-2026-09.zip'), b64('wave2', 'deepseek', 'usage-2026-07.zip'), b64('wave2', 'zip', 'chatgpt-export.zip'));
+    ok('deepseek: newer export layout (start_time_iso / end_time_iso, no utc_date) — both sniffers take start_time_iso as the date column (cost by header alone: wallet_type / currency), generic cost CSVs and a cost-*.csv with token columns are refused; September ZIP → in=2300 cr=500 out=1600 msgs=5 on UTC days 09-01/09-02 (end_time_iso ignored), billed 0.0012 + 0.0031 USD',
+      ds2.sniff.amount && ds2.sniff.cost && !ds2.sniff.genericA && !ds2.sniff.genericB && !ds2.sniff.genericC && !!ds2.sep.t && ds2.sep.t.in === 2300 && ds2.sep.t.cr === 500 && ds2.sep.t.out === 1600 && ds2.sep.t.msgs === 5 && JSON.stringify(ds2.sep.days) === JSON.stringify(['2026-09-01', '2026-09-02'])
+      && ds2.sep.billed.length === 2 && ds2.sep.billed[0].d === '2026-09-01' && near(ds2.sep.billed[0].amount, 0.0012) && ds2.sep.billed[1].d === '2026-09-02' && near(ds2.sep.billed[1].amount, 0.0031) && ds2.sep.meta.rows === 7 && ds2.sep.meta.rejected === 0 && ds2.sep.meta.currency === 'USD'
+      && /usage-2026-09\.zip \(1 amount \+ 1 cost CSV\): DeepSeek API usage export — 7 rows/.test(ds2.sep.note), JSON.stringify({ sniff: ds2.sniff, sep: ds2.sep }));
+    ok('deepseek: a usage import is a sync of the deepseek card — a key-connected card 8 days past its balance check reads warn, then ok with its keyed label kept and lastSync fresh; a DeepSeek-only import leaves the Imports card off (rows live under the deepseek card) and a mixed batch counts only the ChatGPT ZIP ("1 file(s) imported") while the note still lists the DeepSeek file',
+      ds2.before === 'warn' && ds2.after.status === 'ok' && ds2.after.label === 'balance 12.30 USD' && ds2.after.fresh && ds2.only.imports && ds2.only.deepseek === 'ok' && /DeepSeek API usage export/.test(ds2.only.note)
+      && ds2.mixed.label === '1 file(s) imported' && /ChatGPT export — 1 conversations/.test(ds2.mixed.note) && /usage-2026-09\.zip \(1 amount \+ 1 cost CSV\): DeepSeek API usage export/.test(ds2.mixed.note), JSON.stringify({ before: ds2.before, after: ds2.after, only: ds2.only, mixed: ds2.mixed }));
     // ---- T13: chat-export parsers (Grok, DeepSeek chat, Meta AI, Perplexity, Microsoft Copilot CSV) + Imports routing + export-file hub cards ----
     const grokTxt = read('wave2', 'grok', 'grok-export.json'), dscTxt = read('wave2', 'deepseek', 'deepseek-conversations.json'), metaTxt = read('wave2', 'meta-ai', 'message_1.json'),
           pxTxt = read('wave2', 'perplexity', 'threads.json'), cpCsv = read('wave2', 'mscopilot', 'copilot-activity.csv');
@@ -139,7 +177,7 @@ export async function run({ browser, ok }) {
       const imports = connectorById('imports').srcIds, order = PLATFORM_ORDER, badge = document.querySelector('#src-import .badge').textContent;
       Store.sources = {}; Store.connectors = {}; Store.billed = {}; Store.persist(); App._render();
       return { g: { ...sum(g.rows), meta: g.meta, hours: hours(g.rows), expHours: expH('2026-08-10T09:00:05.000Z', '2026-08-10T21:30:05.000Z', '2026-08-11T08:00:00.000Z'), plat: g.rows[0].platform, model: g.rows[0].model },
-        d: { ...sum(d.rows), meta: d.meta, models: [...new Set(d.rows.map(r => r.model))].sort(), plat: d.rows[0].platform },
+        d: { ...sum(d.rows), meta: d.meta, models: [...new Set(d.rows.map(r => r.model))].sort(), plat: d.rows[0].platform, c3: d.rows.filter(r => r.d === dayKey(new Date('2026-08-12T10:00:00.000Z'))).map(r => [r.model, r.in, r.out, r.msgs, r.hour]), h3: H('2026-08-12T10:00:00.000Z') },
         m: { ...sum(m.rows), meta: m.meta, plat: m.rows[0].platform, model: m.rows[0].model, sid: m.rows[0].sid },
         p: { ...sum(p.rows), meta: p.meta, plat: p.rows[0].platform, model: p.rows[0].model },
         cp: { ...sum(cp.rows), meta: cp.meta, hours: hours(cp.rows), h1: H('2026-08-10T09:00:00Z'), h3: H('2026-08-11T08:00:00Z'), plat: cp.rows[0].platform, model: cp.rows[0].model }, cpDetect,
@@ -147,8 +185,9 @@ export async function run({ browser, ok }) {
     }, grokTxt, dscTxt, metaTxt, pxTxt, cpCsv, b64('wave2', 'perplexity', 'perplexity-export.zip'));
     ok('grok: export parsed (est. in=17 out=25 msgs=4; 3 conversations; 1 undated reply skipped; $numberLong / ISO / conversation-time fallbacks; hours kept) as platform Grok, model grok',
       ex.g.in === 17 && ex.g.out === 25 && ex.g.msgs === 4 && ex.g.est && ex.g.meta.convs === 3 && ex.g.meta.skipped === 1 && JSON.stringify(ex.g.hours) === JSON.stringify(ex.g.expHours) && ex.g.plat === 'Grok' && ex.g.model === 'grok', JSON.stringify(ex.g));
-    ok('deepseek chat: export parsed (est. in=16 out=23 msgs=3; 2 conversations; 1 undated skipped; epoch-seconds + content[] handled; model per message, default deepseek-chat) as platform "DeepSeek chat"',
-      ex.d.in === 16 && ex.d.out === 23 && ex.d.msgs === 3 && ex.d.est && ex.d.meta.convs === 2 && ex.d.meta.skipped === 1 && JSON.stringify(ex.d.models) === JSON.stringify(['deepseek-chat', 'deepseek-reasoner']) && ex.d.plat === 'DeepSeek chat', JSON.stringify(ex.d));
+    ok('deepseek chat: export parsed (est. in=19 out=27 msgs=4; 3 conversations; 1 undated skipped; epoch-seconds + content[] + create_time handled; model per message, else the conversation\'s, else deepseek-chat — c3 lands on the conversation\'s create_time as deepseek-reasoner 3/4) as platform "DeepSeek chat"',
+      ex.d.in === 19 && ex.d.out === 27 && ex.d.msgs === 4 && ex.d.est && ex.d.meta.convs === 3 && ex.d.meta.skipped === 1 && JSON.stringify(ex.d.models) === JSON.stringify(['deepseek-chat', 'deepseek-reasoner']) && ex.d.plat === 'DeepSeek chat'
+      && JSON.stringify(ex.d.c3) === JSON.stringify([['deepseek-reasoner', 3, 4, 1, ex.d.h3]]), JSON.stringify(ex.d));
     ok('meta ai: DYI thread parsed newest-first → ascending (est. in=15 out=26 msgs=3; 1 undated skipped; sid = thread_path) as platform "Meta AI", model meta-ai',
       ex.m.in === 15 && ex.m.out === 26 && ex.m.msgs === 3 && ex.m.est && ex.m.meta.skipped === 1 && ex.m.plat === 'Meta AI' && ex.m.model === 'meta-ai' && ex.m.sid === 'inbox/metaai_123', JSON.stringify(ex.m));
     ok('perplexity: thread array parsed with tolerant field names (est. in=16 out=23 msgs=3 of 4 threads; 1 undated skipped; ISO / epoch-ms / date-only) as platform Perplexity, model perplexity',
@@ -159,8 +198,8 @@ export async function run({ browser, ok }) {
     ok('sniff: grok-export / deepseek-chat-export (name-gated: conversations.json → unknown) / meta-ai-export / perplexity-export',
       JSON.stringify(ex.kinds) === JSON.stringify(['grok-export', 'deepseek-chat-export', 'unknown', 'meta-ai-export', 'perplexity-export']), JSON.stringify(ex.kinds));
     ok('imports: one batch routes all five formats (incl. Perplexity JSON inside its ZIP, sid = archive/entry) to their own sources; Meta AI threads merge and a re-imported thread replaces only itself; export-file hub cards turn green; srcIds/PLATFORM_ORDER/badge list them (ChatGPT once)',
-      JSON.stringify(ex.srcs) === JSON.stringify([4, 3, 3, 3, 3]) && ex.pxSid === 'perplexity-export.zip/threads.json' && ex.metaAfterSecond === 4 && ex.metaAfterReimport.msgs === 4 && ex.metaAfterReimport.threads === 2
-      && /Grok export — 3 conversations, 4 replies/.test(ex.note) && /DeepSeek chat export — 2 conversations, 3 replies/.test(ex.note) && /Meta AI thread — 3 replies/.test(ex.note) && /Microsoft Copilot activity CSV — 3 prompts/.test(ex.note) && /Perplexity export — 3 threads/.test(ex.note)
+      JSON.stringify(ex.srcs) === JSON.stringify([4, 4, 3, 3, 3]) && ex.pxSid === 'perplexity-export.zip/threads.json' && ex.metaAfterSecond === 4 && ex.metaAfterReimport.msgs === 4 && ex.metaAfterReimport.threads === 2
+      && /Grok export — 3 conversations, 4 replies/.test(ex.note) && /DeepSeek chat export — 3 conversations, 4 replies/.test(ex.note) && /Meta AI thread — 3 replies/.test(ex.note) && /Microsoft Copilot activity CSV — 3 prompts/.test(ex.note) && /Perplexity export — 3 threads/.test(ex.note)
       && ex.hub.every(cls => /\bok\b/.test(cls)) && ['grok-export', 'deepseek-chat-export', 'meta-ai-export', 'perplexity-export', 'copilot-activity-csv'].every(id => ex.imports.includes(id))
       && ['Grok', 'Microsoft Copilot', 'Perplexity', 'Meta AI', 'DeepSeek chat', 'ChatGPT', 'Claude.ai'].every(pl => ex.order.includes(pl)) && ex.order.filter(pl => pl === 'ChatGPT').length === 1 && ex.order[ex.order.length - 1] === 'Other'
       && /Grok/.test(ex.badge) && /Perplexity/.test(ex.badge) && /Takeout/.test(ex.badge) && /Cursor/.test(ex.badge), JSON.stringify({ srcs: ex.srcs, pxSid: ex.pxSid, metaAfterSecond: ex.metaAfterSecond, metaAfterReimport: ex.metaAfterReimport, hub: ex.hub, note: ex.note, imports: ex.imports, order: ex.order, badge: ex.badge }));
