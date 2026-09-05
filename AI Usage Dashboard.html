@@ -655,13 +655,16 @@ progress { width: 160px; height: 8px; }
     </div>
 
     <div class="card src" id="src-import">
-      <div class="card-head"><h2>Imports</h2><span class="badge">ChatGPT · Claude.ai · Gemini Takeout · Cursor CSV · CSV</span></div>
+      <div class="card-head"><h2>Imports</h2><span class="badge">ChatGPT · Claude.ai · Gemini Takeout · Grok · MS Copilot · Perplexity · Meta AI · DeepSeek · Cursor CSV · CSV · ZIP</span></div>
       <div class="desc">
         Drop exported files here:
         <b>ChatGPT</b> data export (<code>conversations.json</code>; tokens estimated from text) · <b>Claude.ai</b> data export (<code>conversations.json</code>; estimated) ·
         <b>Gemini</b> Google Takeout (<code>My Activity/Gemini Apps/MyActivity.json</code> — pick JSON format in Takeout; estimated from text, one record per prompt) ·
         <b>Cursor</b> usage-events CSV (cursor.com/dashboard → Usage → Export CSV; exact tokens, cost only if the column is present) ·
         <b>DeepSeek API</b> monthly usage ZIP (platform.deepseek.com/usage → Export monthly data; amount-*.csv + cost-*.csv, exact tokens + billed amounts; months merge by day/model, so drop each month as it comes) ·
+        <b>Grok</b> export (grok.com → Settings → Data → Export Data; one JSON; estimated) · <b>Microsoft Copilot</b> activity CSV (account.microsoft.com/privacy → Copilot activity history → Export; estimated) ·
+        <b>Perplexity</b> data export (Settings → Account → Request data export; ZIP or its JSON threads; estimated) · <b>Meta AI</b> Download-your-information threads (message_*.json with Meta AI; estimated) ·
+        <b>DeepSeek chat</b> export (chat.deepseek.com → Settings → Data → Export data; drop the ZIP or keep "deepseek" in the JSON name; estimated) ·
         API responses saved by the PowerShell commands · or a generic <b>CSV</b>
         (<code>date, platform, model, input_tokens, output_tokens[, cache_read_tokens, cache_write_tokens, cost_usd]</code>) — handy for the Gemini API, which has no usage endpoint.
         Consumer chat apps expose no usage API a local page can call — their usage comes from your data export.
@@ -1405,8 +1408,44 @@ const CONNECTORS = [
     qualityNote: 'Exact tokens per model and UTC day from CloudWatch (AWS/Bedrock InputTokenCount / OutputTokenCount, Sum per day, dimension ModelId) — CloudWatch lists only models that reported in the last two weeks, so an idle model\'s older days are not pulled; request counts are not pulled, so messages show 0. Billed dollars per day from Cost Explorer (UnblendedCost, service "Amazon Bedrock"; $0.01 per sync, about 24 hours behind; third-party models billed under their own "(Amazon Bedrock Edition)" service names are not included). Requests are SigV4-signed in this page with WebCrypto; use a read-only IAM user (cloudwatch:GetMetricData, cloudwatch:ListMetrics, ce:GetCostAndUsage) or short-lived STS keys. The access key, secret and session token are kept in this tab only — never saved. Bedrock writes no local usage logs (~/.aws holds credentials only); model-invocation logging to CloudWatch Logs/S3 is not read in this version.',
     paths: ['IAM → Users → Security credentials → Create access key (read-only policy above)', 'region: the one you call Bedrock in (us-east-1, eu-west-1, …) — Cost Explorer is global', 'no local usage files'],
     links: { docs: 'https://docs.aws.amazon.com/bedrock/latest/userguide/monitoring-runtime-metrics.html', usage: 'https://console.aws.amazon.com/costmanagement/home#/cost-explorer' } },
+  // ---- Wave 2 chat apps: export-file cards (no usage API a local page can call; no web-login access; data arrives through Imports) ----
+  { id: 'chatgpt-app', platform: 'ChatGPT', name: 'ChatGPT (web + desktop)', category: 'chat', kind: 'export-file',
+    statusEl: 'chatgpt-app-status', brand: '#10a37f', mark: 'Ch', srcIds: ['chatgpt'], quality: 'estimated',
+    qualityNote: 'Estimated tokens from your ChatGPT data export (conversations.json): no token counts exist anywhere in the export, so tokens are estimated from message text (chars/4) along each conversation\'s active branch, with the model per reply from metadata.model_slug. Get it: chatgpt.com → profile → Settings → Data controls → Export data (emailed ZIP link, expires in 24 h); drop the ZIP or its conversations.json on Imports — a re-import replaces the previous one (the export is all-or-nothing). There is no usage API, OAuth scope or local transcript with tokens for the consumer product (the desktop apps only cache server-side chats, encrypted since mid-2024) and this page never reads your web login. Plus/Pro usage has no dollar value — the cost shown is the API list-price equivalent.',
+    hint: 'the export ZIP, or its conversations.json', paths: ['chatgpt.com → Settings → Data controls → Export data → ZIP (conversations.json, chat.html, user.json, …)'],
+    links: { get: 'https://chatgpt.com', docs: 'https://help.openai.com/en/articles/7260999-exporting-your-chatgpt-history-and-data' } },
+  { id: 'claudeai-app', platform: 'Claude.ai', name: 'Claude.ai (web + desktop)', category: 'chat', kind: 'export-file',
+    statusEl: 'claudeai-app-status', brand: '#d97748', mark: 'Ca', srcIds: ['claudeai'], quality: 'estimated',
+    qualityNote: 'Estimated: the Claude.ai data export (conversations.json) carries no model and no token counts — tokens are estimated from text (chars/4, the full prior context re-sent per reply) and priced as the model you pick on the Imports card. Get it: claude.ai or Claude Desktop → Settings → Privacy → Export data (email link, 24 h; not available on the mobile apps); drop the ZIP or its conversations.json on Imports — a re-import replaces the previous one. Chat conversations never touch disk; Cowork and Claude Code sessions do (~/.claude/projects JSONL with exact tokens) and belong to the Claude Code / Desktop card. The claude.ai usage endpoint is cookie-bound and not callable from this page; Enterprise orgs have the Claude Enterprise (org) Analytics card.',
+    hint: 'the export ZIP, or its conversations.json', paths: ['claude.ai → Settings → Privacy → Export data → ZIP (conversations.json, users.json, projects.json)'],
+    links: { get: 'https://claude.ai', docs: 'https://support.claude.com/en/articles/9450526-how-can-i-export-my-claude-ai-data' } },
+  { id: 'grok', platform: 'Grok', name: 'Grok (grok.com / X)', category: 'chat', kind: 'export-file',
+    statusEl: 'grok-status', brand: '#6b7280', mark: 'Gk', srcIds: ['grok-export'], quality: 'estimated',
+    qualityNote: 'Estimated: grok.com → Settings → Data → Export Data mails a single JSON ({conversations:[{conversation, responses:[{message, sender, create_time}]}]}) with no model or token fields — each assistant reply is output, the preceding prompt is input (a lower bound), both estimated from text (chars/4) and priced as grok-4 list; a re-import replaces. Deleted chats, files and Grok-in-X chats may be missing from the export. SuperGrok/Premium quota is shown only inside the app; its endpoints are cookie-bound and this page never reads your web login. xAI API keys have their own card (xAI API, under API vendors).',
+    hint: 'the single JSON file from Export Data', paths: ['grok.com → Settings → Data → Export Data → one JSON (conversations[].responses[])'],
+    links: { get: 'https://grok.com', docs: 'https://ai-chat-importer.com/blog/how-to-export-grok-conversations' } },
+  { id: 'mscopilot', platform: 'Microsoft Copilot', name: 'Microsoft Copilot (consumer)', category: 'chat', kind: 'export-file',
+    statusEl: 'mscopilot-status', brand: '#0f6cbd', mark: 'MC', srcIds: ['copilot-activity-csv'], quality: 'estimated',
+    qualityNote: 'Estimated: Microsoft Copilot (personal Microsoft account) has no usage API; the privacy dashboard exports your activity as a CSV of prompts and responses with timestamps — no model, no tokens, content can be truncated — so tokens are estimated from that text (prompt = input, response = output). Get it: account.microsoft.com/privacy → Copilot → Your Copilot app activity history → Export all activity history (the CSV downloads immediately; its columns are not documented, so the importer matches them tolerantly and says what it found). Each export file merges by file name; the same file re-imported replaces itself. Work/school Microsoft 365 Copilot is admin-only via Graph reports — prompt counts, never tokens — and cannot be authenticated from a local page. Not GitHub Copilot (that card is under Coding tools).',
+    hint: 'the activity-history CSV from the privacy dashboard', paths: ['account.microsoft.com/privacy → Copilot → activity history → Export all activity history (CSV)', 'in-app: Copilot → profile → Privacy → Export'],
+    links: { get: 'https://copilot.microsoft.com', docs: 'https://support.microsoft.com/en-us/privacy/manage-your-copilot-activity-history-in-the-privacy-dashboard' } },
+  { id: 'perplexity', platform: 'Perplexity', name: 'Perplexity (app)', category: 'chat', kind: 'export-file',
+    statusEl: 'perplexity-status', brand: '#20808d', mark: 'Px', srcIds: ['perplexity-export'], quality: 'estimated',
+    qualityNote: 'Estimated: Perplexity has no usage API for consumers and no local logs; the account data export (Settings → Account → Request data export, or privacy@perplexity.ai — a ZIP of JSON threads with query, answer and timestamps, delivered by link up to ~30 days later) carries no model or tokens, so tokens are estimated from query (input) and answer (output) text. Drop the ZIP or its JSON files on Imports; files merge, the same file re-imported replaces itself. Third-party exporter JSON (query/answer per thread) is accepted by the same shape sniff. Sonar API keys have their own card (Perplexity API, under API vendors).',
+    hint: 'the data-export ZIP, or its JSON thread files', paths: ['perplexity.ai → Settings → Account → Request data export → ZIP of JSON', 'privacy@perplexity.ai (formal request)'],
+    links: { get: 'https://www.perplexity.ai', docs: 'https://takeoutday.org/services/perplexity' } },
+  { id: 'meta-ai', platform: 'Meta AI', name: 'Meta AI', category: 'chat', kind: 'export-file',
+    statusEl: 'meta-ai-status', brand: '#0082fb', mark: 'Ma', srcIds: ['meta-ai-export'], quality: 'estimated',
+    qualityNote: 'Estimated: Meta AI history is per surface and export-only — Accounts Center → Your information and permissions → Download your information → Meta AI (pick JSON), the Meta AI app\'s Download your information, or /download-all-ai-info inside a WhatsApp AI chat. Threads arrive as message_*.json files ({participants, messages:[{sender_name, timestamp_ms, content}]}): replies from "Meta AI" are output, the preceding message is input, tokens are estimated from text — the export has no model and no tokens. Each thread file merges; re-importing the same thread replaces it. There is no consumer API, OAuth scope or local store, and this page never reads your login. Meta AI has no API price, so its rows are priced by the Meta AI price row ($0 by default).',
+    hint: 'message_*.json thread files from Download your information (JSON format)', paths: ['Accounts Center → Download your information → Meta AI (JSON) → messages/…/message_1.json', 'WhatsApp AI chat: /download-all-ai-info'],
+    links: { get: 'https://www.meta.ai', docs: 'https://www.meta.com/help/artificial-intelligence/1314808549771571/' } },
+  { id: 'deepseek-chat', platform: 'DeepSeek chat', name: 'DeepSeek chat', category: 'chat', kind: 'export-file',
+    statusEl: 'deepseek-chat-status', brand: '#4d6bfe', mark: 'Dc', srcIds: ['deepseek-chat-export'], quality: 'estimated',
+    qualityNote: 'Estimated: chat.deepseek.com (web only, not the mobile apps) → Settings → Data → Export data gives a JSON archive of conversations (messages with role, text and timestamps; the model is reportedly recorded, otherwise deepseek-chat is assumed) — no token counts, so tokens are estimated from text and priced at DeepSeek list; a re-import replaces. The importer tells this shape from other chat exports by name: drop the export ZIP as-is, or keep "deepseek" in the JSON file name. Deleted chats and files are excluded; there is no usage API or local store for the chat product and this page never reads your login. API-key usage (the monthly usage ZIP + balance) lives on the DeepSeek API card.',
+    hint: 'the export ZIP, or its JSON with "deepseek" in the file name', paths: ['chat.deepseek.com → Settings → Data → Export data (JSON archive)'],
+    links: { get: 'https://chat.deepseek.com', docs: 'https://api-docs.deepseek.com/quick_start/token_usage/' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
-    statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv'] },
+    statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv', 'grok-export', 'deepseek-chat-export', 'meta-ai-export', 'perplexity-export', 'copilot-activity-csv'] },
 ];
 const connectorById = (id) => CONNECTORS.find(c => c.id === id);
 /* Platforms that run on the user's own hardware (category:'local') — Pricing.cost() zero-prices rows
@@ -1433,8 +1472,8 @@ const QUALITY_LABEL = { exact: 'exact', estimated: 'estimated', validate: 'valid
 const fieldIsSecret = (f) => !!(f && (f.secret || f.type === 'password'));
 
 // deduped: several connectors may share one platform (GitHub Copilot billing + Copilot CLI logs)
-const PLATFORM_ORDER = [...new Set(CONNECTORS.map(c => c.platform).filter(Boolean))]
-  .concat(['ChatGPT', 'Claude.ai', 'Gemini app', 'Cursor', 'Other']);   // import-only platforms without their own connector entry; Other stays last
+// deduped across the registry AND the import-only names: ChatGPT / Claude.ai now have export-file entries, Gemini app / Cursor do not; Other stays last
+const PLATFORM_ORDER = [...new Set(CONNECTORS.map(c => c.platform).filter(Boolean).concat(['ChatGPT', 'Claude.ai', 'Gemini app', 'Cursor', 'Other']))];
 
 const Store = {
   sources: {},       // srcId -> { rows: [], meta: {} }
@@ -1478,6 +1517,8 @@ const Store = {
     View.onConnectorChange(id, prev, next);   // reveal only on an off→connected/attention transition, not every sync
   },
   connectorStatus(c) {
+    // export-file cards never get a connector entry: their data arrives through Imports, so status = rows present under any of their srcIds
+    if (c.kind === 'export-file') return c.srcIds.some(sid => ((((this.sources[sid] || {}).rows) || []).length) > 0) ? 'ok' : 'off';
     // status is driven by the connector's own state entry, not data presence — every
     // connect path (fetch, folder scan, import) writes this entry, so a connector with
     // leftover data but no state (e.g. a keep-data disconnect) reads as truly 'off'.
@@ -2314,6 +2355,127 @@ function parseGeminiTakeout(arr) {
   return { rows: agg.rows(), meta: { msgs, skipped, records: arr.length } };
 }
 
+/* ---------- Wave 2 chat-app exports (Grok, DeepSeek chat, Meta AI, Perplexity). All estimated from text; input = the preceding
+ * prompt only (a lower bound, like Takeout); every row est:1; platform strings are the export-file cards' platforms. ---------- */
+/** Timestamp of an exported record in any shape these exports use: ISO string, date-only string, 'M/D/YYYY H:MM[:SS] [AM|PM]' (local),
+ *  epoch seconds or milliseconds (number or numeric string), MongoDB extended JSON {$date:{$numberLong:'ms'}} / {$date:'iso'}.
+ *  → { d, hour } (local day; hour undefined for date-only values) or null. */
+function exportTimestamp(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'object') { if (v.$date != null) return exportTimestamp(v.$date); if (v.$numberLong != null) return exportTimestamp(Number(v.$numberLong)); return null; }
+  const s = String(v).trim();
+  if (typeof v === 'string' && RE_DATEONLY.test(s)) return { d: s, hour: undefined };
+  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?)?$/.exec(s);
+  if (us) {
+    let h = us[4] ? +us[4] : 0;
+    if (us[7]) { const pm = /p/i.test(us[7]); if (pm && h < 12) h += 12; if (!pm && h === 12) h = 0; }
+    const t = new Date(+us[3], +us[1] - 1, +us[2], h, us[5] ? +us[5] : 0, us[6] ? +us[6] : 0);
+    return isNaN(t) ? null : { d: dayKey(t), hour: us[4] ? t.getHours() : undefined };
+  }
+  let ms = typeof v === 'number' ? v : (/^\d+(\.\d+)?$/.test(s) ? Number(s) : NaN);
+  if (Number.isFinite(ms)) { if (ms < 1e11) ms *= 1000; }   // epoch seconds → ms (no chat export predates 1973)
+  else ms = Date.parse(s);
+  if (!Number.isFinite(ms)) return null;
+  const t = new Date(ms);
+  return { d: dayKey(t), hour: t.getHours() };
+}
+/** Text of an exported message in the shapes seen: string · [parts] · {text} · {content} · {parts:[…]}. */
+function exportText(c) {
+  if (c == null) return '';
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) return c.map(exportText).join('\n');
+  if (typeof c === 'object') { if (typeof c.text === 'string') return c.text; if (c.content != null) return exportText(c.content); if (Array.isArray(c.parts)) return exportText(c.parts); return ''; }
+  return String(c);
+}
+/** grok.com export: {conversations:[{conversation:{title, create_time}, responses:[{message, sender:'human'|'assistant', create_time}]}]}.
+ *  create_time is MongoDB extended JSON ({$date:{$numberLong}}), an ISO string or a number; a reply without one falls back to the
+ *  conversation's create_time; no time anywhere → skipped and counted. Model 'grok' (the export names none). */
+function parseGrokExport(obj) {
+  const agg = makeAgg(); let msgs = 0, skipped = 0;
+  const convs = Array.isArray(obj && obj.conversations) ? obj.conversations : [];
+  for (const c of convs) {
+    const meta = (c && c.conversation) || {}, list = Array.isArray(c && c.responses) ? c.responses : [];
+    const convTs = exportTimestamp(meta.create_time);
+    let lastHuman = 0;
+    for (const r of list) {
+      if (!r || typeof r !== 'object') continue;
+      const chars = exportText(r.message).length;
+      if (String(r.sender || '').toLowerCase() !== 'assistant') { lastHuman = chars; continue; }
+      const ts = exportTimestamp(r.create_time) || convTs;
+      if (!ts) { skipped++; continue; }
+      agg.add(ts.d, 'Grok', 'grok', { in: estTok(lastHuman), out: estTok(chars), msgs: 1, est: 1 }, undefined, ts.hour);
+      msgs++;
+    }
+  }
+  return { rows: agg.rows(), meta: { msgs, convs: convs.length, skipped } };
+}
+/** chat.deepseek.com export (shape undocumented → tolerant): an array of conversations, or {conversations|data:[…]}, each with
+ *  messages[{role|sender, content|text, inserted_at|created_at|timestamp, model?}]. Assistant messages → rows; model = message.model
+ *  or 'deepseek-chat'; a message without a time falls back to the conversation's; none → skipped and counted. */
+function parseDeepSeekChatExport(obj) {
+  const agg = makeAgg(); let msgs = 0, skipped = 0;
+  const convs = Array.isArray(obj) ? obj : (obj && (Array.isArray(obj.conversations) ? obj.conversations : Array.isArray(obj.data) ? obj.data : [])) || [];
+  for (const c of convs) {
+    if (!c || typeof c !== 'object') continue;
+    const list = Array.isArray(c.messages) ? c.messages : [];
+    const convTs = exportTimestamp(c.inserted_at != null ? c.inserted_at : c.created_at != null ? c.created_at : c.timestamp);
+    let lastUser = 0;
+    for (const m of list) {
+      if (!m || typeof m !== 'object') continue;
+      const chars = exportText(m.content != null ? m.content : m.text).length;
+      const role = String(m.role || m.sender || '').toLowerCase();
+      if (role !== 'assistant') { if (role === 'user' || role === 'human') lastUser = chars; continue; }
+      const ts = exportTimestamp(m.inserted_at != null ? m.inserted_at : m.created_at != null ? m.created_at : m.timestamp) || convTs;
+      if (!ts) { skipped++; continue; }
+      agg.add(ts.d, 'DeepSeek chat', String(m.model || 'deepseek-chat'), { in: estTok(lastUser), out: estTok(chars), msgs: 1, est: 1 }, undefined, ts.hour);
+      msgs++;
+    }
+  }
+  return { rows: agg.rows(), meta: { msgs, convs: convs.length, skipped } };
+}
+/** Meta AI thread from Download-your-information (Facebook DYI JSON): {participants:[{name}], messages:[{sender_name, timestamp_ms,
+ *  content}], thread_path}. Messages are listed newest first → sorted ascending; replies whose sender_name is "Meta AI" are output, the
+ *  preceding message input. Rows carry sid = thread_path (or the file name) so each thread file replaces only itself on re-import. */
+function parseMetaAiExport(obj, fileName) {
+  const agg = makeAgg(); let msgs = 0, skipped = 0;
+  const list = Array.isArray(obj && obj.messages) ? obj.messages.filter(m => m && typeof m === 'object') : [];
+  const isAi = (m) => /meta\s*ai/i.test(String(m.sender_name || ''));
+  const sid = String((obj && obj.thread_path) || fileName || 'meta-ai');
+  const sorted = [...list].sort((a, b) => (+a.timestamp_ms || 0) - (+b.timestamp_ms || 0));
+  let lastUser = 0;
+  for (const m of sorted) {
+    const chars = exportText(m.content).length;
+    if (!isAi(m)) { lastUser = chars; continue; }
+    const ts = exportTimestamp(m.timestamp_ms != null ? m.timestamp_ms : m.timestamp);
+    if (!ts) { skipped++; continue; }
+    agg.add(ts.d, 'Meta AI', 'meta-ai', { in: estTok(lastUser), out: estTok(chars), msgs: 1, est: 1 }, sid, ts.hour);
+    msgs++;
+  }
+  return { rows: agg.rows(), meta: { msgs, skipped, sid } };
+}
+/** Perplexity data export / exporter JSON: an array of threads (or {threads|data:[…]}); a thread is {query|query_str|question|title,
+ *  answer|response|text, created_at|timestamp|date} or carries entries[]/steps[] of that shape. Rows carry sid = file name so each file
+ *  (the export may be one JSON per thread) replaces only itself on re-import. */
+function parsePerplexityExport(input, fileName) {
+  const agg = makeAgg(); let msgs = 0, skipped = 0;
+  const list = Array.isArray(input) ? input : (input && (Array.isArray(input.threads) ? input.threads : Array.isArray(input.data) ? input.data : [])) || [];
+  const sid = String(fileName || 'perplexity');
+  const q = (t) => exportText(t.query != null ? t.query : t.query_str != null ? t.query_str : t.question != null ? t.question : t.title);
+  const a = (t) => exportText(t.answer != null ? t.answer : t.response != null ? t.response : t.text);
+  for (const t of list) {
+    if (!t || typeof t !== 'object') continue;
+    const items = Array.isArray(t.entries) ? t.entries : Array.isArray(t.steps) ? t.steps : [t];
+    for (const it of items) {
+      if (!it || typeof it !== 'object') continue;
+      const ts = exportTimestamp(it.created_at != null ? it.created_at : it.timestamp != null ? it.timestamp : it.date != null ? it.date : t.created_at != null ? t.created_at : t.timestamp);
+      if (!ts) { skipped++; continue; }
+      agg.add(ts.d, 'Perplexity', 'perplexity', { in: estTok(q(it).length), out: estTok(a(it).length), msgs: 1, est: 1 }, sid, ts.hour);
+      msgs++;
+    }
+  }
+  return { rows: agg.rows(), meta: { msgs, skipped, threads: list.length, sid } };
+}
+
 /** Parses a large chat export off the main thread via a Blob-sourced Worker, so a big
  *  ChatGPT/Claude.ai export doesn't freeze the tab. Rebuilds the parse functions' source
  *  inside the worker (Workers don't share scope with the page) — every free identifier
@@ -2547,6 +2709,35 @@ async function parseDeepSeekUsageZip(entries) {
   const billedMap = costFiles ? costBilled : priceBilled;
   return { rows: agg.rows(), billed: [...billedMap.entries()].map(([d, amount]) => ({ d, amount })).sort((a, b) => a.d < b.d ? -1 : 1),
     meta: { rows: n, rejected, files: amountFiles + costFiles, amountFiles, costFiles, currency, billedFrom: costFiles ? 'cost CSV' : (priceBilled.size ? 'price column' : 'none') } };
+}
+
+/* Microsoft Copilot (consumer) activity-history CSV — account.microsoft.com/privacy → Copilot → Export all activity history. Columns are
+ * not documented (prompts + responses with timestamps, an app/surface column on some exports) → matched tolerantly: a date/time column,
+ * a prompt/query/request/user column, a response/answer/copilot/bot column, optional app/surface/product; a CSV with any token column is
+ * NOT this format. Dates: ISO or 'M/D/YYYY H:MM[ AM|PM]' (local); unparseable → skipped and counted. Estimated tokens (prompt = input,
+ * response = output), platform 'Microsoft Copilot', model 'copilot'; rows carry sid = file name (exports per surface merge). */
+function isCopilotActivityCSV(head) {
+  const has = (re) => head.some(h => re.test(h));
+  return has(/date|time/) && has(/prompt|query|request|user/) && has(/response|answer|copilot|bot/) && !has(/token/);
+}
+function parseCopilotActivityCSV(text, fileName) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) throw new Error('Empty CSV');
+  const head = rows[0].map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+  const find = (re) => head.findIndex(h => re.test(h));
+  const iDate = find(/date|time/), iPrompt = find(/prompt|query|request|user/), iResp = find(/response|answer|copilot|bot/), iApp = find(/app|surface|product/);
+  if (iDate < 0 || iPrompt < 0 || iResp < 0) throw new Error('Not a Copilot activity CSV (needs date + prompt + response columns)');
+  const agg = makeAgg(); let n = 0, skipped = 0; const apps = new Set();
+  const sid = String(fileName || 'copilot-activity');
+  for (let r = 1; r < rows.length; r++) {
+    const c = rows[r];
+    const ts = exportTimestamp(String(c[iDate] || '').trim());
+    if (!ts) { skipped++; continue; }
+    if (iApp >= 0 && c[iApp]) apps.add(String(c[iApp]).trim());
+    agg.add(ts.d, 'Microsoft Copilot', 'copilot', { in: estTok(String(c[iPrompt] || '').length), out: estTok(String(c[iResp] || '').length), msgs: 1, est: 1 }, sid, ts.hour);
+    n++;
+  }
+  return { rows: agg.rows(), meta: { rows: n, skipped, apps: [...apps], sid } };
 }
 
 /* =================================================================
@@ -3457,6 +3648,10 @@ async function readZipEntries(file) {
 
 /* ---------- import router (drop zone) ---------- */
 function sniffJSON(obj, fileName) {
+  // Wave 2 chat-export shapes (checked after the provider reports and the ChatGPT / Claude.ai / Takeout arrays)
+  const dsConv = (x) => !!(x && Array.isArray(x.messages) && x.messages.some(m => m && m.role && (m.inserted_at != null || m.created_at != null)));
+  const dsMark = (o, name) => /deepseek/i.test(String(name || '')) || (!!o && !Array.isArray(o) && /deepseek/i.test(String(o.source || o.platform || o.provider || '')));   // generic "conversations with messages" JSON must not be mis-routed: DeepSeek needs the name or a source mark
+  const pxItem = (x) => !!(x && typeof x === 'object' && ('query' in x || 'query_str' in x || 'question' in x) && ('answer' in x || 'response' in x || 'text' in x));
   if (obj && Array.isArray(obj.data) && obj.data.length) {
     // find the first bucket that actually has results — providers emit empty buckets for zero-usage days
     const withResult = obj.data.find(b => b && Array.isArray(b.results) && b.results.length);
@@ -3471,8 +3666,18 @@ function sniffJSON(obj, fileName) {
     if (obj[0] && (obj[0].header === 'Gemini Apps' || (Array.isArray(obj[0].products) && obj[0].products.includes('Gemini Apps')))) return 'gemini-takeout';
     if (obj[0] && obj[0].mapping) return 'chatgpt-export';
     if (obj[0] && obj[0].chat_messages) return 'claudeai-export';
+    if (dsConv(obj[0]) && dsMark(obj, fileName)) return 'deepseek-chat-export';
+    if (pxItem(obj[0]) || (obj[0] && Array.isArray(obj[0].entries) && pxItem(obj[0].entries[0]))) return 'perplexity-export';
   }
-  if (obj && Array.isArray(obj.conversations)) return 'chatgpt-export-wrapped';
+  if (obj && !Array.isArray(obj) && typeof obj === 'object') {
+    const convs = Array.isArray(obj.conversations) ? obj.conversations : null;
+    if (convs && convs[0] && Array.isArray(convs[0].responses)) return 'grok-export';   // grok.com: {conversations:[{conversation, responses:[{message, sender, create_time}]}]}
+    const dsList = convs || (Array.isArray(obj.data) ? obj.data : null);
+    if (dsList && dsConv(dsList[0]) && dsMark(obj, fileName)) return 'deepseek-chat-export';
+    if (Array.isArray(obj.participants) && Array.isArray(obj.messages) && (obj.participants.some(p => /meta\s*ai/i.test(p && p.name)) || obj.messages.some(m => /meta\s*ai/i.test(m && m.sender_name)))) return 'meta-ai-export';
+    if (Array.isArray(obj.threads) && obj.threads[0] && (pxItem(obj.threads[0]) || (Array.isArray(obj.threads[0].entries) && pxItem(obj.threads[0].entries[0])))) return 'perplexity-export';
+    if (convs && (!convs.length || (convs[0] && convs[0].mapping))) return 'chatgpt-export-wrapped';   // only ChatGPT mapping trees — any other {conversations:[…]} stays unknown
+  }
   return 'unknown';
 }
 /* =================================================================
@@ -4123,6 +4328,8 @@ const App = {
   hubCard(c, allRows, win30, bst) {
     const st = Store.connectors[c.id] || {};
     const status = Store.connectorStatus(c);
+    // export-file: no entry → the "synced" line comes from the newest source meta (Store.setSource stamps meta.updated on import)
+    const expAt = c.kind === 'export-file' ? Math.max(0, ...c.srcIds.map(sid => ((Store.sources[sid] || {}).meta || {}).updated || 0)) : 0;
     let rows;
     // membership by SOURCE (not platform) for imports, null-platform connectors, and any connector
     // that shares its platform with another (e.g. GitHub Copilot billing vs. Copilot CLI logs) —
@@ -4147,14 +4354,20 @@ const App = {
         el('span', { class: 'dot ' + status }),
         el('button', { class: 'acct-hide', type: 'button', text: '✕', title: 'Hide this card', 'aria-label': 'Hide ' + c.name,
           onclick: (e) => { e.stopPropagation(); View.hideCard(c.id); this.render(); }, onkeydown: (e) => e.stopPropagation() })),
-      el('div', { class: 'acct-label', text: linkOnly ? (c.reason || 'No data path') : st.err ? ('⚠ ' + st.err) : (st.label || (status === 'off' ? 'Not connected' : '')) }),
-      el('div', { class: 'acct-sync', text: st.lastSync ? ('Synced ' + new Date(st.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : '' }),
+      el('div', { class: 'acct-label', text: linkOnly ? (c.reason || 'No data path') : st.err ? ('⚠ ' + st.err) : (st.label || (c.kind === 'export-file' ? (status === 'off' ? 'No export imported yet' : 'from your data export') : status === 'off' ? 'Not connected' : '')) }),
+      el('div', { class: 'acct-sync', text: st.lastSync ? ('Synced ' + new Date(st.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))
+        : expAt ? ('Imported ' + new Date(expAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : '' }),
       el('div', { class: 'acct-stats', text: rows.length ? `${fmtCompact(tok)} tokens · ${fmtUSD(cost)} (30d)` : '' }),
       (c.platform && Budgets.limits[c.platform]) ? (() => { const s = bst.byPlatform[c.platform]; return el('div', { class: 'budget-bar' + (s.pct >= 100 ? ' over' : s.pct >= 80 ? ' warn' : ''), title: `${fmtUSD(s.spent)} of ${fmtUSD(s.limit)} this month` }, el('div', { class: 'fill', style: { width: Math.min(100, s.pct) + '%' } })); })() : null,
       linkOnly
         ? el('div', { class: 'acct-actions' },
             el('button', { class: 'btn small acct-manage', text: 'Details', onclick: (e) => { e.stopPropagation(); this.openConnectorModal(c.id); } }),
             L.usage ? el('a', { class: 'btn small acct-usage-link', href: L.usage, target: '_blank', rel: 'noopener', text: 'Vendor usage page ↗', onclick: (e) => e.stopPropagation() }) : null)
+        : c.kind === 'export-file'
+        // export-file: no credential and nothing to disconnect — Manage (this card's copy) + Import file… (the Imports drop zone); the data belongs to Imports
+        ? el('div', { class: 'acct-actions' },
+            el('button', { class: 'btn small acct-manage', text: 'Manage', onclick: (e) => { e.stopPropagation(); this.openConnectorModal(c.id); } }),
+            el('button', { class: 'btn small acct-import-btn', text: 'Import file…', onclick: (e) => { e.stopPropagation(); this.openImportsFor(c); } }))
         : el('div', { class: 'acct-actions' },
             el('button', { class: 'btn small acct-manage', text: status === 'off' ? 'Connect' : 'Manage', onclick: (e) => { e.stopPropagation(); this.openConnectorModal(c.id); } }),
             status !== 'off' && c.id !== 'imports' ? el('button', { class: 'btn small acct-sync-btn', text: 'Sync', onclick: (e) => { e.stopPropagation(); this.syncConnector(c.id); } }) : null,
@@ -4207,12 +4420,30 @@ const App = {
     // never touch a card that's currently open INSIDE the connector modal: any render while
     // the user is mid-edit (resize, timer, etc.) would otherwise blank it out from under them.
     for (const c of CONNECTORS) {
+      if (c.kind === 'export-file') {   // no entry ever exists: reveal by data presence + refresh the card's status line from the rows
+        const src = $('src-' + c.id), s = $(c.id + '-status'), status = Store.connectorStatus(c);
+        if (src && src.parentNode !== $('modal-body')) src.hidden = status === 'off';
+        if (s) {
+          const n = c.srcIds.flatMap(sid => ((Store.sources[sid] || {}).rows) || []).reduce((a, r) => a + (r.msgs || 0), 0);
+          s.textContent = '';
+          if (status === 'off') s.textContent = 'No export imported yet.';
+          else { s.appendChild(el('span', { class: 'ok', text: '● Imported. ' })); s.appendChild(document.createTextNode(`${fmtInt(n)} message${n === 1 ? '' : 's'} from your data export (via Imports).`)); }
+        }
+        continue;
+      }
       const src = $('src-' + c.id);
       if (!src || (!/^(gemini|copilot|openrouter)$/.test(c.id) && !src.classList.contains('generic'))) continue;   // generic = every ensureSourceCard kind (folder-log, local-server, link-only, key driver)
       if (src.parentNode !== $('modal-body')) src.hidden = !Store.connectors[c.id];
     }
   },
 
+  /** Export-file cards: their data comes through the Imports card — open it (modal), say which export is expected, focus the drop zone. */
+  openImportsFor(c) {
+    this.openConnectorModal('imports');
+    const st = $('import-status');
+    if (st && c) { clear(st); st.appendChild(el('div', { text: `Drop your ${c.platform || c.name} export here — ${c.hint || 'see the card for how to get it'}.` })); }
+    const dz = $('dropzone'); if (dz) dz.focus();
+  },
   openConnectorModal(id) {
     const c = connectorById(id);
     const dlg = $('connector-modal');
@@ -4230,12 +4461,17 @@ const App = {
   closeConnectorModal() { $('connector-modal').close(); },   // 'close' event (fires for Close-button AND Escape) does the restore
   _restoreModalCard() {
     const src = $('modal-body').firstElementChild;
-    if (src && this._modalHome) { this._modalHome.appendChild(src); if ((/^src-(gemini|copilot|openrouter)$/.test(src.id) || src.classList.contains('generic')) && !Store.connectors[src.id.slice(4)]) src.hidden = true; }
+    if (!src || !this._modalHome) return;
+    this._modalHome.appendChild(src);
+    const cid = src.id.slice(4), cc = connectorById(cid);
+    const connected = cc && cc.kind === 'export-file' ? Store.connectorStatus(cc) !== 'off' : !!Store.connectors[cid];   // export-file cards have no entry — data presence decides
+    if ((/^src-(gemini|copilot|openrouter)$/.test(src.id) || src.classList.contains('generic')) && !connected) src.hidden = true;
   },
   syncConnector(id) {
     if (id === 'local') return this.rescan();
     const c = connectorById(id);
     if (c && c.kind === 'folder-log') return this.rescanFolder(id);
+    if (c && c.kind === 'export-file') return this.openImportsFor(c);   // nothing to sync — the export is re-dropped by hand
     if (c && c.kind === 'local-server') { const jobs = [this.connectServer(c)]; if (this._dirHandles[id]) jobs.push(this.rescanFolder(id)); return Promise.all(jobs); }
     if (c && c.kind === 'link-only') return;   // honest card: nothing to sync
     if (c && c.keyLS) {
@@ -4678,7 +4914,7 @@ const App = {
     ];
     if (c.kind === 'link-only' && c.reason) kids.push(el('div', { class: 'note reason', text: 'Why there is no data path: ' + c.reason }));
     if (c.paths && c.paths.length) {
-      const p = el('div', { class: 'note' }, (c.kind === 'link-only' || c.fetch) ? 'Where to look: ' : 'Where the files live: ');
+      const p = el('div', { class: 'note' }, (c.kind === 'link-only' || c.kind === 'export-file' || c.fetch) ? 'Where to look: ' : 'Where the files live: ');
       c.paths.forEach((s, i) => { if (i) p.appendChild(document.createTextNode(' · ')); p.appendChild(el('code', { text: s })); });
       kids.push(p);
     }
@@ -4724,6 +4960,11 @@ const App = {
     // blank or overwrite each other's line. Single-driver cards keep the one '<id>-status' at the bottom.
     const dual = !!(c.baseUrl && c.patterns);
     const statusEl = el('div', { class: 'status', id: c.id + '-status', text: c.kind === 'link-only' ? 'No data path — nothing to connect here; use the links below.' : 'Not connected.' });
+    if (c.kind === 'export-file') {
+      statusEl.textContent = 'No export imported yet.';
+      kids.push(el('div', { class: 'row' }, el('button', { class: 'btn primary', id: c.id + '-import', text: 'Import file…', onclick: () => this.openImportsFor(c) })));
+      kids.push(el('div', { class: 'note', text: 'Looking for: ' + (c.hint || 'your data export') + '. Files are read in your browser only; the rows land under Imports and show on this card.' }));
+    }
     if (c.baseUrl) {
       kids.push(el('div', { class: 'row' },
         el('input', { type: 'text', id: c.id + '-url', value: LS.get('url:' + c.id, null) || c.baseUrl, 'aria-label': c.name + ' server URL', spellcheck: 'false' }),
@@ -5227,6 +5468,31 @@ const App = {
       Store.setSource('gemini-takeout', res.rows, res.meta);
       notes.push(`${f.name}: Gemini Takeout — ${fmtInt(res.meta.msgs)} prompts (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} non-Gemini/undated record(s) skipped` : ''})`);
       imported++;
+    } else if (kind === 'grok-export') {
+      const res = parseGrokExport(obj);
+      Store.setSource('grok-export', res.rows, res.meta);   // one export = the whole history → re-import replaces
+      notes.push(`${f.name}: Grok export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens; input = the preceding prompt only${res.meta.skipped ? `; ${res.meta.skipped} undated repl${res.meta.skipped === 1 ? 'y' : 'ies'} skipped` : ''})`);
+      imported++;
+    } else if (kind === 'deepseek-chat-export') {
+      const res = parseDeepSeekChatExport(obj);
+      Store.setSource('deepseek-chat-export', res.rows, res.meta);   // one archive = the whole history → re-import replaces
+      notes.push(`${f.name}: DeepSeek chat export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} undated repl${res.meta.skipped === 1 ? 'y' : 'ies'} skipped` : ''})`);
+      imported++;
+    } else if (kind === 'meta-ai-export') {
+      const res = parseMetaAiExport(obj, f.name);
+      // Download-your-information splits threads into message_N.json files: rows carry the thread as sid, so a file replaces only its own thread
+      const keep = ((Store.sources['meta-ai-export'] || {}).rows || []).filter(r => r.sid !== res.meta.sid && !(Array.isArray(r.sids) && r.sids.includes(res.meta.sid)));
+      const all = keep.concat(res.rows);
+      Store.setSource('meta-ai-export', all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), threads: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size });
+      notes.push(`${f.name}: Meta AI thread — ${fmtInt(res.meta.msgs)} replies (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} undated skipped` : ''}; threads merge, the same thread re-imported replaces itself)`);
+      imported++;
+    } else if (kind === 'perplexity-export') {
+      const res = parsePerplexityExport(obj, f.name);
+      const keep = ((Store.sources['perplexity-export'] || {}).rows || []).filter(r => r.sid !== res.meta.sid && !(Array.isArray(r.sids) && r.sids.includes(res.meta.sid)));
+      const all = keep.concat(res.rows);
+      Store.setSource('perplexity-export', all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), files: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size });
+      notes.push(`${f.name}: Perplexity export — ${fmtInt(res.meta.msgs)} threads (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} undated skipped` : ''}; files merge, the same file re-imported replaces itself)`);
+      imported++;
     } else if (kind === 'anthropic-usage') {
       const res = parseAnthropicUsage(obj);
       this._gen.anthropic++;   // an import supersedes any in-flight fetch — it must not overwrite this
@@ -5333,6 +5599,15 @@ const App = {
           if (isDeepSeekCostCSV(headCells, f.name)) {
             const r = parseDeepSeekCostCSV(csvText);
             landDeepSeek({ rows: [], billed: r.billed, meta: { ...r.meta, files: 1, billedFrom: 'cost CSV' } }, f.name);
+            continue;
+          }
+          if (isCopilotActivityCSV(headCells)) {
+            const res = parseCopilotActivityCSV(csvText, f.name);
+            const keep = ((Store.sources['copilot-activity-csv'] || {}).rows || []).filter(r => r.sid !== res.meta.sid && !(Array.isArray(r.sids) && r.sids.includes(res.meta.sid)));   // one export per surface → files merge by name
+            const all = keep.concat(res.rows);
+            Store.setSource('copilot-activity-csv', all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), files: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size, apps: res.meta.apps });
+            notes.push(`${f.name}: Microsoft Copilot activity CSV — ${fmtInt(res.meta.rows)} prompts (estimated tokens from prompt/response text${res.meta.apps.length ? '; ' + res.meta.apps.join(', ') : ''}${res.meta.skipped ? `; ${res.meta.skipped} row(s) with unreadable dates skipped` : ''})`);
+            imported++;
             continue;
           }
           const res = parseGenericCSV(csvText);
@@ -5471,7 +5746,7 @@ const App = {
     this.wireCollapsibles();
     this.wireInsightHides();
     this.wireLegacyToggle();
-    for (const c of CONNECTORS) if (c.kind === 'folder-log' || c.kind === 'local-server' || c.kind === 'link-only' || c.fetch) this.ensureSourceCard(c);
+    for (const c of CONNECTORS) if (c.kind === 'folder-log' || c.kind === 'local-server' || c.kind === 'link-only' || c.kind === 'export-file' || c.fetch) this.ensureSourceCard(c);
     this._hubQuery = $('hub-search').value || '';   // the browser may restore the box's text across a reload — start in sync with it, not empty
     $('hub-search').addEventListener('input', () => { this._hubQuery = $('hub-search').value; this.renderHub(); });
 

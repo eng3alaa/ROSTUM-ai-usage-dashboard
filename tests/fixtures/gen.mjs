@@ -536,6 +536,67 @@ export async function generate() {
     { TimePeriod: { Start: '2026-08-10', End: '2026-08-11' }, Total: { UnblendedCost: { Amount: '1.23', Unit: 'USD' } }, Groups: [], Estimated: false },
     { TimePeriod: { Start: '2026-08-11', End: '2026-08-12' }, Total: { UnblendedCost: { Amount: '0.77', Unit: 'USD' } }, Groups: [], Estimated: false },
     { TimePeriod: { Start: '2026-08-12', End: '2026-08-13' }, Total: { UnblendedCost: { Amount: '0', Unit: 'USD' } }, Groups: [], Estimated: true } ], DimensionValueAttributes: [] }, null, 1));
+  // T13a — Grok export (grok.com → Settings → Data → Export Data). estTok = round(chars/4); input = preceding human message.
+  //   t1: human 40 → assistant 80 (in 10, out 20, $numberLong ms) · human 20 → assistant 8 (in 5, out 2, ISO) ·
+  //   t2: human 'abcd' → 'ok!!!' (in 1, out 1; no create_time → conversation create_time) · 'broken' 6 chars (out 2, in 1; create_time 'not a date' → conversation time) ·
+  //   t3: assistant with no date anywhere → skipped.   Expected: in=17 out=25 msgs=4 convs=3 skipped=1 · platform Grok · model grok · est
+  const ms = (iso) => ({ $date: { $numberLong: String(T(iso)) } });
+  w('wave2/grok/grok-export.json', JSON.stringify({ conversations: [
+    { conversation: { title: 't1', create_time: ms('2026-08-10T09:00:00.000Z') }, responses: [
+      { message: 'x'.repeat(40), sender: 'human', create_time: ms('2026-08-10T09:00:00.000Z') },
+      { message: 'y'.repeat(80), sender: 'assistant', create_time: ms('2026-08-10T09:00:05.000Z') },
+      { message: 'z'.repeat(20), sender: 'human', create_time: '2026-08-10T21:30:00.000Z' },
+      { message: 'w'.repeat(8), sender: 'assistant', create_time: '2026-08-10T21:30:05.000Z' } ] },
+    { conversation: { title: 't2', create_time: '2026-08-11T08:00:00.000Z' }, responses: [
+      { message: 'abcd', sender: 'human' }, { message: 'ok!!!', sender: 'assistant' }, { message: 'broken', sender: 'assistant', create_time: 'not a date' } ] },
+    { conversation: { title: 't3' }, responses: [{ message: 'no date anywhere', sender: 'assistant' }] },
+  ] }, null, 1));
+  // T13b — DeepSeek chat export (chat.deepseek.com → Settings → Data → Export data). Tolerant shape: array of conversations with messages[{role, content, inserted_at|created_at, model?}].
+  //   c1: user 40 → assistant 80 (in 10, out 20, model deepseek-reasoner) · user 20 → assistant 8 (in 5, out 2; epoch SECONDS; no model → deepseek-chat) ·
+  //   c2: user content[] 'abcd' → 'ok!!!' (in 1, out 1) · assistant with created_at null and no conversation time → skipped.
+  //   Expected: in=16 out=23 msgs=3 convs=2 skipped=1 · platform 'DeepSeek chat' · models deepseek-chat + deepseek-reasoner · est
+  w('wave2/deepseek/deepseek-conversations.json', JSON.stringify([
+    { id: 'c1', title: 'hello', inserted_at: '2026-08-10T09:00:00.000Z', messages: [
+      { role: 'user', content: 'x'.repeat(40), inserted_at: '2026-08-10T09:00:00.000Z' },
+      { role: 'assistant', content: 'y'.repeat(80), inserted_at: '2026-08-10T09:00:05.000Z', model: 'deepseek-reasoner' },
+      { role: 'user', content: 'z'.repeat(20), inserted_at: T('2026-08-10T21:30:00.000Z') / 1000 },
+      { role: 'assistant', content: 'w'.repeat(8), inserted_at: T('2026-08-10T21:30:05.000Z') / 1000 } ] },
+    { id: 'c2', title: 'two', messages: [
+      { role: 'user', content: [{ type: 'text', text: 'abcd' }], created_at: '2026-08-11T08:00:00.000Z' },
+      { role: 'assistant', content: 'ok!!!', created_at: '2026-08-11T08:00:03.000Z' },
+      { role: 'assistant', content: 'no time', created_at: null } ] },
+  ], null, 1));
+  // T13c — Meta AI thread (Download your information, JSON → message_1.json; Facebook DYI shape, newest first).
+  //   sorted ascending: 08-09 'Here is the image' 17 chars (out 4, no preceding user → in 0) · user 40 → Meta AI 80 (in 10, out 20) · user 20 → Meta AI 8 (in 5, out 2) · one undated Meta AI message → skipped.
+  //   Expected: in=15 out=26 msgs=3 skipped=1 · platform 'Meta AI' · model meta-ai · sid = thread_path
+  w('wave2/meta-ai/message_1.json', JSON.stringify({ participants: [{ name: 'Alaa' }, { name: 'Meta AI' }], title: 'Meta AI', thread_path: 'inbox/metaai_123', messages: [
+    { sender_name: 'Meta AI', content: 'undated' },
+    { sender_name: 'Meta AI', timestamp_ms: T('2026-08-10T21:30:05.000Z'), content: 'w'.repeat(8) },
+    { sender_name: 'Alaa', timestamp_ms: T('2026-08-10T21:30:00.000Z'), content: 'z'.repeat(20) },
+    { sender_name: 'Meta AI', timestamp_ms: T('2026-08-10T09:00:05.000Z'), content: 'y'.repeat(80) },
+    { sender_name: 'Alaa', timestamp_ms: T('2026-08-10T09:00:00.000Z'), content: 'x'.repeat(40) },
+    { sender_name: 'Meta AI', timestamp_ms: T('2026-08-09T08:00:00.000Z'), content: 'Here is the image' },
+  ] }, null, 1));
+  // T13d — Perplexity data export (array of threads; tolerant field names). q1: 40 → 80 (in 10, out 20, ISO) · 20 → 8 (in 5, out 2, epoch ms) · 'abcd' → 'ok!!!' (in 1, out 1, date-only) · undated → skipped.
+  //   Expected: in=16 out=23 msgs=3 threads=4 skipped=1 · platform Perplexity · model perplexity. Also shipped inside a ZIP (the way the export arrives) next to an unrelated account.json.
+  const pxThreads = JSON.stringify([
+    { title: 'q1', query_str: 'x'.repeat(40), answer: 'y'.repeat(80), created_at: '2026-08-10T09:00:00.000Z' },
+    { query: 'z'.repeat(20), response: 'w'.repeat(8), timestamp: T('2026-08-10T21:30:00.000Z') },
+    { question: 'abcd', text: 'ok!!!', date: '2026-08-11' },
+    { query: 'undated', answer: 'nope' },
+  ], null, 1);
+  w('wave2/perplexity/threads.json', pxThreads);
+  w('wave2/perplexity/perplexity-export.zip', zipBuffer([{ name: 'threads.json', data: pxThreads, deflate: true }, { name: 'account.json', data: '{"email":"x@y.z"}' }]));
+  // T13e — Microsoft Copilot activity CSV (account.microsoft.com/privacy → Copilot → Export all activity history; columns undocumented → tolerant).
+  //   row1 ISO: 40 → 80 (in 10, out 20) · row2 'M/D/YYYY H:MM PM' local: 20 → 8 (in 5, out 2, hour 21) · row3 ISO: 'abcd' → 'ok!!!' (in 1, out 1) · row4 unparseable date → skipped.
+  //   Expected: in=16 out=23 msgs=3 skipped=1 · platform 'Microsoft Copilot' · model copilot · apps [Copilot app, Copilot in Edge]
+  w('wave2/mscopilot/copilot-activity.csv', [
+    'Date,App,Prompt,Response',
+    '2026-08-10T09:00:00Z,Copilot app,' + 'x'.repeat(40) + ',' + 'y'.repeat(80),
+    '8/10/2026 9:30 PM,Copilot in Edge,' + 'z'.repeat(20) + ',' + 'w'.repeat(8),
+    '2026-08-11T08:00:00Z,Copilot app,abcd,ok!!!',
+    'not a date,Copilot app,undated,skip me',
+  ].join('\n') + '\n');
 }
 
 if (process.argv[1] === import.meta.filename) await generate();

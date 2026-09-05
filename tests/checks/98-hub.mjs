@@ -288,6 +288,46 @@ export async function run({ browser, ok }) {
       lo.modal.open && lo.modal.has && lo.modal.reason && lo.modal.usageLink && /no data path/i.test(lo.modal.statusText) && lo.modal.badge === 'no data' &&
       lo.after.home && lo.after.hidden && lo.after.status === 'off' && lo.after.noState && lo.syncNoop, JSON.stringify({ modal: lo.modal, after: lo.after, syncNoop: lo.syncNoop }));
     ok('link-only: ✕ hides the card and the hidden chip restores it', lo.gone && /^1 hidden — show$/.test(lo.chipText || '') && lo.back, JSON.stringify({ gone: lo.gone, chipText: lo.chipText, back: lo.back }));
+    // Plan 4b T13: export-file cards — Manage + "Import file…" (opens the Imports modal), no Sync / Disconnect (the data belongs to Imports);
+    // status follows the source rows (no connector entry is ever written); the card's own generic card stays revealed after Manage closes.
+    const exp = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load(); App._hubQuery = '';
+      App._render();
+      const c = connectorById('grok');
+      const card = () => document.querySelector('#accounts-hub .acct[data-connector="grok"]');
+      const btns = () => [...card().querySelectorAll('.acct-actions button')].map(b => b.textContent);
+      const dlg = document.getElementById('connector-modal');
+      const before = { status: Store.connectorStatus(c), dot: card().querySelector('.dot').className, btns: btns(), label: card().querySelector('.acct-label').textContent,
+        group: !!document.querySelector('#accounts-hub .hub-group[data-group="chat"] .acct[data-connector="grok"]'), srcHidden: document.getElementById('src-grok').hidden, statusText: document.getElementById('grok-status').textContent };
+      card().querySelector('.acct-import-btn').click();
+      const opened = { open: dlg.open, hostsImports: !!dlg.querySelector('#src-import'), title: document.getElementById('modal-title').textContent, hint: document.getElementById('import-status').textContent };
+      let closed = new Promise(r => dlg.addEventListener('close', r, { once: true })); dlg.close(); await closed;
+      Store.setSource('grok-export', [{ d: dayKey(new Date()), platform: 'Grok', model: 'grok', in: 100, cw: 0, cr: 0, out: 50, msgs: 2, est: 1 }], { msgs: 2 });
+      App._render();
+      const after = { status: Store.connectorStatus(c), dot: card().querySelector('.dot').className, btns: btns(), label: card().querySelector('.acct-label').textContent, sync: card().querySelector('.acct-sync').textContent,
+        stats: card().querySelector('.acct-stats').textContent, noEntry: Store.connectors.grok === undefined, srcRevealed: !document.getElementById('src-grok').hidden, statusText: document.getElementById('grok-status').textContent };
+      card().querySelector('.acct-manage').click();
+      const manage = { open: dlg.open, hostsOwn: !!dlg.querySelector('#src-grok'), importBtn: !!dlg.querySelector('#grok-import'), badge: (dlg.querySelector('#src-grok .badge') || {}).textContent };
+      closed = new Promise(r => dlg.addEventListener('close', r, { once: true })); dlg.close(); await closed;
+      const afterManage = { srcStillRevealed: !document.getElementById('src-grok').hidden };
+      App.syncConnector('grok');   // export-file: no network, no error — opens Imports
+      const sync = { open: dlg.open, hostsImports: !!dlg.querySelector('#src-import') };
+      closed = new Promise(r => dlg.addEventListener('close', r, { once: true })); dlg.close(); await closed;
+      const kinds = CONNECTORS.filter(x => x.kind === 'export-file').map(x => [x.id, x.platform, x.category, x.quality, x.srcIds.join('|')]);
+      const copyOk = CONNECTORS.filter(x => x.kind === 'export-file').every(x => /^Estimated/.test(x.qualityNote) && /export/i.test(x.qualityNote) && !!x.links && !!x.paths && !!x.hint && document.getElementById(x.statusEl));
+      Store.sources = {}; Store.persist(); App._render();
+      return { before, opened, after, manage, afterManage, sync, kinds, copyOk };
+    });
+    ok('hub: export-file card starts off (gray, "No export imported yet", Manage + Import file… only, in Chat apps, source card hidden); Import file… opens the Imports modal with a hint naming the platform',
+      exp.before.status === 'off' && /\boff\b/.test(exp.before.dot) && JSON.stringify(exp.before.btns) === JSON.stringify(['Manage', 'Import file…']) && exp.before.label === 'No export imported yet' && exp.before.group && exp.before.srcHidden && /No export imported yet/.test(exp.before.statusText)
+      && exp.opened.open && exp.opened.hostsImports && exp.opened.title === 'Imports' && /Grok/.test(exp.opened.hint), JSON.stringify({ before: exp.before, opened: exp.opened }));
+    ok('hub: rows under the card\'s srcId → ok (green, "from your data export", Imported <time>, 30d stats) with NO connector entry, still no Sync/Disconnect; source card revealed with "Imported … 2 messages" and stays revealed after Manage closes; Sync routes to Imports',
+      exp.after.status === 'ok' && /\bok\b/.test(exp.after.dot) && JSON.stringify(exp.after.btns) === JSON.stringify(['Manage', 'Import file…']) && exp.after.label === 'from your data export' && /^Imported /.test(exp.after.sync) && /150/.test(exp.after.stats) && exp.after.noEntry
+      && exp.after.srcRevealed && /Imported/.test(exp.after.statusText) && /2 messages/.test(exp.after.statusText) && exp.manage.open && exp.manage.hostsOwn && exp.manage.importBtn && /estimated/.test(exp.manage.badge || '') && exp.afterManage.srcStillRevealed
+      && exp.sync.open && exp.sync.hostsImports, JSON.stringify({ after: exp.after, manage: exp.manage, afterManage: exp.afterManage, sync: exp.sync }));
+    ok('hub: the seven export-file cards (ChatGPT, Claude.ai, Grok, Microsoft Copilot, Perplexity, Meta AI, DeepSeek chat) are chat / estimated, copy is quality-first and export-based, each has links, paths, hint and a live status element',
+      JSON.stringify(exp.kinds) === JSON.stringify([['chatgpt-app', 'ChatGPT', 'chat', 'estimated', 'chatgpt'], ['claudeai-app', 'Claude.ai', 'chat', 'estimated', 'claudeai'], ['grok', 'Grok', 'chat', 'estimated', 'grok-export'], ['mscopilot', 'Microsoft Copilot', 'chat', 'estimated', 'copilot-activity-csv'],
+        ['perplexity', 'Perplexity', 'chat', 'estimated', 'perplexity-export'], ['meta-ai', 'Meta AI', 'chat', 'estimated', 'meta-ai-export'], ['deepseek-chat', 'DeepSeek chat', 'chat', 'estimated', 'deepseek-chat-export']]) && exp.copyOk, JSON.stringify(exp.kinds));
   } finally {
     await page.close();
   }

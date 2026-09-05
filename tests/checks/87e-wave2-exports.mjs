@@ -102,6 +102,68 @@ export async function run({ browser, ok }) {
     ok('deepseek: registry entry is an api-key card (fetch fetchDeepSeekBalance, keyLS key:deepseek) in API vendors with srcIds [deepseek, deepseek-usage-zip], quality exact, copy states export-first / balance validate-only / months merge; Imports accepts .zip',
       ds.reg.kind === 'api-key' && ds.reg.fetch === 'fetchDeepSeekBalance' && ds.reg.keyLS === 'key:deepseek' && ds.reg.cat === 'api' && ds.reg.platform === 'DeepSeek API' && JSON.stringify(ds.reg.srcIds) === JSON.stringify(['deepseek', 'deepseek-usage-zip'])
       && ds.reg.quality === 'exact' && ds.reg.copy && ds.reg.statusEl && ds.reg.inHub && /\.zip/.test(ds.reg.accept || ''), JSON.stringify(ds.reg));
+    // ---- T13: chat-export parsers (Grok, DeepSeek chat, Meta AI, Perplexity, Microsoft Copilot CSV) + Imports routing + export-file hub cards ----
+    const grokTxt = read('wave2', 'grok', 'grok-export.json'), dscTxt = read('wave2', 'deepseek', 'deepseek-conversations.json'), metaTxt = read('wave2', 'meta-ai', 'message_1.json'),
+          pxTxt = read('wave2', 'perplexity', 'threads.json'), cpCsv = read('wave2', 'mscopilot', 'copilot-activity.csv');
+    const ex = await page.evaluate(async (grokTxt, dscTxt, metaTxt, pxTxt, cpCsv, pxZipB64) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      const sum = (rows) => rows.reduce((a, r) => ({ in: a.in + r.in, out: a.out + r.out, msgs: a.msgs + r.msgs, est: a.est && r.est === 1 }), { in: 0, out: 0, msgs: 0, est: true });
+      const H = (iso) => new Date(iso).getHours();
+      const hours = (rows) => [...new Set(rows.map(r => r.hour))].sort((a, b) => a - b);
+      const expH = (...isos) => [...new Set(isos.map(H))].sort((a, b) => a - b);
+      // parsers, direct
+      const g = parseGrokExport(JSON.parse(grokTxt));
+      const d = parseDeepSeekChatExport(JSON.parse(dscTxt));
+      const m = parseMetaAiExport(JSON.parse(metaTxt), 'message_1.json');
+      const p = parsePerplexityExport(JSON.parse(pxTxt), 'threads.json');
+      const head = (parseCSV(cpCsv.split(/\r?\n/, 1)[0])[0] || []).map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+      const cpDetect = { yes: isCopilotActivityCSV(head), generic: isCopilotActivityCSV(['date', 'platform', 'model', 'input_tokens', 'output_tokens', 'requests']), cursor: isCursorUsageCSV(head), deepseek: isDeepSeekAmountCSV(head, 'copilot-activity.csv') };
+      const cp = parseCopilotActivityCSV(cpCsv, 'copilot-activity.csv');
+      const kinds = [sniffJSON(JSON.parse(grokTxt), 'grok-export.json'), sniffJSON(JSON.parse(dscTxt), 'deepseek-conversations.json'), sniffJSON(JSON.parse(dscTxt), 'conversations.json'), sniffJSON(JSON.parse(metaTxt), 'message_1.json'), sniffJSON(JSON.parse(pxTxt), 'threads.json')];
+      // Imports routing: four loose files + the Perplexity ZIP (JSON inside) in one batch
+      const toFile = (b, name) => new File([Uint8Array.from(atob(b), ch => ch.charCodeAt(0))], name, { type: 'application/zip' });
+      await App.handleImportFiles([
+        new File([grokTxt], 'grok-export.json', { type: 'application/json' }), new File([dscTxt], 'deepseek-conversations.json', { type: 'application/json' }),
+        new File([metaTxt], 'message_1.json', { type: 'application/json' }), new File([cpCsv], 'copilot-activity.csv', { type: 'text/csv' }), toFile(pxZipB64, 'perplexity-export.zip')]);
+      const note = document.getElementById('import-status').textContent;
+      const srcs = ['grok-export', 'deepseek-chat-export', 'meta-ai-export', 'perplexity-export', 'copilot-activity-csv'].map(id => Store.sources[id] ? sum(Store.sources[id].rows).msgs : null);
+      const pxSid = Store.sources['perplexity-export'].rows[0].sid;
+      // Meta AI threads: a second thread file merges (3 + 1 = 4 replies); re-importing the first replaces only its own thread (still 4, 2 threads)
+      const meta2 = JSON.parse(metaTxt); meta2.thread_path = 'inbox/metaai_456'; meta2.messages = meta2.messages.slice(0, 3);   // undated (skipped) + one reply + its prompt → 1 reply
+      await App.handleImportFiles([new File([JSON.stringify(meta2)], 'message_2.json', { type: 'application/json' })]);
+      const metaAfterSecond = sum(Store.sources['meta-ai-export'].rows).msgs;
+      await App.handleImportFiles([new File([metaTxt], 'message_1.json', { type: 'application/json' })]);
+      const metaAfterReimport = { msgs: sum(Store.sources['meta-ai-export'].rows).msgs, threads: Store.sources['meta-ai-export'].meta.threads };
+      App.renderHub();
+      const hub = ['grok', 'deepseek-chat', 'meta-ai', 'perplexity', 'mscopilot'].map(id => (document.querySelector(`#accounts-hub .acct[data-connector="${id}"] .dot`) || {}).className || 'missing');
+      const imports = connectorById('imports').srcIds, order = PLATFORM_ORDER, badge = document.querySelector('#src-import .badge').textContent;
+      Store.sources = {}; Store.connectors = {}; Store.billed = {}; Store.persist(); App._render();
+      return { g: { ...sum(g.rows), meta: g.meta, hours: hours(g.rows), expHours: expH('2026-08-10T09:00:05.000Z', '2026-08-10T21:30:05.000Z', '2026-08-11T08:00:00.000Z'), plat: g.rows[0].platform, model: g.rows[0].model },
+        d: { ...sum(d.rows), meta: d.meta, models: [...new Set(d.rows.map(r => r.model))].sort(), plat: d.rows[0].platform },
+        m: { ...sum(m.rows), meta: m.meta, plat: m.rows[0].platform, model: m.rows[0].model, sid: m.rows[0].sid },
+        p: { ...sum(p.rows), meta: p.meta, plat: p.rows[0].platform, model: p.rows[0].model },
+        cp: { ...sum(cp.rows), meta: cp.meta, hours: hours(cp.rows), h1: H('2026-08-10T09:00:00Z'), h3: H('2026-08-11T08:00:00Z'), plat: cp.rows[0].platform, model: cp.rows[0].model }, cpDetect,
+        kinds, note, srcs, pxSid, metaAfterSecond, metaAfterReimport, hub, imports, order, badge };
+    }, grokTxt, dscTxt, metaTxt, pxTxt, cpCsv, b64('wave2', 'perplexity', 'perplexity-export.zip'));
+    ok('grok: export parsed (est. in=17 out=25 msgs=4; 3 conversations; 1 undated reply skipped; $numberLong / ISO / conversation-time fallbacks; hours kept) as platform Grok, model grok',
+      ex.g.in === 17 && ex.g.out === 25 && ex.g.msgs === 4 && ex.g.est && ex.g.meta.convs === 3 && ex.g.meta.skipped === 1 && JSON.stringify(ex.g.hours) === JSON.stringify(ex.g.expHours) && ex.g.plat === 'Grok' && ex.g.model === 'grok', JSON.stringify(ex.g));
+    ok('deepseek chat: export parsed (est. in=16 out=23 msgs=3; 2 conversations; 1 undated skipped; epoch-seconds + content[] handled; model per message, default deepseek-chat) as platform "DeepSeek chat"',
+      ex.d.in === 16 && ex.d.out === 23 && ex.d.msgs === 3 && ex.d.est && ex.d.meta.convs === 2 && ex.d.meta.skipped === 1 && JSON.stringify(ex.d.models) === JSON.stringify(['deepseek-chat', 'deepseek-reasoner']) && ex.d.plat === 'DeepSeek chat', JSON.stringify(ex.d));
+    ok('meta ai: DYI thread parsed newest-first → ascending (est. in=15 out=26 msgs=3; 1 undated skipped; sid = thread_path) as platform "Meta AI", model meta-ai',
+      ex.m.in === 15 && ex.m.out === 26 && ex.m.msgs === 3 && ex.m.est && ex.m.meta.skipped === 1 && ex.m.plat === 'Meta AI' && ex.m.model === 'meta-ai' && ex.m.sid === 'inbox/metaai_123', JSON.stringify(ex.m));
+    ok('perplexity: thread array parsed with tolerant field names (est. in=16 out=23 msgs=3 of 4 threads; 1 undated skipped; ISO / epoch-ms / date-only) as platform Perplexity, model perplexity',
+      ex.p.in === 16 && ex.p.out === 23 && ex.p.msgs === 3 && ex.p.est && ex.p.meta.threads === 4 && ex.p.meta.skipped === 1 && ex.p.plat === 'Perplexity' && ex.p.model === 'perplexity', JSON.stringify(ex.p));
+    ok('ms copilot: activity CSV detected (generic / Cursor / DeepSeek headers are not) and parsed (est. in=16 out=23 msgs=3; 1 unparseable date skipped; ISO and M/D/YYYY H:MM PM → hour 21; apps listed) as platform "Microsoft Copilot", model copilot',
+      ex.cpDetect.yes && !ex.cpDetect.generic && !ex.cpDetect.cursor && !ex.cpDetect.deepseek && ex.cp.in === 16 && ex.cp.out === 23 && ex.cp.msgs === 3 && ex.cp.est && ex.cp.meta.skipped === 1
+      && ex.cp.hours.includes(21) && ex.cp.hours.includes(ex.cp.h1) && ex.cp.hours.includes(ex.cp.h3) && JSON.stringify(ex.cp.meta.apps) === JSON.stringify(['Copilot app', 'Copilot in Edge']) && ex.cp.plat === 'Microsoft Copilot' && ex.cp.model === 'copilot', JSON.stringify({ cp: ex.cp, cpDetect: ex.cpDetect }));
+    ok('sniff: grok-export / deepseek-chat-export (name-gated: conversations.json → unknown) / meta-ai-export / perplexity-export',
+      JSON.stringify(ex.kinds) === JSON.stringify(['grok-export', 'deepseek-chat-export', 'unknown', 'meta-ai-export', 'perplexity-export']), JSON.stringify(ex.kinds));
+    ok('imports: one batch routes all five formats (incl. Perplexity JSON inside its ZIP, sid = archive/entry) to their own sources; Meta AI threads merge and a re-imported thread replaces only itself; export-file hub cards turn green; srcIds/PLATFORM_ORDER/badge list them (ChatGPT once)',
+      JSON.stringify(ex.srcs) === JSON.stringify([4, 3, 3, 3, 3]) && ex.pxSid === 'perplexity-export.zip/threads.json' && ex.metaAfterSecond === 4 && ex.metaAfterReimport.msgs === 4 && ex.metaAfterReimport.threads === 2
+      && /Grok export — 3 conversations, 4 replies/.test(ex.note) && /DeepSeek chat export — 2 conversations, 3 replies/.test(ex.note) && /Meta AI thread — 3 replies/.test(ex.note) && /Microsoft Copilot activity CSV — 3 prompts/.test(ex.note) && /Perplexity export — 3 threads/.test(ex.note)
+      && ex.hub.every(cls => /\bok\b/.test(cls)) && ['grok-export', 'deepseek-chat-export', 'meta-ai-export', 'perplexity-export', 'copilot-activity-csv'].every(id => ex.imports.includes(id))
+      && ['Grok', 'Microsoft Copilot', 'Perplexity', 'Meta AI', 'DeepSeek chat', 'ChatGPT', 'Claude.ai'].every(pl => ex.order.includes(pl)) && ex.order.filter(pl => pl === 'ChatGPT').length === 1 && ex.order[ex.order.length - 1] === 'Other'
+      && /Grok/.test(ex.badge) && /Perplexity/.test(ex.badge) && /Takeout/.test(ex.badge) && /Cursor/.test(ex.badge), JSON.stringify({ srcs: ex.srcs, pxSid: ex.pxSid, metaAfterSecond: ex.metaAfterSecond, metaAfterReimport: ex.metaAfterReimport, hub: ex.hub, note: ex.note, imports: ex.imports, order: ex.order, badge: ex.badge }));
   } finally {
     await page.close();
   }
