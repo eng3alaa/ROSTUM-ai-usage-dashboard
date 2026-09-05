@@ -1414,7 +1414,7 @@ const CONNECTORS = [
       { id: 'session', label: 'Session token (optional, STS)', type: 'password', secret: true },
       { id: 'region', label: 'Region', placeholder: 'us-east-1' } ],
     quality: 'exact',
-    qualityNote: 'Exact tokens per model and UTC day from CloudWatch (AWS/Bedrock InputTokenCount / OutputTokenCount, Sum per day, dimension ModelId) — CloudWatch lists only models that reported in the last two weeks, so an idle model\'s older days are not pulled; request counts are not pulled, so messages show 0. Billed dollars per day from Cost Explorer (UnblendedCost, service "Amazon Bedrock"; $0.01 per sync, about 24 hours behind; third-party models billed under their own "(Amazon Bedrock Edition)" service names are not included). Requests are SigV4-signed in this page with WebCrypto; use a read-only IAM user (cloudwatch:GetMetricData, cloudwatch:ListMetrics, ce:GetCostAndUsage) or short-lived STS keys. The access key, secret and session token are kept in this tab only — never saved. Bedrock writes no local usage logs (~/.aws holds credentials only); model-invocation logging to CloudWatch Logs/S3 is not read in this version.',
+    qualityNote: 'Exact tokens per model and UTC day from CloudWatch (AWS/Bedrock InputTokenCount / OutputTokenCount, Sum per day, dimension ModelId) — CloudWatch lists only models that reported in the last two weeks, so an idle model\'s older days are not pulled; request counts are not pulled, so messages show 0. Billed dollars per day from Cost Explorer (UnblendedCost, service "Amazon Bedrock"; about 24 hours behind; third-party models billed under their own "(Amazon Bedrock Edition)" service names are not included). Cost Explorer charges $0.01 per request — every Sync and every auto-refresh tick that re-fetches this card pays it; turn auto-refresh off if that matters. Requests are SigV4-signed in this page with WebCrypto; use a read-only IAM user (cloudwatch:GetMetricData, cloudwatch:ListMetrics, ce:GetCostAndUsage) or short-lived STS keys. The access key, secret and session token are kept in this tab only — never saved. Bedrock writes no local usage logs (~/.aws holds credentials only); model-invocation logging to CloudWatch Logs/S3 is not read in this version.',
     paths: ['IAM → Users → Security credentials → Create access key (read-only policy above)', 'region: the one you call Bedrock in (us-east-1, eu-west-1, …) — Cost Explorer is global', 'no local usage files'],
     links: { docs: 'https://docs.aws.amazon.com/bedrock/latest/userguide/monitoring-runtime-metrics.html', usage: 'https://console.aws.amazon.com/costmanagement/home#/cost-explorer' } },
   // ---- Wave 2 chat apps: export-file cards (no usage API a local page can call; no web-login access; data arrives through Imports) ----
@@ -3559,7 +3559,8 @@ async function sigv4Sign({ method = 'POST', url, headers = {}, body = '', servic
  *  midnight (≤ 500 queries per call, NextToken paged) → exact tokens per model × UTC day, msgs 0 (request counts not pulled);
  *  (3) Cost Explorer GetCostAndUsage (served from us-east-1 only; $0.01 per request; ~24 h lag), DAILY UnblendedCost filtered to
  *  SERVICE 'Amazon Bedrock' → billed per day (zero days included). A Cost Explorer failure (e.g. no ce:GetCostAndUsage) degrades to
- *  tokens-only and is reported in the status line; CloudWatch failures are errors (403 → the AWS rejection message). */
+ *  tokens-only (billed: null → connectKey marks the stored billed envelope stale) and is reported in the status line; CloudWatch failures
+ *  are errors (403 → the AWS rejection message). */
 async function fetchBedrock(key, fields, opts = {}) {
   const days = Math.max(1, opts.days || 90);
   const accessKeyId = String(key || '').trim(), secretAccessKey = String(fields.secret || '').trim(), sessionToken = String(fields.session || '').trim() || undefined;
@@ -3602,7 +3603,7 @@ async function fetchBedrock(key, fields, opts = {}) {
         const ts = r.Timestamps || [], vs = r.Values || [];
         for (let k = 0; k < ts.length; k++) {
           const v = finTok(Number(vs[k])); if (!v) continue;
-          const d = dayKeyUTC(ts[k]); if (!d) continue;
+          const t = ts[k]; const d = dayKeyUTC(typeof t === 'number' ? (t < 1e12 ? t * 1000 : t) : t); if (!d) continue;   // JSON 1.0 returns epoch SECONDS (< 1e12 → ×1000; ms and ISO strings also accepted)
           agg.add(d, 'AWS Bedrock', model, { [mm[1]]: v, msgs: 0 });
         }
       }
@@ -3611,7 +3612,7 @@ async function fetchBedrock(key, fields, opts = {}) {
   }
   const rows = agg.rows();
   // (3) billed per day — Cost Explorer is served from us-east-1 only; failure degrades to tokens-only
-  let billed, costNote = '';
+  let billed = null, costNote = '';   // array = fresh · null = Cost Explorer failed → connectKey marks the stored billed envelope stale (never silently "fresh")
   try {
     const start = dayKeyUTC(startSec * 1000), end = dayKeyUTC(now.getTime() + 864e5);   // End is exclusive → tomorrow
     const byDay = new Map(); let tok = null, pages = 0;
@@ -3625,10 +3626,10 @@ async function fetchBedrock(key, fields, opts = {}) {
       tok = (j && j.NextPageToken) || null;
     } while (tok && ++pages < 20);
     billed = [...byDay.entries()].map(([d, amount]) => ({ d, amount })).sort((a, b) => a.d < b.d ? -1 : 1);
-  } catch (e) { costNote = ' · cost unavailable: ' + (e.message || String(e)).slice(0, 80); }
+  } catch (e) { billed = null; costNote = ' · cost unavailable: ' + (e.message || String(e)).slice(0, 80); }
   return { label: `${region} · key …${accessKeyId.slice(-4)}`,
-    detail: `${models.length} model${models.length === 1 ? '' : 's'} seen by CloudWatch (last 2 weeks) · ${rows.length} usage rows · last ${days} days` + (billed ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from Cost Explorer ($0.01 per sync)` : costNote),
-    rows, ...(billed ? { billed } : {}), meta: { days, region, models: models.length } };
+    detail: `${models.length} model${models.length === 1 ? '' : 's'} seen by CloudWatch (last 2 weeks) · ${rows.length} usage rows · last ${days} days` + (billed ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from Cost Explorer ($0.01 per request)` : costNote),
+    rows, billed, meta: { days, region, models: models.length } };
 }
 
 async function fetchCopilotAll(token) {
@@ -5393,7 +5394,8 @@ const App = {
   /* =================== generic key driver (api-key / admin-key / cloud-token entries with `fetch`) =================== */
   /** One code path for every key-bearing Wave-2 card: reads '<id>-key' (+ extra `fields` '<id>-f-<field>'), honors the Remember opt-in
    *  (never for sessionOnly), calls globalThis[c.fetch](key, fields, { days: 90 }) → { label, detail, rows?, billed?, meta? } and stores
-   *  rows → Store.setSource(c.id), billed → Store.setBilled(c.id) (null = soft-fail → stale envelope), then the connector entry. Own gen slot
+   *  rows → Store.setSource(c.id), billed → Store.setBilled(c.id) (undefined = fetcher has no billed path, envelope untouched · null = billed fetch
+   *  failed → stale envelope · array = fresh, [] = truthful empty), then the connector entry. Own gen slot
    *  this._gen[c.id]: a superseded call (newer connect, disconnect, clear-data) commits nothing and clears only its own placeholder —
    *  the fetchGemini rule (status.dataset.gen). */
   async connectKey(c) {
@@ -5419,7 +5421,7 @@ const App = {
       const res = (await fn(key, fields, { days: 90 })) || {};
       if (gen !== this._gen[c.id]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
       if (Array.isArray(res.rows)) Store.setSource(c.id, res.rows, res.meta || {});
-      if (res.billed !== undefined) Store.setBilled(c.id, res.billed);                               // array = fresh (or truthful empty), null = fetch failed → stale envelope
+      if (res.billed !== undefined) Store.setBilled(c.id, res.billed);                               // contract: undefined = no billed path (untouched) · null = billed fetch failed → Store.setBilled(null) marks the stored envelope stale · array = fresh ([] = truthful empty)
       Store.setConnector(c.id, { label: res.label || ((c.keyLabel || 'key') + ' · last 4: ' + key.slice(-4)), lastSync: Date.now(), err: null });
       status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));

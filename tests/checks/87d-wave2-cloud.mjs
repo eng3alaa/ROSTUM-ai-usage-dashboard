@@ -229,7 +229,8 @@ export async function run({ browser, ok }) {
       const card = document.getElementById('src-bedrock');
       const keyEl = document.getElementById('bedrock-key'), secEl = document.getElementById('bedrock-f-secret'), sesEl = document.getElementById('bedrock-f-session'), regEl = document.getElementById('bedrock-f-region');
       const ui = { card: !!card, note: card ? card.querySelectorAll('.session-only').length : 0, pwd: keyEl && keyEl.type, secretPwd: secEl && secEl.type, sessionPwd: sesEl && sesEl.type, regionInput: regEl && regEl.tagName, noRemember: card ? !card.querySelector('input[type="checkbox"]') : false,
-        reg: { kind: c.kind, cat: c.category, so: c.sessionOnly === true, q: c.quality, fetch: c.fetch, platform: c.platform, srcIds: c.srcIds, statusEl: c.statusEl, fields: (c.fields || []).map(f => f.id + (f.secret ? '!' : '')), keyLabel: c.keyLabel } };
+        reg: { kind: c.kind, cat: c.category, so: c.sessionOnly === true, q: c.quality, fetch: c.fetch, platform: c.platform, srcIds: c.srcIds, statusEl: c.statusEl, fields: (c.fields || []).map(f => f.id + (f.secret ? '!' : '')), keyLabel: c.keyLabel, qn: c.qualityNote || '' },
+        descHasCopy: card ? [...card.querySelectorAll('.desc')].some(e => /every auto-refresh tick/.test(e.textContent)) : false };
       const calls = [];
       const origFetch = window.fetch;
       const lower = (init) => { const h = {}; for (const [k, v] of Object.entries(init.headers || {})) h[k.toLowerCase()] = String(v); return h; };
@@ -251,7 +252,8 @@ export async function run({ browser, ok }) {
         const t = rows.reduce((a, r) => ({ in: a.in + r.in, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, out: 0, msgs: 0 });
         const st = Store.connectors.bedrock || {};
         const happy = { ...t, n: rows.length, models: [...new Set(rows.map(r => r.model))].sort(), days: [...new Set(rows.map(r => r.d))].sort(), platforms: [...new Set(rows.map(r => r.platform))], est: rows.some(r => r.est),
-          billed: Store.billedRows('bedrock'), status: Store.connectorStatus(c), label: st.label, err: st.err || null, statusText: document.getElementById('bedrock-status').textContent };
+          byKey: rows.map(r => r.d + '|' + r.model + '|' + r.in + '|' + r.out).sort(),
+          billed: Store.billedRows('bedrock'), billedStale: (Store.billed.bedrock || {}).stale, status: Store.connectorStatus(c), label: st.label, err: st.err || null, statusText: document.getElementById('bedrock-status').textContent };
         const byTarget = (s) => calls.filter(x => (x.headers['x-amz-target'] || '').endsWith(s));
         const pick = (x) => ({ url: x.url, method: x.method, auth: x.headers.authorization, date: x.headers['x-amz-date'], ct: x.headers['content-type'], sha: x.headers['x-amz-content-sha256'], sess: x.headers['x-amz-security-token'] || null, target: x.headers['x-amz-target'], body: x.body });
         const sig = { lm: byTarget('.ListMetrics').map(pick), gmd: byTarget('.GetMetricData').map(pick), ce: byTarget('.GetCostAndUsage').map(pick), total: calls.length };
@@ -262,7 +264,8 @@ export async function run({ browser, ok }) {
           if (t.endsWith('.ListMetrics')) return json(body && body.NextToken === 'n2' ? l2 : l1); if (t.endsWith('.GetMetricData')) return json(dataText);
           return json(JSON.stringify({ __type: 'AccessDeniedException', Message: 'User: arn:aws:iam::123:user/ro is not authorized to perform: ce:GetCostAndUsage' }), 400); };
         await App.connectKey(c);
-        const degraded = { err: (Store.connectors.bedrock || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('bedrock-status').textContent, rows: (Store.sources.bedrock || { rows: [] }).rows.length };
+        const degraded = { err: (Store.connectors.bedrock || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('bedrock-status').textContent, rows: (Store.sources.bedrock || { rows: [] }).rows.length,
+          billedStale: (Store.billed.bedrock || {}).stale, billedKept: Store.billedRows('bedrock').length };
         // CloudWatch rejects the signature/key (403) → attention with the AWS message
         window.fetch = async () => json(JSON.stringify({ __type: 'InvalidSignatureException', message: 'The request signature we calculated does not match the signature you provided.' }), 403);
         await App.connectKey(c);
@@ -290,6 +293,19 @@ export async function run({ browser, ok }) {
       && bd.happy.days.join() === '2026-08-10,2026-08-11' && bd.happy.platforms.join() === 'AWS Bedrock' && !bd.happy.est
       && bd.happy.billed.length === 3 && bd.happy.billed.map(b => b.d).join() === '2026-08-10,2026-08-11,2026-08-12' && Math.abs(bd.happy.billed[0].amount - 1.23) < 1e-9 && Math.abs(bd.happy.billed[1].amount - 0.77) < 1e-9 && bd.happy.billed[2].amount === 0
       && bd.happy.status === 'ok' && bd.happy.err === null && bd.happy.label === 'eu-west-1 · key …MPLE' && /Connected/.test(bd.happy.statusText) && /2 models seen by CloudWatch/.test(bd.happy.statusText) && /billed 3 days/.test(bd.happy.statusText), JSON.stringify(bd.happy));
+    // Wire format: JSON 1.0 GetMetricData Timestamps are epoch SECONDS — the fixture must carry them as such (out1 keeps one ISO string) and the
+    // page must land each value on its UTC calendar day (1786320000 s = 2026-08-10, 1786406400 s = 2026-08-11), never on 1970-01-21.
+    const bdRes = JSON.parse(bdData).MetricDataResults;
+    const wireEpoch = bdRes.filter(r => r.Id !== 'out1').every(r => r.Timestamps.every(t => Number.isInteger(t) && t > 1e9 && t < 1e12)) && typeof bdRes.find(r => r.Id === 'out1').Timestamps[0] === 'string';
+    ok('bedrock: GetMetricData Timestamps arrive as epoch seconds (JSON 1.0 wire format) and land on the UTC day — claude 08-10 12000/1500 · claude 08-11 8000/900 · nova 08-11 400/50 (ISO string in out1 parses too); nothing on 1970-01-21',
+      !bd.missing && wireEpoch && bd.happy.byKey.join(';') === '2026-08-10|anthropic.claude-sonnet-4-5|12000|1500;2026-08-11|amazon.nova-pro-v1:0|400|50;2026-08-11|anthropic.claude-sonnet-4-5|8000|900'
+      && !bd.happy.days.some(d => d.startsWith('1970')), JSON.stringify({ wireEpoch, byKey: bd.happy.byKey, days: bd.happy.days }));
+    ok('bedrock: Cost Explorer failure returns billed: null → the previous billed envelope is marked stale (3 rows kept, stale:true) while tokens stay fresh; the happy run leaves it stale:false',
+      !bd.missing && bd.happy.billedStale === false && bd.degraded.billedStale === true && bd.degraded.billedKept === 3, JSON.stringify({ happyStale: bd.happy.billedStale, degraded: bd.degraded }));
+    ok('bedrock: card copy states Cost Explorer is billed per request (every Sync and every auto-refresh tick pays $0.01; turn auto-refresh off) — no "per sync" claim on the card or the status line; quality stays exact',
+      !bd.missing && /Cost Explorer charges \$0\.01 per request — every Sync and every auto-refresh tick that re-fetches this card pays it; turn auto-refresh off if that matters\./.test(bd.ui.reg.qn)
+      && !/per sync/.test(bd.ui.reg.qn) && !/per sync/.test(bd.happy.statusText) && /\$0\.01 per request/.test(bd.happy.statusText) && bd.ui.descHasCopy && bd.ui.reg.q === 'exact',
+      JSON.stringify({ qn: bd.ui.reg.qn, descHasCopy: bd.ui.descHasCopy, statusText: bd.happy.statusText }));
     ok('bedrock: 4 signed POSTs — ListMetrics ×2 (NextToken n2 on the 2nd) + GetMetricData (4 queries, Period 86400, Stat Sum, ModelId dims, batch ≤ 500) on monitoring.eu-west-1 with x-amz-json-1.0, GetCostAndUsage on ce.us-east-1 with x-amz-json-1.1 (DAILY, UnblendedCost, SERVICE = Amazon Bedrock); Authorization "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/…" with the right service scope; no session-token header when blank',
       !bd.missing && bd.sig.total === 4 && bd.sig.lm.length === 2 && bd.sig.gmd.length === 1 && bd.sig.ce.length === 1
       && [...bd.sig.lm, ...bd.sig.gmd].every(x => x.url === 'https://monitoring.eu-west-1.amazonaws.com/' && x.method === 'POST' && x.ct === 'application/x-amz-json-1.0' && /^\d{8}T\d{6}Z$/.test(x.date || '') && /^[0-9a-f]{64}$/.test(x.sha || '') && x.sess === null

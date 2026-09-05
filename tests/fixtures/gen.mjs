@@ -524,13 +524,16 @@ export async function generate() {
   w('wave2/bedrock/list-metrics-2.json', JSON.stringify({ Metrics: [
     { Namespace: 'AWS/Bedrock', MetricName: 'InputTokenCount', Dimensions: [{ Name: 'ModelId', Value: 'amazon.nova-pro-v1:0' }] } ] }, null, 1));
   // T12 — GetMetricData: Ids in<i>/out<i> index the models array (claude = 0, nova = 1); a stray Id is ignored.
+  //   Wire format: on the JSON 1.0 protocol CloudWatch returns Timestamps as epoch SECONDS (integers or doubles), not ISO strings —
+  //   2026-08-10T00:00:00Z = Date.UTC(2026, 7, 10) / 1000 = 1786320000 s · 2026-08-11 = 1786320000 + 86400 = 1786406400 s.
+  //   Read as milliseconds those are 1970-01-21T16:12:00Z / 16:13:26Z — the bug this fixture guards. out1 keeps an ISO string so both encodings are proven to parse.
   //   Expected rows: claude 08-10 in 12000 out 1500 · claude 08-11 in 8000 out 900 · nova 08-11 in 400 out 50 → in = 20400 · out = 2450 · 3 rows
   w('wave2/bedrock/get-metric-data.json', JSON.stringify({ MetricDataResults: [
-    { Id: 'in0', Label: 'InputTokenCount', Timestamps: ['2026-08-10T00:00:00Z', '2026-08-11T00:00:00Z'], Values: [12000, 8000], StatusCode: 'Complete' },
-    { Id: 'out0', Label: 'OutputTokenCount', Timestamps: ['2026-08-10T00:00:00Z', '2026-08-11T00:00:00Z'], Values: [1500, 900], StatusCode: 'Complete' },
-    { Id: 'in1', Label: 'InputTokenCount', Timestamps: ['2026-08-11T00:00:00Z'], Values: [400], StatusCode: 'Complete' },
+    { Id: 'in0', Label: 'InputTokenCount', Timestamps: [1786320000, 1786406400], Values: [12000, 8000], StatusCode: 'Complete' },
+    { Id: 'out0', Label: 'OutputTokenCount', Timestamps: [1786320000, 1786406400], Values: [1500, 900], StatusCode: 'Complete' },
+    { Id: 'in1', Label: 'InputTokenCount', Timestamps: [1786406400], Values: [400], StatusCode: 'Complete' },
     { Id: 'out1', Label: 'OutputTokenCount', Timestamps: ['2026-08-11T00:00:00Z'], Values: [50], StatusCode: 'Complete' },
-    { Id: 'x9', Label: 'stray', Timestamps: ['2026-08-11T00:00:00Z'], Values: [99999], StatusCode: 'Complete' } ], Messages: [] }, null, 1));
+    { Id: 'x9', Label: 'stray', Timestamps: [1786406400], Values: [99999], StatusCode: 'Complete' } ], Messages: [] }, null, 1));
   // T12 — Cost Explorer GetCostAndUsage (DAILY): every day in range comes back, zero days included. Expected billed: 08-10 1.23 · 08-11 0.77 · 08-12 0 (3 rows, sum 2.00)
   w('wave2/bedrock/cost.json', JSON.stringify({ ResultsByTime: [
     { TimePeriod: { Start: '2026-08-10', End: '2026-08-11' }, Total: { UnblendedCost: { Amount: '1.23', Unit: 'USD' } }, Groups: [], Estimated: false },
