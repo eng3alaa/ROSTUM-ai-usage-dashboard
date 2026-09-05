@@ -596,6 +596,63 @@ export async function run({ browser, ok }) {
       race.before.src && race.before.conn && !race.afterDisconnect.src && !race.afterDisconnect.conn && race.afterDisconnect.status === 'off' && !/Connected/.test(race.afterDisconnect.text), JSON.stringify(race));
     ok('scan race: Clear-all during an in-flight folder scan → the scan bails: no source, no connector entry',
       !race.afterClear.src && !race.afterClear.conn && race.afterClear.status === 'off', JSON.stringify(race.afterClear));
+
+    // ---- T15 (Plan 4b): folder-log projects → Projects table ----
+    // Expected project×model rows (same arithmetic as the T7/T8/T9/T13 totals, split by model):
+    //   Codex (cwd D:\proj1 → 'D:/proj1'): gpt-5.4-codex in=200 cr=200 out=130 msgs=3
+    //   Gemini CLI (no cwd; projectHash abc123 → '~/.gemini/tmp/abc123'): gemini-3-flash in=525 cr=0 out=20 msgs=1 · gemini-3-pro in=800+500=1300 cr=200+1500=1700 out=350+100=450 msgs=2
+    //   Copilot CLI: sess-1 (context.cwd → 'D:/proj1'): claude-sonnet-4.5 in=1200+800=2000 cw=100 cr=900 out=300+150=450 msgs=2 · gpt-5.4 in=100 out=40 msgs=1;
+    //                sess-2 (no cwd → '(unknown project)', shutdown fallback): gpt-5.4 in=50 out=10 msgs=2
+    //   Junie (path projects/rostum.5e3a1b2c/matterhorn/.matterhorn/… → 'rostum'): claude-sonnet-4.5 in=1500+900=2400 cr=600 out=200+120=320 msgs=2 · gpt-5.4 in=300 out=40 msgs=1
+    const pj = await page.evaluate(async (codex, gem, cpA, cpB, junie) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const out = {};
+      const slim = (p) => ({ project: p.project, model: p.model, in: p.in, cw: p.cw, cr: p.cr, out: p.out, msgs: p.msgs });
+      const byKey = (a, b) => (a.project + '|' + a.model) < (b.project + '|' + b.model) ? -1 : 1;
+      // (a) each parser emits project rows (per call; parseFolderCached merges across files)
+      const cx = await parseCodexRollouts([{ path: 'sessions/2026/08/10/rollout-2026-08-10T09-00-00-abc.jsonl', file: new File([codex], 'rollout-2026-08-10T09-00-00-abc.jsonl') }], null, new Set(), connectorById('codex'));
+      out.codex = cx.projects.map(slim); out.codexPlatform = cx.projects[0] && cx.projects[0].platform;
+      const gc = await parseGeminiCliSessions([{ path: 'tmp/abc123/chats/session-2026-08-10T09-00-aaaa.json', file: new File([gem], 'session-2026-08-10T09-00-aaaa.json') }], null, new Set(), connectorById('gemini-cli'));
+      out.gemini = gc.projects.map(slim).sort(byKey);
+      const cp = await parseCopilotCliEvents([{ path: 'session-state/sess-1/events.jsonl', file: new File([cpA], 'events.jsonl') }, { path: 'session-state/sess-2/events.jsonl', file: new File([cpB], 'events.jsonl') }], null, new Set(), connectorById('copilot-cli'));
+      out.copilot = cp.projects.map(slim).sort(byKey);
+      const ju = await parseJunieEvents([{ path: 'projects/rostum.5e3a1b2c/matterhorn/.matterhorn/events/ISSUE-1 task-1-events.jsonl', file: new File([junie], 'ISSUE-1 task-1-events.jsonl') }], null, new Set(), connectorById('junie'));
+      out.junie = ju.projects.map(slim).sort(byKey);
+      // (b) scanFiles stores rows under Store.projectsBy[c.id] (persisted); the Projects table merges Claude + folder-log rows of the SAME folder into one row
+      Store.projects = [{ project: 'D:/proj1', model: 'claude-sonnet-5', in: 100, cw: 0, cr: 0, out: 50, msgs: 1 }];   // Claude Code rows for the same repo
+      const codexFiles = () => [{ path: 'sessions/2026/08/10/rollout-2026-08-10T09-00-00-abc.jsonl', file: new File([codex], 'rollout-2026-08-10T09-00-00-abc.jsonl') }];
+      await App.scanFiles(connectorById('codex'), codexFiles());
+      out.stored = (Store.projectsBy.codex || []).length;
+      out.persisted = (((JSON.parse(localStorage.getItem('aiusage:data') || '{}')).projectsBy || {}).codex || []).length;
+      App.renderProjects();
+      out.table = [...document.querySelectorAll('#projects-table tbody tr')].map(tr => { const td = [...tr.children].map(x => x.textContent); return { name: td[0], models: td[1], msgs: td[2], tok: td[3] }; });
+      // (c) disconnect keep-data keeps the rows; delete-data removes them; clearAll empties the map; load() defaults to {}; empty state names the tools
+      const origConfirm = window.confirm;
+      window.confirm = () => false; App.disconnectConnector('codex'); out.keptAfterKeep = (Store.projectsBy.codex || []).length;
+      await App.scanFiles(connectorById('codex'), codexFiles());
+      window.confirm = () => true; App.disconnectConnector('codex'); out.goneAfterDelete = Store.projectsBy.codex === undefined;
+      window.confirm = origConfirm;
+      Store.projectsBy = { codex: [{ project: 'x', model: 'm', in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }] }; Store.clearAll(); out.afterClear = Object.keys(Store.projectsBy || {}).length;
+      localStorage.setItem('aiusage:data', JSON.stringify({ sources: {}, billed: {}, projects: [], connectors: {} })); Store.load();
+      out.loadDefault = !!Store.projectsBy && typeof Store.projectsBy === 'object' && Object.keys(Store.projectsBy).length === 0;
+      Store.projects = []; Store.projectsBy = {}; App.renderProjects();
+      out.emptyText = (document.querySelector('#projects-table .empty') || {}).textContent || '';
+      // cleanup
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {}; Store.persist(); App._render();
+      return out;
+    }, codexText, gemA, cp1, cp2, junieText);
+    ok('projects (4b): Codex/Gemini CLI/Copilot CLI/Junie parsers emit project×model rows (Codex D:/proj1 gpt-5.4-codex 200/200/130/3; Gemini ~/.gemini/tmp/abc123 flash 525/0/20/1 + pro 1300/1700/450/2; Copilot D:/proj1 sonnet 2000/100/900/450/2 + gpt 100/40/1 and (unknown project) gpt 50/10/2; Junie rostum sonnet 2400/600/320/2 + gpt 300/40/1)',
+      JSON.stringify(pj.codex) === JSON.stringify([{ project: 'D:/proj1', model: 'gpt-5.4-codex', in: 200, cw: 0, cr: 200, out: 130, msgs: 3 }]) && pj.codexPlatform === 'OpenAI Codex CLI'
+      && JSON.stringify(pj.gemini) === JSON.stringify([{ project: '~/.gemini/tmp/abc123', model: 'gemini-3-flash', in: 525, cw: 0, cr: 0, out: 20, msgs: 1 }, { project: '~/.gemini/tmp/abc123', model: 'gemini-3-pro', in: 1300, cw: 0, cr: 1700, out: 450, msgs: 2 }])
+      && JSON.stringify(pj.copilot) === JSON.stringify([{ project: '(unknown project)', model: 'gpt-5.4', in: 50, cw: 0, cr: 0, out: 10, msgs: 2 }, { project: 'D:/proj1', model: 'claude-sonnet-4.5', in: 2000, cw: 100, cr: 900, out: 450, msgs: 2 }, { project: 'D:/proj1', model: 'gpt-5.4', in: 100, cw: 0, cr: 0, out: 40, msgs: 1 }])
+      && JSON.stringify(pj.junie) === JSON.stringify([{ project: 'rostum', model: 'claude-sonnet-4.5', in: 2400, cw: 0, cr: 600, out: 320, msgs: 2 }, { project: 'rostum', model: 'gpt-5.4', in: 300, cw: 0, cr: 0, out: 40, msgs: 1 }]),
+      JSON.stringify({ codex: pj.codex, gemini: pj.gemini, copilot: pj.copilot, junie: pj.junie }));
+    ok('projects (4b): scanFiles stores rows under Store.projectsBy[id] and persists them; the Projects table merges Claude + Codex rows of D:/proj1 into ONE row (msgs 4, tokens 680 = 100+50+200+200+130, both models listed)',
+      pj.stored === 1 && pj.persisted === 1 && pj.table.length === 1 && pj.table[0].name === 'D:/proj1' && pj.table[0].msgs === '4' && pj.table[0].tok === '680' && /sonnet-5/.test(pj.table[0].models) && /gpt-5\.4-codex/.test(pj.table[0].models),
+      JSON.stringify({ stored: pj.stored, persisted: pj.persisted, table: pj.table }));
+    ok('projects (4b): disconnect keep-data keeps projectsBy; delete-data removes it; clearAll empties it; load() defaults to {}; empty state names the folder-log tools',
+      pj.keptAfterKeep === 1 && pj.goneAfterDelete && pj.afterClear === 0 && pj.loadDefault && /Codex/.test(pj.emptyText) && /Gemini CLI/.test(pj.emptyText),
+      JSON.stringify({ keptAfterKeep: pj.keptAfterKeep, goneAfterDelete: pj.goneAfterDelete, afterClear: pj.afterClear, loadDefault: pj.loadDefault, emptyText: pj.emptyText }));
   } finally {
     await page.close();
   }

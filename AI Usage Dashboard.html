@@ -1167,7 +1167,7 @@ const CONNECTORS = [
     statusEl: 'gemini-cli-status', brand: '#4285f4', mark: 'Gc', srcIds: ['gemini-cli'],
     patterns: [/(^|\/)session-[^/]*\.json$/i], parser: 'parseGeminiCliSessions', hint: 'chats/session-*.json files (pick ~/.gemini or ~/.gemini/tmp)',
     quality: 'exact',
-    qualityNote: 'Exact tokens from Gemini CLI\'s auto-recorded sessions (session-*.json: per-response input / output / cached / thoughts counts and model). Google\'s docs do not publish the field names, so the parser sniffs tokens{} (and usageMetadata{}) defensively. The CLI prunes sessions after 30 days / 50 files by default; a re-scan only counts what is still on disk — raise the CLI\'s retention or keep copies if you want history. Cost is API-equivalent at list prices (Code Assist quota is not exposed).',
+    qualityNote: 'Exact tokens from Gemini CLI\'s auto-recorded sessions (session-*.json: per-response input / output / cached / thoughts counts and model). Google\'s docs do not publish the field names, so the parser sniffs tokens{} (and usageMetadata{}) defensively. The CLI prunes sessions after 30 days / 50 files by default; a re-scan only counts what is still on disk — raise the CLI\'s retention or keep copies if you want history. Cost is API-equivalent at list prices (Code Assist quota is not exposed). In the Projects table, sessions are grouped by their project-hash folder (~/.gemini/tmp/<hash>) because Gemini CLI does not record the working directory.',
     paths: ['%USERPROFILE%\\.gemini\\tmp\\<project_hash>\\chats\\session-*.json (Windows)', '~/.gemini/tmp/<hash>/chats/ (macOS/Linux)', 'GEMINI_CLI_HOME overrides ~/.gemini'],
     links: { get: 'https://github.com/google-gemini/gemini-cli', docs: 'https://geminicli.com/docs/cli/session-management/' } },
   { id: 'copilot-cli', platform: 'GitHub Copilot', name: 'GitHub Copilot CLI (logs)', category: 'coding', kind: 'folder-log',
@@ -1480,10 +1480,11 @@ const Store = {
   sources: {},       // srcId -> { rows: [], meta: {} }
   billed: {},        // srcId -> {rows: [{d, amount}], at, stale} envelope (v1 arrays migrate on load)
   projects: [],      // [{name, msgs, in, cw, cr, out, cost}] from local logs
+  projectsBy: {},    // connectorId → [{project, model, in, cw, cr, out, msgs, platform, local?}] from folder-log scans (Codex cwd, Gemini CLI project hash, Copilot CLI cwd, Junie project dir)
   connectors: {},    // connectorId -> { label, lastSync, err }
   load() {
     const saved = LS.get('data', null);
-    if (saved) { this.sources = saved.sources || {}; this.billed = saved.billed || {}; this.projects = saved.projects || []; this.connectors = saved.connectors || {}; }
+    if (saved) { this.sources = saved.sources || {}; this.billed = saved.billed || {}; this.projects = saved.projects || []; this.projectsBy = saved.projectsBy || {}; this.connectors = saved.connectors || {}; }
     // migrate v1 billed arrays to {rows, at, stale} envelopes
     for (const [k, v] of Object.entries(this.billed)) {
       if (Array.isArray(v)) this.billed[k] = { rows: v, at: null, stale: false };
@@ -1540,7 +1541,7 @@ const Store = {
     this.persist();
   },
   persist() {
-    try { LS.set('data', { sources: this.sources, billed: this.billed, projects: this.projects, connectors: this.connectors }); }
+    try { LS.set('data', { sources: this.sources, billed: this.billed, projects: this.projects, projectsBy: this.projectsBy, connectors: this.connectors }); }
     catch (e) { console.warn('persist failed', e); }
   },
   compactRows(rows) {
@@ -1562,7 +1563,7 @@ const Store = {
     return keep.concat([...merge.values()]);
   },
   setSource(id, rows, meta) { this.sources[id] = { rows: this.compactRows(rows), meta: { ...meta, updated: Date.now() } }; this.persist(); },
-  clearAll() { this.sources = {}; this.billed = {}; this.projects = []; this.connectors = {}; LS.del('data'); },
+  clearAll() { this.sources = {}; this.billed = {}; this.projects = []; this.projectsBy = {}; this.connectors = {}; LS.del('data'); },
   allRows() {
     const localSids = new Set();
     for (const r of ((this.sources.local || {}).rows || [])) {
@@ -1688,6 +1689,24 @@ function prettyProject(raw) {
   s = s.replace(/^[A-Za-z]:\/(Users|home)\/[^/]+\//i, '~/');
   s = s.replace(/^\/(Users|home)\/[^/]+\//i, '~/');
   return s.length > 60 ? '…' + s.slice(-59) : s;
+}
+
+/** Project×model bundles for the Projects table — the row shape parseClaudeLogs' projMap emits
+ *  ({ project, model, in, cw, cr, out, msgs }) plus `platform` and `local: 1` when the request ran on a local
+ *  provider (Pricing.cost honours both). Nested Maps (no separator bytes); parseFolderCached merges the rows of
+ *  one connector across files. Used by the Codex / Gemini CLI / Copilot CLI / Junie parsers. */
+function makeProjAgg(platform) {
+  const byProj = new Map();   // project → Map(model → bundle)
+  return {
+    add(project, model, t) {
+      let m = byProj.get(project); if (!m) { m = new Map(); byProj.set(project, m); }
+      let b = m.get(model);
+      if (!b) { b = { project, model, platform, in: 0, cw: 0, cr: 0, out: 0, msgs: 0 }; m.set(model, b); }
+      b.in += t.in || 0; b.cw += t.cw || 0; b.cr += t.cr || 0; b.out += t.out || 0; b.msgs += t.msgs || 0;
+      if (t.local) b.local = 1;
+    },
+    rows() { const out = []; for (const m of byProj.values()) out.push(...m.values()); return out; },
+  };
 }
 
 /** files: [{path, file}] → aggregated usage */
@@ -1874,18 +1893,18 @@ async function parseUsageLoggerJsonl(files, onProgress, seen = new Set(), c) {
  *  by sid (the rollout filename, which embeds the session UUID): the same rollout can appear under both
  *  sessions/ and archived_sessions/, and re-parsing it from scratch would double every delta. */
 async function parseCodexRollouts(files, onProgress, seen = new Set()) {
-  const agg = makeAgg(); const addedIds = []; let msgs = 0; const k = { lines: 0, badLines: 0 };
+  const agg = makeAgg(); const proj = makeProjAgg('OpenAI Codex CLI'); const addedIds = []; let msgs = 0; const k = { lines: 0, badLines: 0 };
   const list = files.filter(f => /(^|\/)rollout-[^/]*\.jsonl$/i.test(f.path));
   for (let fi = 0; fi < list.length; fi++) {
     const { path, file } = list[fi];
     const sid = (path.split('/').pop() || '').replace(/\.jsonl$/i, '');
     if (seen.has(sid)) { if (onProgress) onProgress(fi + 1, list.length); continue; }   // same rollout re-appearing under sessions/ vs archived_sessions/ — whole file already counted
     seen.add(sid); addedIds.push(sid);
-    let model = 'codex', prev = null, local = 0;
+    let model = 'codex', prev = null, local = 0, cwd = null;   // cwd = session_meta / turn_context payload.cwd (latest wins) → Projects table (prettyProject, same as Claude Code)
     await eachJsonl(file, (o) => {
       const p = o.payload || {};
       if (o.type === 'session_meta' && p.model_provider != null) local = (isLocalProvider(p.model_provider) || /^oss$/i.test(String(p.model_provider).trim())) ? 1 : 0;   // built-in OSS provider ids ('ollama' / 'lmstudio'; 'oss' in older builds) — the model name alone never decides
-      if (o.type === 'session_meta' || o.type === 'turn_context') { if (p.model) model = String(p.model); return; }
+      if (o.type === 'session_meta' || o.type === 'turn_context') { if (p.model) model = String(p.model); if (p.cwd) cwd = String(p.cwd); return; }
       if (o.type !== 'event_msg' || p.type !== 'token_count' || !p.info || !p.info.total_token_usage) return;
       const u = p.info.total_token_usage;
       const cur = { in: finTok(+u.input_tokens || 0), cr: finTok(+u.cached_input_tokens || 0), out: finTok(+u.output_tokens || 0) };
@@ -1897,11 +1916,12 @@ async function parseCodexRollouts(files, onProgress, seen = new Set()) {
       const t = { in: Math.max(0, d.in - d.cr), cr: d.cr, out: Math.max(0, d.out), msgs: 1 };
       if (local) t.local = 1;
       agg.add(dayKey(okTs ? ts : file.lastModified), 'OpenAI Codex CLI', model, t, sid, okTs ? ts.getHours() : undefined);
+      proj.add(prettyProject(cwd), model, t);
       msgs++;
     }, k);
     if (onProgress) onProgress(fi + 1, list.length);
   }
-  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds } };
+  return { rows: agg.rows(), projects: proj.rows(), meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds } };
 }
 
 /** Gemini CLI — ~/.gemini/tmp/<hash>/chats/session-*.json (whole-file JSON). messages[] of type 'gemini' carry
@@ -1909,7 +1929,7 @@ async function parseCodexRollouts(files, onProgress, seen = new Set()) {
  *  defensively, usageMetadata {promptTokenCount, candidatesTokenCount, cachedContentTokenCount, thoughtsTokenCount}.
  *  Dedupe by sessionId:messageId. */
 async function parseGeminiCliSessions(files, onProgress, seen = new Set()) {
-  const agg = makeAgg(); const addedIds = []; let msgs = 0, lines = 0, badLines = 0;
+  const agg = makeAgg(); const proj = makeProjAgg('Gemini CLI'); const addedIds = []; let msgs = 0, lines = 0, badLines = 0;
   const list = files.filter(f => /(^|\/)session-[^/]*\.json$/i.test(f.path));
   for (let fi = 0; fi < list.length; fi++) {
     const { path, file } = list[fi];
@@ -1917,21 +1937,29 @@ async function parseGeminiCliSessions(files, onProgress, seen = new Set()) {
     if (!obj || typeof obj !== 'object' || !Array.isArray(obj.messages)) { badLines++; continue; }
     lines++;
     const sid = String(obj.sessionId || (path.split('/').pop() || '').replace(/\.json$/i, ''));
+    // Projects table: Gemini CLI does not record the working directory — sessions live under tmp/<project_hash>/chats/, so the
+    // hash folder stands in for the project (a cwd-like field is honoured if a future CLI version writes one).
+    const hm = path.match(/(?:^|\/)tmp\/([^/]+)\/chats\//i);
+    const cwd = obj.cwd || obj.projectRoot || obj.workspaceRoot || null;
+    const hash = (obj.projectHash != null && String(obj.projectHash)) || (hm ? hm[1] : null);
+    const projName = cwd ? prettyProject(String(cwd)) : hash ? '~/.gemini/tmp/' + hash : prettyProject(null);
     for (const m of obj.messages) {
       if (!m || m.type === 'user') continue;
       const um = m.usageMetadata;
-      const t = m.tokens || (um ? { input: um.promptTokenCount, output: um.candidatesTokenCount, cached: um.cachedContentTokenCount, thoughts: um.thoughtsTokenCount, tool: um.toolUsePromptTokenCount } : null);
-      if (!t) continue;
+      const t0 = m.tokens || (um ? { input: um.promptTokenCount, output: um.candidatesTokenCount, cached: um.cachedContentTokenCount, thoughts: um.thoughtsTokenCount, tool: um.toolUsePromptTokenCount } : null);
+      if (!t0) continue;
       if (m.id != null) { const id = sid + ':' + m.id; if (seen.has(id)) continue; seen.add(id); addedIds.push(id); }
-      const input = finTok(+t.input || 0), cached = finTok(+t.cached || 0), output = finTok(+t.output || 0), thoughts = finTok(+t.thoughts || 0), tool = finTok(+t.tool || 0);   // tool = toolUsePromptTokenCount: billed (uncached) input for built-in tools, not part of promptTokenCount
+      const input = finTok(+t0.input || 0), cached = finTok(+t0.cached || 0), output = finTok(+t0.output || 0), thoughts = finTok(+t0.thoughts || 0), tool = finTok(+t0.tool || 0);   // tool = toolUsePromptTokenCount: billed (uncached) input for built-in tools, not part of promptTokenCount
       const ts = m.timestamp ? new Date(m.timestamp) : null, okTs = ts && !isNaN(ts);
-      agg.add(dayKey(okTs ? ts : file.lastModified), 'Gemini CLI', String(m.model || obj.model || 'gemini'),
-        { in: Math.max(0, input - cached) + tool, cr: cached, out: output + thoughts, msgs: 1 }, sid, okTs ? ts.getHours() : undefined);
+      const model = String(m.model || obj.model || 'gemini');
+      const t = { in: Math.max(0, input - cached) + tool, cr: cached, out: output + thoughts, msgs: 1 };
+      agg.add(dayKey(okTs ? ts : file.lastModified), 'Gemini CLI', model, t, sid, okTs ? ts.getHours() : undefined);
+      proj.add(projName, model, t);
       msgs++;
     }
     if (onProgress) onProgress(fi + 1, list.length);
   }
-  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines, addedIds } };
+  return { rows: agg.rows(), projects: proj.rows(), meta: { files: list.length, msgs, lines, badLines, addedIds } };
 }
 
 /** GitHub Copilot CLI — ~/.copilot/session-state/<sid>/events.jsonl. Per-request `assistant.usage` events
@@ -1942,23 +1970,25 @@ async function parseGeminiCliSessions(files, onProgress, seen = new Set()) {
  *  already-seen duplicates (same session under two paths) still counts as "had usage" and skips the shutdown
  *  fallback, instead of re-adding the session's totals a second time. */
 async function parseCopilotCliEvents(files, onProgress, seen = new Set()) {
-  const agg = makeAgg(); const addedIds = []; let msgs = 0; const k = { lines: 0, badLines: 0 };
+  const agg = makeAgg(); const proj = makeProjAgg('GitHub Copilot'); const addedIds = []; let msgs = 0; const k = { lines: 0, badLines: 0 };
   const list = files.filter(f => /(^|\/)events\.jsonl$/i.test(f.path));
   const num = (o, a, b) => finTok(+(o[a] ?? o[b] ?? 0) || 0);
   for (let fi = 0; fi < list.length; fi++) {
     const { path, file } = list[fi];
     const parts = path.split('/'); const sid = parts.length > 1 ? parts[parts.length - 2] : (path.replace(/\.jsonl$/i, ''));
-    let sawUsage = 0; const shutdowns = [];
+    let sawUsage = 0, cwd = null; const shutdowns = [];   // cwd from session.start (data.context.cwd per the chronicle docs; flat data.cwd / gitRoot / repository accepted) → Projects table
     await eachJsonl(file, (o) => {
       const d = o.data || o.payload || o;
       const type = String(o.type || o.event || '');
+      if (type === 'session.start') { const ctx = (d.context && typeof d.context === 'object') ? d.context : d; const w = ctx.cwd || ctx.workingDirectory || ctx.gitRoot || ctx.repository; if (w) cwd = String(w); return; }
       if (type === 'assistant.usage') {
         sawUsage++;
         if (o.id != null) { const id = sid + ':' + o.id; if (seen.has(id)) return; seen.add(id); addedIds.push(id); }
         const ts = o.timestamp ? new Date(o.timestamp) : null, okTs = ts && !isNaN(ts);
-        agg.add(dayKey(okTs ? ts : file.lastModified), 'GitHub Copilot', String(d.model || 'copilot'),
-          { in: num(d, 'inputTokens', 'input_tokens'), out: num(d, 'outputTokens', 'output_tokens'), cr: num(d, 'cacheReadTokens', 'cache_read_tokens'), cw: num(d, 'cacheWriteTokens', 'cache_write_tokens'), msgs: 1 },
-          sid, okTs ? ts.getHours() : undefined);
+        const model = String(d.model || 'copilot');
+        const t = { in: num(d, 'inputTokens', 'input_tokens'), out: num(d, 'outputTokens', 'output_tokens'), cr: num(d, 'cacheReadTokens', 'cache_read_tokens'), cw: num(d, 'cacheWriteTokens', 'cache_write_tokens'), msgs: 1 };
+        agg.add(dayKey(okTs ? ts : file.lastModified), 'GitHub Copilot', model, t, sid, okTs ? ts.getHours() : undefined);
+        proj.add(prettyProject(cwd), model, t);
         msgs++;
       } else if (type === 'session.shutdown' && d.modelMetrics && typeof d.modelMetrics === 'object') {
         shutdowns.push({ ts: o.timestamp, metrics: d.modelMetrics });
@@ -1968,14 +1998,15 @@ async function parseCopilotCliEvents(files, onProgress, seen = new Set()) {
       const ts = s.ts ? new Date(s.ts) : null, okTs = ts && !isNaN(ts);
       for (const [model, m] of Object.entries(s.metrics)) {
         const u = (m && m.usage) || {}, n = finTok(+((m && m.requests && m.requests.count) ?? 1) || 0) || 1;
-        agg.add(dayKey(okTs ? ts : file.lastModified), 'GitHub Copilot', model,
-          { in: num(u, 'inputTokens', 'input_tokens'), out: num(u, 'outputTokens', 'output_tokens'), cr: num(u, 'cacheReadTokens', 'cache_read_tokens'), cw: num(u, 'cacheWriteTokens', 'cache_write_tokens'), msgs: n }, sid, okTs ? ts.getHours() : undefined);
+        const t = { in: num(u, 'inputTokens', 'input_tokens'), out: num(u, 'outputTokens', 'output_tokens'), cr: num(u, 'cacheReadTokens', 'cache_read_tokens'), cw: num(u, 'cacheWriteTokens', 'cache_write_tokens'), msgs: n };
+        agg.add(dayKey(okTs ? ts : file.lastModified), 'GitHub Copilot', model, t, sid, okTs ? ts.getHours() : undefined);
+        proj.add(prettyProject(cwd), model, t);
         msgs += n;
       }
     }
     if (onProgress) onProgress(fi + 1, list.length);
   }
-  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds } };
+  return { rows: agg.rows(), projects: proj.rows(), meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds } };
 }
 
 /** Continue.dev — ~/.continue/dev_data/<ver>/tokensGenerated.jsonl: one event per model response
@@ -2103,28 +2134,33 @@ async function parseAiderHistory(files, onProgress) {
  *  records carry inputTokens/outputTokens/cacheTokens (+cost, model) — nesting varies by version, so the token object
  *  is looked up at event, event.answer, event.usage, event.response, event.tokenUsage, event.statistics. */
 async function parseJunieEvents(files, onProgress) {
-  const agg = makeAgg(); let msgs = 0; const k = { lines: 0, badLines: 0 };
+  const agg = makeAgg(); const proj = makeProjAgg('JetBrains Junie'); let msgs = 0; const k = { lines: 0, badLines: 0 };
   const list = files.filter(f => /(^|\/)[^/]*events\.jsonl$/i.test(f.path));
   const pick = (o, ...keys) => { for (const key of keys) if (o && o[key] != null) return finTok(+o[key] || 0); return 0; };
   for (let fi = 0; fi < list.length; fi++) {
     const { path, file } = list[fi];
     const sid = (path.split('/').pop() || '').replace(/\.jsonl$/i, '');
+    // Projects table: IDE layout …/projects/<project>/matterhorn/.matterhorn/events/… → <project> (JetBrains' ".<hash>" cache suffix stripped);
+    // a project-path-like field on any event (Junie CLI sessions) is honoured; otherwise '(unknown project)'.
+    const pm = path.match(/(?:^|\/)([^/]+)\/matterhorn\/\.matterhorn\//i);
+    let projName = pm ? pm[1].replace(/\.[0-9a-f]{6,}$/i, '') : null;
     await eachJsonl(file, (o) => {
       const ev = o.event && typeof o.event === 'object' ? o.event : o;
+      if (!projName) { const w = ev.projectPath || ev.projectDir || ev.cwd || ev.workingDirectory || o.projectPath; if (w) projName = prettyProject(String(w)); }
       const type = String(ev.type || ev.eventType || o.type || '');
       if (!/LlmResponse/i.test(type)) return;
       const src = [ev, ev.answer, ev.usage, ev.response, ev.tokenUsage, ev.statistics].find(x => x && typeof x === 'object' && (x.inputTokens != null || x.input_tokens != null));
       if (!src) return;
       const model = String(ev.model || ev.modelName || (ev.answer && (ev.answer.model || ev.answer.modelName)) || src.model || 'junie');
       const tsRaw = o.timestamp || ev.timestamp || o.time; const ts = tsRaw ? new Date(tsRaw) : null, okTs = ts && !isNaN(ts);
-      agg.add(dayKey(okTs ? ts : file.lastModified), 'JetBrains Junie', model,
-        { in: pick(src, 'inputTokens', 'input_tokens'), out: pick(src, 'outputTokens', 'output_tokens'), cr: pick(src, 'cacheTokens', 'cacheInputTokens', 'cache_read_tokens'), cw: pick(src, 'cacheCreateInputTokens', 'cacheCreationTokens', 'cache_write_tokens'), msgs: 1 },
-        sid, okTs ? ts.getHours() : undefined);
+      const t = { in: pick(src, 'inputTokens', 'input_tokens'), out: pick(src, 'outputTokens', 'output_tokens'), cr: pick(src, 'cacheTokens', 'cacheInputTokens', 'cache_read_tokens'), cw: pick(src, 'cacheCreateInputTokens', 'cacheCreationTokens', 'cache_write_tokens'), msgs: 1 };
+      agg.add(dayKey(okTs ? ts : file.lastModified), 'JetBrains Junie', model, t, sid, okTs ? ts.getHours() : undefined);
+      proj.add(projName || prettyProject(null), model, t);
       msgs++;
     }, k);
     if (onProgress) onProgress(fi + 1, list.length);
   }
-  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds: [] } };
+  return { rows: agg.rows(), projects: proj.rows(), meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds: [] } };
 }
 
 /** LM Studio — *.conversation.json (whole-file JSON). For each message take versions[currentlySelected]; assistant
@@ -2418,7 +2454,7 @@ async function parseOllamaFiles(files, onProgress, seen = new Set(), c, siblingF
  *  would otherwise serve pre-fix rows forever for finished files). History: 'scan:' → v3 (per-hour granularity,
  *  connector-prefixed signatures) → v4 (Roo/Cline inclusive tokensIn + per-request model, local:1 flags, Gemini CLI
  *  tool tokens). prune() sweeps EVERY older-version key so IDB keeps no dead entries. */
-const SCAN_CACHE_VER = 'scan:v4:';
+const SCAN_CACHE_VER = 'scan:v5:';   // v5: folder-log parsers emit project rows (Plan 4b T15) — output changed for unchanged bytes → one-time re-parse
 const ScanCache = {
   async get(sig) { try { return await IDB.get(SCAN_CACHE_VER + sig); } catch { return null; } },
   async set(sig, entry) { try { await IDB.set(SCAN_CACHE_VER + sig, entry); } catch {} },
@@ -4687,6 +4723,7 @@ const App = {
       for (const sid of c.srcIds) delete Store.sources[sid];
       for (const sid of c.srcIds) delete Store.billed[sid];
       if (id === 'local') Store.projects = [];
+      delete Store.projectsBy[id];   // folder-log project rows are data — go with the data, stay on keep-data
     }
     Store.persist();
     this.render();
@@ -5006,9 +5043,12 @@ const App = {
   renderProjects() {
     const wrap = $('projects-table');
     clear(wrap);
-    const raw = Store.projects || [];
+    // Claude Code rows (Store.projects, from the .claude scan) + folder-log rows (Store.projectsBy[connectorId]: Codex cwd, Gemini CLI
+    // project-hash folder, Copilot CLI cwd, Junie project dir) — same row shape, merged by project name below, so the same repo used
+    // from several tools is ONE row (the Models column lists every model seen). Pricing.cost honours each row's platform / local flag.
+    const raw = (Store.projects || []).concat(Object.values(Store.projectsBy || {}).flat());
     $('projects-hint').textContent = raw.length ? 'all time, from local session logs' : '';
-    if (!raw.length) { wrap.appendChild(el('div', { class: 'empty', text: 'Connect the local .claude folder to see per-project usage.' })); return; }
+    if (!raw.length) { wrap.appendChild(el('div', { class: 'empty', text: 'Connect a local log folder (Claude Code, Codex CLI, Gemini CLI, Copilot CLI or JetBrains Junie) to see per-project usage.' })); return; }
     const byProj = new Map();
     for (const pb of raw) {
       let p = byProj.get(pb.project);
@@ -5198,6 +5238,7 @@ const App = {
       const res = await parseFolderCached(c, files, (done, total) => { if (prog) { prog.max = total; prog.value = done; } }, ScanCache);
       if (gen !== this._gen[c.id]) return;   // superseded by a newer scan of this connector
       if (!res.meta.files) { status.textContent = `No matching files found — expected ${c.hint || 'log files'}.`; return; }
+      if (res.projects && res.projects.length) Store.projectsBy[c.id] = res.projects; else delete Store.projectsBy[c.id];   // Projects table rows (persisted by setSource's persist below); a re-scan that finds none clears the stale set
       Store.setSource(c.id, res.rows, { files: res.meta.files, msgs: res.meta.msgs, lines: res.meta.lines, badLines: res.meta.badLines });
       const filesLabel = `${res.meta.files} file${res.meta.files === 1 ? '' : 's'}`;
       // per-half errors (dual-driver cards): this driver owns scanErr, connectServer owns serverErr; hub err = serverErr || scanErr
