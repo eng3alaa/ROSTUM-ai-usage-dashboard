@@ -376,30 +376,41 @@ export async function generate() {
     metadata: { user_0: { timestamp: '2026-08-11 10:00:00' }, assistant_0: { timestamp: '2026-08-11 10:00:05' } } }, null, 1));
   w('wave2/tgwebui/user_data/logs/chat_state.json', JSON.stringify({ unique_id: 'x' }));   // not matched (no chat/ or instruct/ dir) — ignored
   // ---- Plan 4b (Wave 2) fixtures: API vendors ----
-  // T7 — Fireworks billingUsage (tokens as JSON STRINGS; day = bucket start UTC; groupBy=model_name) + billing/summary (USD per day).
+  // T7 — Fireworks billingUsage + billing/summary in the DOCUMENTED wire shape (docs.fireworks.ai/accounts/exporting-usage-and-costs, api-reference/get-billing-usage, api-reference/get-billing-summary):
+  //   billingUsage = gatewayAccountUsage { serverlessCosts[], dedicatedCosts[], trainingCosts[] } — serverless rows: promptTokens / completionTokens as JSON STRINGS (int64), group { model_name } (map<string,string>), startTime / endTime, costNanoUsd;
+  //   dedicated rows: acceleratorSeconds (string int64), deploymentId, acceleratorType, baseModel, group { deployment_name } — NO token fields (dedicated deployments are metered in GPU time; usageType / placement values here are illustrative).
+  //   billing/summary?granularity=DAILY = { lineItems[] (PERIOD totals — must NOT be counted per day), usageBuckets[] { startTime, endTime, lineItems[] { series, category, totalCost: { currencyCode, units, nanos } } } }.
   //   Days are RELATIVE so the 90-day fetch window always covers them: A = 3 days ago, B = 40 days ago (a different 31-day window), Z = 200 days ago (outside the range → must be dropped).
   //   serverless: A llama in 12000 out 3400 · A qwen in 5000 out 900 · A llama promptTokens "abc" (rejected → 0) out 10 · B llama in 800 out 120 · Z 99999/99999 (dropped)
-  //   dedicated:  A dep-1 in 2000 out 500
-  //   Expected rows (serverless + dedicated): in = 12000+5000+0+800+2000 = 19800 · out = 3400+900+10+120+500 = 4930 · msgs = 0 (no request count in the export)
-  //     4 day·model rows: A/llama (in 12000, out 3410), A/qwen, B/llama, A/dep-1 · model names lose the accounts/<acct>/models/ (serverless) and accounts/<acct>/deployments/ (dedicated → 'dep-1') prefixes
-  //   summary: A serverless 1.84 + dedicated 4.50 = 6.34 · B 0.12 · Z 9.99 (dropped) → 2 billed days, total 6.46
+  //   dedicated:  A dep-1 7200 accelerator-seconds (= 2.0 accelerator-h; no tokens → no day·model row) · Z dep-1 99999 s (dropped by the window guard)
+  //   Expected rows (serverless only — dedicated rows carry no tokens): in = 12000+5000+0+800 = 17800 · out = 3400+900+10+120 = 4430 · msgs = 0 (no request count in the export)
+  //     3 day·model rows: A/llama (in 12000, out 3400+10 = 3410), A/qwen, B/llama · model names lose the accounts/<acct>/models/ prefix · meta.acceleratorSeconds = 7200
+  //   summary per-day buckets: A serverless 1 + 0.84 = 1.84, dedicated 4 + 0.50 = 4.50 → 6.34 · B 0 + 0.12 = 0.12 · Z training 9.99 (dropped) → 2 billed days, total 6.34 + 0.12 = 6.46
+  //     the top-level lineItems (period totals 1.96 + 4.50 + 9.99 = 16.45) are a trap: counting them per window too would give 6.46 + 16.45 = 22.91
   const fwDay = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
-  const fwBucket = (n, model, p, c) => ({ startTime: fwDay(n) + 'T00:00:00Z', endTime: fwDay(n - 1) + 'T00:00:00Z', dimensions: { model_name: model }, promptTokens: p, completionTokens: c });
-  w('wave2/fireworks/billingUsage-serverless.json', JSON.stringify({ usageBuckets: [
-    fwBucket(3, 'accounts/fireworks/models/llama-v3p3-70b-instruct', '12000', '3400'),
-    fwBucket(3, 'accounts/fireworks/models/qwen3-235b-a22b', '5000', '900'),
-    fwBucket(3, 'accounts/fireworks/models/llama-v3p3-70b-instruct', 'abc', '10'),
-    fwBucket(40, 'accounts/fireworks/models/llama-v3p3-70b-instruct', '800', '120'),
-    fwBucket(200, 'accounts/fireworks/models/llama-v3p3-70b-instruct', '99999', '99999'),
+  const fwSpan = (n) => ({ startTime: fwDay(n) + 'T00:00:00Z', endTime: fwDay(n - 1) + 'T00:00:00Z' });
+  const fwServerless = (n, model, p, c) => ({ ...fwSpan(n), promptTokens: p, completionTokens: c, cachedPromptTokens: '0', uncachedPromptTokens: p, audioInputSeconds: 0, usageType: 'TEXT_COMPLETION_INFERENCE_USAGE', group: { model_name: model }, costNanoUsd: 1234567 });
+  const fwDedicated = (n, dep, secs) => ({ ...fwSpan(n), deploymentId: dep, acceleratorType: 'NVIDIA_H100_80GB', acceleratorSeconds: secs, baseModel: 'accounts/fireworks/models/llama-v3p3-70b-instruct', usageType: 'DEDICATED_DEPLOYMENT_USAGE', placement: 'PLACEMENT_UNSPECIFIED', group: { deployment_name: 'accounts/acme/deployments/' + dep } });
+  const fwMoney = (units, nanos) => ({ currencyCode: 'USD', units: String(units), nanos });   // google.type.Money as proto3 JSON: int64 units is a string, int32 nanos a number
+  const fwItem = (series, category, units, nanos) => ({ category, groupingKey: 'model', groupingValue: 'llama-v3p3-70b-instruct', quantity: 1, unitAmount: fwMoney(0, 0), totalCost: fwMoney(units, nanos), series });
+  w('wave2/fireworks/billingUsage-serverless.json', JSON.stringify({ serverlessCosts: [
+    fwServerless(3, 'accounts/fireworks/models/llama-v3p3-70b-instruct', '12000', '3400'),
+    fwServerless(3, 'accounts/fireworks/models/qwen3-235b-a22b', '5000', '900'),
+    fwServerless(3, 'accounts/fireworks/models/llama-v3p3-70b-instruct', 'abc', '10'),
+    fwServerless(40, 'accounts/fireworks/models/llama-v3p3-70b-instruct', '800', '120'),
+    fwServerless(200, 'accounts/fireworks/models/llama-v3p3-70b-instruct', '99999', '99999'),
   ] }, null, 1));
-  w('wave2/fireworks/billingUsage-dedicated.json', JSON.stringify({ usageBuckets: [
-    fwBucket(3, 'accounts/acme/deployments/dep-1', '2000', '500'),
+  w('wave2/fireworks/billingUsage-dedicated.json', JSON.stringify({ dedicatedCosts: [
+    fwDedicated(3, 'dep-1', '7200'),
+    fwDedicated(200, 'dep-1', '99999'),
   ] }, null, 1));
-  w('wave2/fireworks/billing-summary.json', JSON.stringify({ lineItems: [
-    { category: 'SERVERLESS', usageBuckets: [{ startTime: fwDay(3) + 'T00:00:00Z', amount: '1.84', currency: 'USD' }, { startTime: fwDay(40) + 'T00:00:00Z', amount: '0.12', currency: 'USD' }] },
-    { category: 'DEDICATED_DEPLOYMENT', usageBuckets: [{ startTime: fwDay(3) + 'T00:00:00Z', amount: '4.50', currency: 'USD' }] },
-    { category: 'TRAINING', usageBuckets: [{ startTime: fwDay(200) + 'T00:00:00Z', amount: '9.99', currency: 'USD' }] },
-  ] }, null, 1));
+  w('wave2/fireworks/billing-summary.json', JSON.stringify({
+    lineItems: [fwItem('SERVERLESS', 'Text Completion', 1, 960000000), fwItem('DEDICATED_DEPLOYMENT', 'Dedicated Deployment', 4, 500000000), fwItem('TRAINING', 'Supervised Fine-Tuning', 9, 990000000)],
+    usageBuckets: [
+      { ...fwSpan(3), lineItems: [fwItem('SERVERLESS', 'Text Completion', 1, 840000000), fwItem('DEDICATED_DEPLOYMENT', 'Dedicated Deployment', 4, 500000000)] },
+      { ...fwSpan(40), lineItems: [fwItem('SERVERLESS', 'Text Completion', 0, 120000000)] },
+      { ...fwSpan(200), lineItems: [fwItem('TRAINING', 'Supervised Fine-Tuning', 9, 990000000)] },
+    ] }, null, 1));
   // ---- Plan 4b fixtures (wave2/): ZIP reader + DeepSeek API monthly usage export (Task 8) ----
   // T8a — ZIP reader round-trip: one stored entry (9 bytes), one deflate-raw entry (3000 chars), one entry with an unsupported method (12 = bzip2 → bytes() must throw)
   w('wave2/zip/mini.zip', zipBuffer([

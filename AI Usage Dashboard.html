@@ -1366,8 +1366,8 @@ const CONNECTORS = [
     keyLabel: 'Fireworks API key', keyHint: 'fw_… (app.fireworks.ai → Settings → API keys — any regular key works)',
     fields: [{ id: 'account', label: 'Account id', placeholder: 'e.g. my-team' }],
     quality: 'exact',
-    qualityNote: 'Exact tokens and billed dollars: any regular Fireworks key plus your account id reads GET /v1/accounts/{account}/billingUsage (daily prompt / completion tokens per model, serverless and dedicated deployments, fetched in 31-day windows) and GET …/billing/summary?granularity=DAILY (rated USD per day). Token counts arrive as strings and are daily only (no hour); the API caches for a few minutes. Request counts are not part of the export, so the messages metric stays 0 for Fireworks. Find the account id in app.fireworks.ai (Settings, or the first path segment of the console URL); the key is kept in this browser only if you tick Remember.',
-    paths: ['GET https://api.fireworks.ai/v1/accounts/{account}/billingUsage?usageType=SERVERLESS|DEDICATED_DEPLOYMENT&groupBy=model_name (≤31-day windows)', 'GET https://api.fireworks.ai/v1/accounts/{account}/billing/summary?granularity=DAILY', 'CLI equivalent: firectl billing get-usage / export-metrics'],
+    qualityNote: 'Exact tokens and billed dollars: any regular Fireworks key plus your account id reads GET /v1/accounts/{account}/billingUsage (daily prompt / completion tokens per serverless model, fetched in 31-day windows) and GET …/billing/summary?granularity=DAILY (rated USD per day across serverless, dedicated and training). Dedicated deployments are metered in accelerator-seconds — the export carries no token counts for them — so they appear in billed dollars and as accelerator-hours in the status line, not as token rows. Token counts arrive as strings and are daily only (no hour); the API caches for a few minutes. Request counts are not part of the export, so the messages metric stays 0 for Fireworks. Find the account id in app.fireworks.ai (Settings, or the first path segment of the console URL); the key is kept in this browser only if you tick Remember.',
+    paths: ['GET https://api.fireworks.ai/v1/accounts/{account}/billingUsage?usageType=SERVERLESS&groupBy=model_name and ?usageType=DEDICATED_DEPLOYMENT&groupBy=deployment_name (≤31-day windows)', 'GET https://api.fireworks.ai/v1/accounts/{account}/billing/summary?granularity=DAILY', 'CLI equivalent: firectl billing get-usage / export-metrics'],
     links: { get: 'https://app.fireworks.ai/settings/users/api-keys', docs: 'https://docs.fireworks.ai/accounts/exporting-usage-and-costs', usage: 'https://app.fireworks.ai/account/billing' } },
   // ---- Wave 2 API vendor: DeepSeek (key driver validate + monthly usage ZIP through Imports) ----
   { id: 'deepseek', platform: 'DeepSeek API', name: 'DeepSeek API', category: 'api', kind: 'api-key',
@@ -3275,9 +3275,9 @@ async function validateTgwebui(base) {
 
 /* ---------- Fireworks AI: exact tokens (billingUsage) + billed USD (billing/summary) with a regular key ---------- */
 /** fields.account = Fireworks account id (app.fireworks.ai). `days` back from today in ≤31-day half-open windows [s, e); two
- *  passes (SERVERLESS, DEDICATED_DEPLOYMENT); token fields are JSON strings; day = bucket start (UTC); model = dimensions.model_name
- *  without the accounts/<acct>/models/ (serverless) or accounts/<acct>/deployments/ (dedicated) prefix. A bucket is counted only if its start falls inside the window that requested it,
- *  so padded or cached responses never double count. Summary failure → billed null (tokens still land). */
+ *  passes (SERVERLESS → serverlessCosts[] grouped by model_name; DEDICATED_DEPLOYMENT → dedicatedCosts[] grouped by deployment_name — the documented gatewayAccountUsage wrapper); token fields are JSON strings; day = row start (UTC); model = group.model_name / group.deployment_name
+ *  without the accounts/<acct>/models/ (serverless) or accounts/<acct>/deployments/ (dedicated) prefix. Dedicated rows carry acceleratorSeconds and no token fields → no day·model row, only meta.acceleratorSeconds and the status line. A row is counted only if its start falls inside the window that requested it,
+ *  so padded or cached responses never double count. Summary = documented DAILY shape usageBuckets[].lineItems[].totalCost { units, nanos } (top-level lineItems are period totals, not counted); its failure → billed null (tokens still land). */
 async function fetchFireworks(key, fields, opts) {
   const account = String((fields && fields.account) || '').trim();
   if (!account) throw new Error('Enter your Fireworks account id (app.fireworks.ai → Settings → Account; it is also the first path segment in the console URL)');
@@ -3291,17 +3291,20 @@ async function fetchFireworks(key, fields, opts) {
   const windows = [];
   for (let s = startAll.getTime(); s < endAll.getTime();) { const e = Math.min(s + 31 * dayMs, endAll.getTime()); windows.push([new Date(s), new Date(e)]); s = e; }
   const inWin = (t, s, e) => { const ms = Date.parse(t); return Number.isFinite(ms) && ms >= s.getTime() && ms < e.getTime(); };
-  const modelOf = (b) => { const dims = b.dimensions || {}; const raw = dims.model_name || dims.modelName || b.model_name || b.modelName || b.model || 'fireworks (all models)'; return String(raw).replace(/^accounts\/[^/]+\/(models|deployments)\//, ''); };   // serverless 'accounts/fireworks/models/<m>' and dedicated 'accounts/<acct>/deployments/<dep>' both lose their resource prefix
+  const modelOf = (b) => { const dims = b.group || b.dimensions || {}; const raw = dims.model_name || dims.deployment_name || dims.modelName || b.model_name || b.modelName || b.model || 'fireworks (all models)'; return String(raw).replace(/^accounts\/[^/]+\/(models|deployments)\//, ''); };   // serverless 'accounts/fireworks/models/<m>' and dedicated 'accounts/<acct>/deployments/<dep>' both lose their resource prefix
   const agg = makeAgg();
+  let accelSec = 0;   // dedicated deployments are metered in accelerator-seconds (GPU time), not tokens — surfaced in meta + the status line
   for (const usageType of ['SERVERLESS', 'DEDICATED_DEPLOYMENT']) {
     for (const [s, e] of windows) {
       const url = new URL(base + '/billingUsage');
       url.searchParams.set('startTime', iso(s)); url.searchParams.set('endTime', iso(e));
-      url.searchParams.set('usageType', usageType); url.searchParams.set('groupBy', 'model_name'); url.searchParams.set('timezone', 'UTC');
+      url.searchParams.set('usageType', usageType); url.searchParams.set('groupBy', usageType === 'SERVERLESS' ? 'model_name' : 'deployment_name'); url.searchParams.set('timezone', 'UTC');   // docs: serverless dimensions include model_name, dedicated ones deployment_name
       const j = await fetchJSON(url, h);
-      for (const b of (j.usageBuckets || j.buckets || j.data || [])) {
+      const list = j[usageType === 'SERVERLESS' ? 'serverlessCosts' : 'dedicatedCosts'];   // documented wrapper (gatewayAccountUsage) keyed by usage type — never the other pass's array, so nothing is counted twice; older / flat keys tolerated
+      for (const b of (Array.isArray(list) ? list : (j.usageBuckets || j.buckets || j.data || []))) {
         const t = b.startTime || b.start_time || b.bucketStart;
         if (!inWin(t, s, e)) continue;
+        if (b.promptTokens == null && b.completionTokens == null) { accelSec += finTok(+b.acceleratorSeconds || 0); continue; }   // dedicated / training rows: no token counts in the export — their dollars come from the summary
         agg.add(dayKeyUTC(t), 'Fireworks AI', modelOf(b), { in: finTok(+b.promptTokens || 0), out: finTok(+b.completionTokens || 0), msgs: finTok(+(b.requests ?? b.numRequests ?? b.requestCount) || 0) });
       }
     }
@@ -3313,22 +3316,23 @@ async function fetchFireworks(key, fields, opts) {
       const url = new URL(base + '/billing/summary');
       url.searchParams.set('granularity', 'DAILY'); url.searchParams.set('startTime', iso(s)); url.searchParams.set('endTime', iso(e));
       const j = await fetchJSON(url, h);
-      const items = Array.isArray(j.lineItems) ? j.lineItems : Array.isArray(j.items) ? j.items : [j];   // per-category line items, or buckets at the top level
-      for (const it of items) for (const b of (it.usageBuckets || it.buckets || [])) {
+      // documented DAILY shape: top-level usageBuckets[] { startTime, endTime, lineItems[] { series, category, totalCost: { currencyCode, units, nanos } } } — the top-level lineItems are period totals and are NOT counted;
+      // tolerated: lineItems[].usageBuckets[] and flat buckets that carry their own cost / amount
+      const money = (raw) => raw && typeof raw === 'object' ? (raw.units != null || raw.nanos != null ? (+raw.units || 0) + (+raw.nanos || 0) / 1e9 : parseFloat(raw.value ?? raw.amount)) : parseFloat(raw);   // google.type.Money { units (int64 string), nanos (int32) } or a plain number / numeric string
+      const buckets = Array.isArray(j.usageBuckets) ? j.usageBuckets : (Array.isArray(j.lineItems) ? j.lineItems : Array.isArray(j.items) ? j.items : []).flatMap(it => it.usageBuckets || it.buckets || []);
+      for (const b of buckets) {
         const t = b.startTime || b.start_time || b.bucketStart;
         if (!inWin(t, s, e)) continue;
-        const raw = b.cost ?? b.amount ?? b.totalCost ?? b.total;
-        const amt = raw && typeof raw === 'object' ? parseFloat(raw.value ?? raw.amount) : parseFloat(raw);
         const d = dayKeyUTC(t);
-        bm.set(d, (bm.get(d) || 0) + finAmt(amt));
+        for (const it of (Array.isArray(b.lineItems) ? b.lineItems : [b])) bm.set(d, (bm.get(d) || 0) + finAmt(money(it.totalCost ?? it.cost ?? it.amount ?? it.total)));
       }
     }
     billed = [...bm.entries()].map(([d, amount]) => ({ d, amount })).sort((a, b) => a.d < b.d ? -1 : 1);
   } catch (e) { console.warn('fireworks billing summary failed', e); }
   const rows = agg.rows();
   return { label: `account ${account} · last 4: ${key.slice(-4)}`, rows, billed,
-    detail: `${rows.length} day·model rows${billed ? ` · ${billed.length} billed day${billed.length === 1 ? '' : 's'}` : ' · billing summary unavailable (tokens only)'} · last ${days} days in ${windows.length} windows`,
-    meta: { days, account, windows: windows.length } };
+    detail: `${rows.length} day·model rows${billed ? ` · ${billed.length} billed day${billed.length === 1 ? '' : 's'}` : ' · billing summary unavailable (tokens only)'}${accelSec ? ` · dedicated ${(accelSec / 3600).toFixed(1)} accelerator-h (GPU time, no token counts)` : ''} · last ${days} days in ${windows.length} windows`,
+    meta: { days, account, windows: windows.length, acceleratorSeconds: accelSec } };
 }
 
 /** DeepSeek API — GET /user/balance: validate + remaining balance only (no usage history exists on the API; history comes
