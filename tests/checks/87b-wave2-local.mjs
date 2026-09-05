@@ -322,6 +322,65 @@ export async function run({ browser, ok }) {
     });
     ok('pricing: GPT4All / Jan / text-generation-webui rows cost $0 by platform (category local → LOCAL_PLATFORMS); PLATFORM_ORDER derives them; hosted rows still priced',
       pz.gpt4all === 0 && pz.jan === 0 && pz.tg === 0 && pz.hosted > 0 && pz.locals === 3 && pz.order, JSON.stringify(pz));
+
+    // ---- T14 (4b): readSqliteTable + Ollama desktop db.sqlite (estimated) through the Ollama card ----
+    const dbPath = path.join(OUT, 'wave2', 'ollama-app', 'db.sqlite');
+    if (!fs.existsSync(dbPath)) {
+      ok('ollama-db: readSqliteTable + parseOllamaFiles (fixture skipped)', true, 'node:sqlite unavailable — fixture skipped');
+    } else {
+      const dbBuf = fs.readFileSync(dbPath);
+      const dbB64 = dbBuf.toString('base64'), pageSize = dbBuf.readUInt16BE(16) === 1 ? 65536 : dbBuf.readUInt16BE(16);
+      const usageLog = read('usage-log', 'ollama-usage.jsonl');   // Plan 4a fixture: in=1060 out=370 msgs=3 (exact rows)
+      const od = await page.evaluate(async (b64, logText) => {
+        Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+        const bytes = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
+        const t = readSqliteTable(bytes.buffer, 'messages');
+        const col = (r, n) => r[t.columns.indexOf(n)];
+        const byId = Object.fromEntries(t.rows.map(r => [col(r, 'id'), r]));
+        let nope = '', garbage = '', worowid = '';
+        try { readSqliteTable(bytes.buffer, 'nope'); } catch (e) { nope = e.message; }
+        try { readSqliteTable(new TextEncoder().encode('this is not a database at all').buffer, 'messages'); } catch (e) { garbage = e.message; }
+        try { readSqliteTable(bytes.buffer, 'kv'); } catch (e) { worowid = e.message; }
+        const chats = readSqliteTable(bytes, 'chats');   // a Uint8Array is accepted too
+        const c = connectorById('ollama');
+        // parser directly
+        const res = await parseOllamaFiles([{ path: 'db.sqlite', file: new File([bytes], 'db.sqlite') }], null, new Set(), c);
+        const tot = res.rows.reduce((a, r) => ({ in: a.in + r.in, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, out: 0, msgs: 0 });
+        const byModel = Object.fromEntries(res.rows.map(r => [r.model, { in: r.in, out: r.out, msgs: r.msgs, est: r.est, sid: r.sid, d: r.d, hour: r.hour, platform: r.platform, cost: Pricing.cost(r.model, r) }]));
+        // dedupe: the same db handed in again under another path with the SAME seen set → nothing added twice
+        const seen = new Set();
+        await parseOllamaFiles([{ path: 'Ollama/db.sqlite', file: new File([bytes], 'db.sqlite') }], null, seen, c);
+        const again = await parseOllamaFiles([{ path: 'backup/Ollama/db.sqlite', file: new File([bytes], 'db.sqlite') }], null, seen, c);
+        // through the card: db.sqlite + usage-logger JSONL in ONE scan (dispatcher) → exact JSONL rows + estimated db rows under the ollama source
+        await App.scanFiles(c, [{ path: 'Ollama/db.sqlite', file: new File([bytes], 'db.sqlite') }, { path: 'Ollama/ollama-usage.jsonl', file: new File([logText], 'ollama-usage.jsonl') }]);
+        const src = Store.sources.ollama;
+        const scanned = { n: src ? src.rows.length : 0, in: src ? src.rows.reduce((a, r) => a + r.in, 0) : 0, est: src ? src.rows.filter(r => r.est).length : 0, label: (Store.connectors.ollama || {}).label, status: Store.connectorStatus(c),
+          text: document.getElementById('ollama-scan-status').textContent, pick: document.getElementById('ollama-pick').textContent };
+        // a garbage db.sqlite is ONE unreadable file: the batch continues (parseFolderCached counts it as badFiles)
+        await App.scanFiles(c, [{ path: 'db.sqlite', file: new File(['garbage, not sqlite'], 'db.sqlite') }, { path: 'ollama-usage.jsonl', file: new File([logText], 'ollama-usage.jsonl') }]);
+        const bad = { text: document.getElementById('ollama-scan-status').textContent, in: Store.sources.ollama ? Store.sources.ollama.rows.reduce((a, r) => a + r.in, 0) : 0 };
+        Store.sources = {}; Store.connectors = {}; Store.persist();
+        return { columns: t.columns, n: t.rows.length, m2content: String(col(byId.m2, 'content')).length, m2thinking: String(col(byId.m2, 'thinking')).length, m2model: col(byId.m2, 'model_name'), m1cloud: col(byId.m1, 'model_cloud'), m1thinking: col(byId.m1, 'thinking'),
+          nope, garbage, worowid, chats: chats.columns.join(',') + '|' + chats.rows.length + '|' + chats.rows[0][1],
+          ...tot, rows: res.rows.length, files: res.meta.files, addedIds: res.meta.addedIds, byModel, expDays: { gemma: dayKey(new Date('2026-08-10T09:00:30Z')), ollama: dayKey(new Date(1786396260 * 1000)) }, againRows: again.rows.length, againIds: again.meta.addedIds.length,
+          patterns: c.patterns.map(String), parser: c.parser, quality: c.quality, note: /^Exact for API traffic you log, estimated for desktop-app chats/.test(c.qualityNote) && /db\.sqlite/.test(c.qualityNote) && /keeps no usage history/.test(c.qualityNote) && /-wal/.test(c.qualityNote) && /est\./.test(c.qualityNote),
+          paths: c.paths.some(p => /db\.sqlite/.test(p)), scanned, bad };
+      }, dbB64, usageLog);
+      ok('readSqliteTable: messages table → 4 rows with the CREATE TABLE column names; the 6000-char content (+400 thinking) comes back whole through an overflow page (page size ' + pageSize + ', max local ' + (pageSize - 35) + '); NULL/int cells typed; Uint8Array input ok',
+        JSON.stringify(od.columns) === JSON.stringify(['id', 'chat_id', 'role', 'content', 'thinking', 'model_name', 'model_cloud', 'created_at', 'updated_at']) && od.n === 4 && od.m2content === 6000 && od.m2thinking === 400 && (pageSize - 35) < 6400
+        && od.m2model === 'gemma3:4b' && od.m1cloud === 0 && od.m1thinking === null && od.chats === 'id,title,created_at|1|test chat', JSON.stringify({ columns: od.columns, n: od.n, m2: [od.m2content, od.m2thinking, od.m2model], m1: [od.m1cloud, od.m1thinking], chats: od.chats, pageSize }));
+      ok('readSqliteTable: unknown table / not-a-database / WITHOUT ROWID → clear errors (unsupported SQLite layout for WITHOUT ROWID)',
+        /table not found: nope/.test(od.nope) && /not a SQLite file/.test(od.garbage) && /unsupported SQLite layout/.test(od.worowid), JSON.stringify({ nope: od.nope, garbage: od.garbage, worowid: od.worowid }));
+      ok('ollama-db: parseOllamaFiles([db.sqlite]) → 2 assistant rows, est:1, platform Ollama, $0: gemma3:4b in=estTok(40)=10 out=estTok(6000+400)=1600, "ollama" (NULL model_name) in=estTok(24)=6 out=estTok(100)=25 → in=16 out=1625 msgs=2; created_at ISO / unix-seconds text → days; dedupe ids ollama-db:<message id>',
+        od.in === 16 && od.out === 1625 && od.msgs === 2 && od.rows === 2 && od.files === 1 && JSON.stringify(od.addedIds) === JSON.stringify(['ollama-db:m2', 'ollama-db:m4'])
+        && od.byModel['gemma3:4b'] && od.byModel['gemma3:4b'].in === 10 && od.byModel['gemma3:4b'].out === 1600 && od.byModel['gemma3:4b'].est === 1 && od.byModel['gemma3:4b'].platform === 'Ollama' && od.byModel['gemma3:4b'].cost === 0 && od.byModel['gemma3:4b'].sid === 'ollama-db:c1' && od.byModel['gemma3:4b'].d === od.expDays.gemma && od.byModel['gemma3:4b'].hour != null
+        && od.byModel.ollama && od.byModel.ollama.in === 6 && od.byModel.ollama.out === 25 && od.byModel.ollama.est === 1 && od.byModel.ollama.cost === 0 && od.byModel.ollama.d === od.expDays.ollama
+        && od.againRows === 0 && od.againIds === 0, JSON.stringify({ tot: [od.in, od.out, od.msgs], rows: od.rows, byModel: od.byModel, expDays: od.expDays, addedIds: od.addedIds, again: [od.againRows, od.againIds] }));
+      ok('ollama-db: the Ollama card reads db.sqlite AND usage-logger JSONL in one scan (patterns + parseOllamaFiles dispatcher): 2 files → in=1060 exact + 16 est, 2 est rows; a garbage db.sqlite is "1 file(s) unreadable" and the JSONL still lands; note leads with the mixed quality, paths name db.sqlite',
+        od.patterns.length === 2 && od.patterns.some(p => /db\\\.sqlite/.test(p)) && od.parser === 'parseOllamaFiles' && od.quality === 'exact' && od.note && od.paths
+        && od.scanned.label === '2 files' && od.scanned.status === 'ok' && od.scanned.in === 1076 && od.scanned.est === 2 && /Connected/.test(od.scanned.text) && /5 messages/.test(od.scanned.text) && /1 unreadable line/.test(od.scanned.text) && od.scanned.pick === 'Choose usage-log or Ollama data folder…'
+        && /1 file\(s\) unreadable/.test(od.bad.text) && od.bad.in === 1060, JSON.stringify({ patterns: od.patterns, parser: od.parser, scanned: od.scanned, bad: od.bad }));
+    }
   } finally {
     await page.close();
   }

@@ -1224,10 +1224,11 @@ const CONNECTORS = [
     statusEl: 'ollama-status', brand: '#5b6472', mark: 'Ol', srcIds: ['ollama'],
     baseUrl: 'http://localhost:11434', validate: 'validateOllama',
     corsHint: 'Something answered at {base} but this page could not read it — most likely Ollama blocking the origin (CORS). Set OLLAMA_ORIGINS="*" (or your page origin), restart Ollama, then validate again.',
-    patterns: [/usage[^/]*\.jsonl$/i], parser: 'parseUsageLoggerJsonl', hint: 'usage-logger JSONL files (ollama-usage.jsonl — see docs/tools/ollama-usage-logger.mjs)',
+    patterns: [/usage[^/]*\.jsonl$/i, /(^|\/)db\.sqlite$/i], parser: 'parseOllamaFiles', folderLabel: 'usage-log or Ollama data',
+    hint: 'usage-logger JSONL files (ollama-usage.jsonl — see docs/tools/ollama-usage-logger.mjs) and/or the desktop app\'s db.sqlite',
     quality: 'exact',
-    qualityNote: 'Live check only: Ollama keeps no usage history and no per-request log — exact token counts (prompt_eval_count / eval_count) exist only inside each API response. This card verifies the server (GET /api/tags, /api/ps) and shows what is installed and loaded now. For history, run the one-file proxy docs/tools/ollama-usage-logger.mjs (it forwards requests to Ollama and appends exact per-request JSONL) and pick its output folder below. Desktop-app chats live in db.sqlite (SQLite, no token counts) — not read in this version. If validation says CORS: set OLLAMA_ORIGINS="*" and restart Ollama. Logged models are priced $0 — they run on your hardware (gated on the Ollama platform, not on model name). To see a hosted-equivalent figure, compare the same tokens against a hosted model\'s row in the price list. Ollama used THROUGH a coding tool (Continue.dev, Cline, Aider, Codex --oss) is also $0 when that tool\'s log names the provider.',
-    paths: ['server: http://localhost:11434 (OLLAMA_HOST)', 'usage log: ~/.ai-usage/ollama-usage.jsonl (written by the proxy)', 'server.log has request lines but no tokens; db.sqlite has chats but no tokens'],
+    qualityNote: 'Exact for API traffic you log, estimated for desktop-app chats. Ollama itself keeps no usage history and no per-request log — exact token counts (prompt_eval_count / eval_count) exist only inside each API response. This card verifies the server (GET /api/tags, /api/ps) and shows what is installed and loaded now. For exact history run the one-file proxy docs/tools/ollama-usage-logger.mjs (it forwards requests to Ollama and appends exact per-request JSONL) and pick its output folder below. Chats made in the Ollama desktop app are read from its db.sqlite (%LOCALAPPDATA%\\Ollama on Windows): no token counts are stored there, so those rows are estimated from message text (chars ÷ 4; input = the previous user message) and marked est.; close the Ollama app before scanning so its write-ahead log is checkpointed into db.sqlite (the -wal sidecar is not read, so un-checkpointed chats are missing until then). One folder per card — pick the proxy\'s folder or the Ollama data folder, or point the proxy\'s USAGE_LOG at the Ollama data folder to get both in one scan. If validation says CORS: set OLLAMA_ORIGINS="*" and restart Ollama. Ollama rows are priced $0 — they run on your hardware (gated on the Ollama platform, not on model name). To see a hosted-equivalent figure, compare the same tokens against a hosted model\'s row in the price list. Ollama used THROUGH a coding tool (Continue.dev, Cline, Aider, Codex --oss) is also $0 when that tool\'s log names the provider.',
+    paths: ['server: http://localhost:11434 (OLLAMA_HOST)', 'usage log: ~/.ai-usage/ollama-usage.jsonl (written by the proxy; USAGE_LOG overrides the path)', 'desktop-app chats: %LOCALAPPDATA%\\Ollama\\db.sqlite (Windows) · ~/Library/Application Support/Ollama/db.sqlite (macOS) · ~/.ollama/db.sqlite (Linux)', 'server.log has request lines but no tokens'],
     links: { get: 'https://ollama.com/download', docs: 'https://docs.ollama.com/api' } },
   // ---- Wave 2 key-driver connectors (App.connectKey; one global fetcher each) ----
   { id: 'groq', platform: 'Groq', name: 'Groq', category: 'api', kind: 'api-key',
@@ -2235,6 +2236,184 @@ async function parseTgwebuiLogs(files, onProgress, seen = new Set(), c) {
   return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines, addedIds: [] } };
 }
 
+/* =================================================================
+ * Minimal SQLite 3 reader (no library): enough to read ONE rowid table out of a .sqlite file in the browser.
+ * Supported: page sizes 512..65536 + reserved bytes, sqlite_master on page 1, table b-trees (interior 0x05 / leaf 0x0D),
+ * overflow chains, record serial types 0-9, 12+ (blob → Uint8Array), 13+ (UTF-8 text), INTEGER PRIMARY KEY rowid aliases,
+ * columns added later by ALTER TABLE (short records are NULL-padded). Throws Error('unsupported SQLite layout …') for WITHOUT
+ * ROWID tables (index b-trees 0x02/0x0A), UTF-16 databases and reserved serial types; Error('not a SQLite file') for garbage;
+ * Error('table not found: <name>') when sqlite_master has no such table. The -wal sidecar is NEVER read — rows still sitting in
+ * the write-ahead log are invisible until the owning app checkpoints (close the Ollama app first).
+ * File format: https://www.sqlite.org/fileformat2.html
+ * ================================================================= */
+function readSqliteTable(buffer, tableName) {
+  const u8 = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const bad = (why) => new Error('unsupported SQLite layout' + (why ? ' (' + why + ')' : ''));
+  const MAGIC = 'SQLite format 3';                                            // 16-byte header string: these 15 chars + one NUL byte (offset 15)
+  if (u8.length < 100 || u8[15] !== 0 || [...MAGIC].some((ch, i) => u8[i] !== ch.charCodeAt(0))) throw new Error('not a SQLite file');
+  let pageSize = dv.getUint16(16); if (pageSize === 1) pageSize = 65536;   // offset 16: big-endian u16; 1 means 65536
+  const usable = pageSize - u8[20];                                         // offset 20: reserved bytes at the END of every page
+  const textEnc = dv.getUint32(56);                                          // 1 = UTF-8 (0 on a never-written db); 2/3 = UTF-16 → unsupported
+  if (textEnc > 1) throw bad('text encoding ' + textEnc);
+  const nPages = Math.floor(u8.length / pageSize);
+  const pageOff = (n) => (n - 1) * pageSize;                                 // pages are 1-based
+  const dec = new TextDecoder('utf-8');
+  // varint: 1–9 bytes, big-endian 7-bit groups; a 9th byte carries all 8 bits
+  const varint = (a, pos) => {
+    let v = 0;
+    for (let i = 0; i < 8; i++) { const b = a[pos + i]; v = v * 128 + (b & 0x7f); if (!(b & 0x80)) return [v, i + 1]; }
+    return [v * 256 + a[pos + 8], 9];
+  };
+  // table-leaf cell payload: if it does not fit, the local part follows the SQLite formula (X = U-35, M = ((U-12)*32/255)-23,
+  // K = M + ((P-M) % (U-4)); local = K ≤ X ? K : M), then a u32 first-overflow-page number; each overflow page = u32 next + data
+  const maxLocal = usable - 35, minLocal = Math.floor((usable - 12) * 32 / 255) - 23;
+  const readPayload = (pos, size) => {
+    if (size <= maxLocal) return u8.subarray(pos, pos + size);
+    const K = minLocal + ((size - minLocal) % (usable - 4));
+    const local = K <= maxLocal ? K : minLocal;
+    const out = new Uint8Array(size);
+    out.set(u8.subarray(pos, pos + local), 0);
+    let filled = local, next = dv.getUint32(pos + local), guard = 0;
+    while (next && filled < size) {
+      if (next > nPages || guard++ > nPages) throw bad('overflow chain');
+      const o = pageOff(next), chunk = Math.min(usable - 4, size - filled);
+      out.set(u8.subarray(o + 4, o + 4 + chunk), filled);
+      filled += chunk; next = dv.getUint32(o);
+    }
+    if (filled < size) throw bad('truncated overflow chain');
+    return out;
+  };
+  // record: varint header size, one serial type per column, then the values back to back
+  const decodeRecord = (pay) => {
+    const pdv = new DataView(pay.buffer, pay.byteOffset, pay.byteLength);
+    const [hdrSize, n0] = varint(pay, 0);
+    const types = []; let hp = n0;
+    while (hp < hdrSize) { const [t, n] = varint(pay, hp); types.push(t); hp += n; }
+    const vals = []; let bp = hdrSize;
+    for (const t of types) {
+      let v = null, len = 0;
+      if (t === 0) v = null;
+      else if (t === 1) { v = pdv.getInt8(bp); len = 1; }
+      else if (t === 2) { v = pdv.getInt16(bp); len = 2; }
+      else if (t === 3) { v = (pdv.getInt8(bp) << 16) | pdv.getUint16(bp + 1); len = 3; }
+      else if (t === 4) { v = pdv.getInt32(bp); len = 4; }
+      else if (t === 5) { v = pdv.getInt16(bp) * 4294967296 + pdv.getUint32(bp + 2); len = 6; }
+      else if (t === 6) { v = Number(pdv.getBigInt64(bp)); len = 8; }
+      else if (t === 7) { v = pdv.getFloat64(bp); len = 8; }
+      else if (t === 8) v = 0;
+      else if (t === 9) v = 1;
+      else if (t >= 12 && t % 2 === 0) { len = (t - 12) / 2; v = pay.slice(bp, bp + len); }          // blob
+      else if (t >= 13) { len = (t - 13) / 2; v = dec.decode(pay.subarray(bp, bp + len)); }           // text
+      else throw bad('serial type ' + t);                                                             // 10, 11 are reserved
+      vals.push(v); bp += len;
+    }
+    return vals;
+  };
+  // b-tree walk. Page header: type byte, first freeblock u16, cell count u16 (+3), cell content start u16 (+5), fragmented bytes (+7),
+  // right-most child u32 (+8, interior only); then the cell pointer array (u16 offsets from the START of the page). Page 1's header
+  // sits after the 100-byte file header, but its cell offsets are still relative to byte 0 of the page.
+  const walk = (pageNo, onRow, depth) => {
+    if (depth > 64 || pageNo < 1 || pageNo > nPages) throw bad('page ' + pageNo);
+    const base = pageOff(pageNo), hdr = base + (pageNo === 1 ? 100 : 0);
+    const type = u8[hdr], nCells = dv.getUint16(hdr + 3);
+    if (type === 0x0D) {                                                      // table leaf: cells = varint payload size, varint rowid, payload
+      for (let i = 0; i < nCells; i++) {
+        const cell = base + dv.getUint16(hdr + 8 + i * 2);
+        const [size, a] = varint(u8, cell), [rowid, b] = varint(u8, cell + a);
+        onRow(rowid, decodeRecord(readPayload(cell + a + b, size)));
+      }
+    } else if (type === 0x05) {                                               // table interior: cells = u32 left child, varint key (unused); then the right-most child
+      for (let i = 0; i < nCells; i++) walk(dv.getUint32(base + dv.getUint16(hdr + 12 + i * 2)), onRow, depth + 1);
+      walk(dv.getUint32(hdr + 8), onRow, depth + 1);
+    } else throw bad('page type 0x' + type.toString(16));                     // 0x02 / 0x0A = index b-tree (WITHOUT ROWID tables live there)
+  };
+  // sqlite_master is the table b-tree rooted at page 1: columns type, name, tbl_name, rootpage, sql
+  let master = null;
+  walk(1, (rowid, r) => { if (!master && r[0] === 'table' && String(r[1]).toLowerCase() === String(tableName).toLowerCase()) master = r; }, 0);
+  if (!master) throw new Error('table not found: ' + tableName);
+  const sql = String(master[4] || '');
+  if (/WITHOUT\s+ROWID/i.test(sql)) throw bad('WITHOUT ROWID');
+  // column names from CREATE TABLE: the parenthesized list split on commas at depth 0, first token per entry (quotes stripped);
+  // table constraints (PRIMARY KEY(…), UNIQUE, CHECK, FOREIGN KEY, CONSTRAINT) are not columns
+  const body = sql.slice(sql.indexOf('(') + 1, sql.lastIndexOf(')'));
+  const parts = []; let d = 0, cur = '';
+  for (const ch of body) { if (ch === '(') d++; else if (ch === ')') d--; if (ch === ',' && d === 0) { parts.push(cur); cur = ''; } else cur += ch; }
+  parts.push(cur);
+  const columns = [], rowidAlias = [];
+  for (const p of parts) {
+    const s = p.trim(); if (!s || /^(CONSTRAINT|PRIMARY\s+KEY|UNIQUE|CHECK|FOREIGN\s+KEY)\b/i.test(s)) continue;
+    const m = /^("([^"]*)"|`([^`]*)`|\[([^\]]*)\]|'([^']*)'|([^\s]+))\s*([\s\S]*)$/.exec(s);
+    const name = m[2] ?? m[3] ?? m[4] ?? m[5] ?? m[6];
+    if (/^INTEGER\s+PRIMARY\s+KEY\b/i.test(m[7] || '')) rowidAlias.push(columns.length);   // rowid alias: the record holds NULL, the cell's rowid is the value
+    columns.push(name);
+  }
+  const rows = [];
+  walk(master[3], (rowid, vals) => {
+    while (vals.length < columns.length) vals.push(null);   // columns added by ALTER TABLE are absent from older records
+    for (const i of rowidAlias) if (vals[i] == null) vals[i] = rowid;
+    rows.push(vals.slice(0, columns.length));
+  }, 0);
+  return { columns, rows };
+}
+
+/** Ollama desktop app — db.sqlite (GUI chats only; API/CLI traffic is not in here). Table messages(id, chat_id, role, content,
+ *  thinking, model_name, model_cloud, created_at, updated_at, …). No token counts are stored: out = estTok(content + thinking),
+ *  in = estTok(the previous user message in the same chat) → every row est:1. created_at may be ISO text, SQLite
+ *  'YYYY-MM-DD HH:MM:SS' (UTC), or unix seconds/ms (number or digit string). Dedupe id 'ollama-db:<message id>' (seen/addedIds)
+ *  so the same db scanned again under another path never double counts; row sid 'ollama-db:<chat_id>' groups rows per chat.
+ *  An unreadable file (WITHOUT ROWID / not SQLite) THROWS — parseFolderCached counts it as one unreadable file and moves on.
+ *  The -wal sidecar is not read: close the Ollama app first so the WAL is checkpointed into db.sqlite. */
+async function parseOllamaDb(files, onProgress, seen = new Set(), c, siblingFiles) {
+  const agg = makeAgg(); const addedIds = []; let msgs = 0, lines = 0;
+  const list = files.filter(f => /(^|\/)db\.sqlite$/i.test(f.path));
+  const when = (v, fallback) => {
+    if (typeof v === 'string' && /^\d{9,13}(\.\d+)?$/.test(v.trim())) v = +v;
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) return new Date(v < 1e12 ? v * 1000 : v);   // unix seconds vs milliseconds
+    if (typeof v === 'string') {
+      let s = v.trim().replace(/^(\d{4}-\d{2}-\d{2}) (\d)/, '$1T$2').replace(/(\.\d{3})\d+/, '$1');        // 'YYYY-MM-DD HH:MM:SS[.ffffff][zone]' → ISO, ≤ 3 fraction digits
+      if (/^\d{4}-\d{2}-\d{2}T/.test(s) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) s += 'Z';                   // SQLite CURRENT_TIMESTAMP / Go UTC text carry no zone → UTC
+      const d = new Date(s); if (!isNaN(d)) return d;
+    }
+    return new Date(fallback);
+  };
+  for (let fi = 0; fi < list.length; fi++) {
+    const { file } = list[fi];
+    const table = readSqliteTable(await file.arrayBuffer(), 'messages');   // throws on a bad file (see above)
+    const col = Object.fromEntries(table.columns.map((n, i) => [String(n).toLowerCase(), i]));
+    const get = (r, name) => { const i = col[name]; return i == null ? null : r[i]; };
+    if (col.role == null || col.content == null) throw new Error('unsupported SQLite layout (messages has no role/content columns)');
+    const lastUser = new Map();   // chat_id → text of the latest user message so far (rows arrive in rowid = insertion order)
+    for (const r of table.rows) {
+      lines++;
+      const role = String(get(r, 'role') || '').toLowerCase();
+      const chat = String(get(r, 'chat_id') ?? '');
+      const text = String(get(r, 'content') ?? '');
+      if (role === 'user') { lastUser.set(chat, text); continue; }
+      if (role !== 'assistant') continue;
+      const id = 'ollama-db:' + String(get(r, 'id') ?? (fi + ':' + lines));
+      if (seen.has(id)) continue;
+      seen.add(id); addedIds.push(id);
+      const ts = when(get(r, 'created_at'), file.lastModified);
+      agg.add(dayKey(ts), (c && c.platform) || 'Ollama', String(get(r, 'model_name') || 'ollama'),
+        { in: estTok((lastUser.get(chat) || '').length), out: estTok(text.length + String(get(r, 'thinking') ?? '').length), msgs: 1, est: 1 },
+        'ollama-db:' + chat, ts.getHours());
+      msgs++;
+    }
+    if (onProgress) onProgress(fi + 1, list.length);
+  }
+  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines: 0, addedIds } };
+}
+/** Ollama folder dispatcher (registry parser): usage-logger JSONL (exact, parseUsageLoggerJsonl) + desktop db.sqlite (estimated,
+ *  parseOllamaDb) through one card; results concatenated. parseFolderCached hands in one file at a time, so each call sees one kind. */
+async function parseOllamaFiles(files, onProgress, seen = new Set(), c, siblingFiles) {
+  const a = await parseUsageLoggerJsonl(files.filter(f => /\.jsonl$/i.test(f.path)), null, seen, c);
+  const b = await parseOllamaDb(files.filter(f => /(^|\/)db\.sqlite$/i.test(f.path)), null, seen, c, siblingFiles);
+  if (onProgress) onProgress(files.length, files.length);
+  return { rows: a.rows.concat(b.rows), projects: [], meta: { files: a.meta.files + b.meta.files, msgs: a.meta.msgs + b.meta.msgs, lines: a.meta.lines + b.meta.lines,
+    badLines: a.meta.badLines + b.meta.badLines, addedIds: (a.meta.addedIds || []).concat(b.meta.addedIds || []) } };
+}
+
 /** ScanCache key prefix — bump whenever a parser's OUTPUT changes for unchanged bytes (cached per-file entries
  *  would otherwise serve pre-fix rows forever for finished files). History: 'scan:' → v3 (per-hour granularity,
  *  connector-prefixed signatures) → v4 (Roo/Cline inclusive tokensIn + per-request model, local:1 flags, Gemini CLI
@@ -2845,7 +3024,7 @@ async function validateOllama(base) {
   let ps = null; try { ps = await fetchJSON(base + '/api/ps', {}); } catch {}
   const n = Array.isArray(tags && tags.models) ? tags.models.length : 0;
   const loaded = ps && Array.isArray(ps.models) ? ps.models.length : 0;
-  return { label: `${n} models installed`, detail: `${n} models installed · ${loaded} loaded now · no usage history on the server (see the note; usage-logger JSONL is read from the folder below)` };
+  return { label: `${n} models installed`, detail: `${n} models installed · ${loaded} loaded now · no usage history on the server (usage-logger JSONL — exact — and the desktop app's db.sqlite — estimated — are read from the folder below)` };
 }
 
 /** LocalAI history: GET /api/usage?period=all → { usage: [{ bucket, model, prompt_tokens, completion_tokens, total_tokens, request_count }] }.

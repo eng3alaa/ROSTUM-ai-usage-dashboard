@@ -597,6 +597,34 @@ export async function generate() {
     '2026-08-11T08:00:00Z,Copilot app,abcd,ok!!!',
     'not a date,Copilot app,undated,skip me',
   ].join('\n') + '\n');
+  // T14 (4b) — Ollama desktop-app db.sqlite (schema subset of ollama/app/store/schema.sql). Needs node:sqlite; when it is unavailable nothing is
+  //   written and 87b's ollama-db block reports itself skipped. One chat, 2 user + 2 assistant messages. m2's record is 6000 + 400 chars → it
+  //   exceeds one 4096-byte page → overflow page. created_at shapes: ISO 'Z' text (m1/m2), SQLite 'YYYY-MM-DD HH:MM:SS' (m3, UTC), unix-seconds
+  //   text (m4 = 1786396260 = 2026-08-10T21:11:00Z). kv is WITHOUT ROWID → readSqliteTable must refuse it.
+  //   Expected (estTok = round(chars/4)): m2 in=estTok(40)=10 out=estTok(6000+400)=1600 model gemma3:4b · m4 in=estTok(24)=6 out=estTok(100)=25 model 'ollama'
+  //   (model_name NULL) → in=16 out=1625 msgs=2, both est:1, platform Ollama, $0.
+  let sqlite = null;
+  const origEmit = process.emitWarning;   // some Node versions print an ExperimentalWarning when node:sqlite loads — keep the suite output clean
+  process.emitWarning = (w, ...a) => { if (/SQLite/i.test(String((w && w.message) || w))) return; return origEmit.call(process, w, ...a); };
+  try { sqlite = await import('node:sqlite'); } catch { sqlite = null; }
+  process.emitWarning = origEmit;
+  if (sqlite && sqlite.DatabaseSync) {
+    const dbPath = path.join(OUT, 'wave2', 'ollama-app', 'db.sqlite');
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const db = new sqlite.DatabaseSync(dbPath);
+    db.exec('PRAGMA journal_mode=DELETE');   // no -wal sidecar: every row lands in db.sqlite (what the parser reads)
+    db.exec('CREATE TABLE chats(id TEXT PRIMARY KEY, title TEXT, created_at TEXT)');
+    db.exec('CREATE TABLE messages(id TEXT PRIMARY KEY, chat_id TEXT, role TEXT, content TEXT, thinking TEXT, model_name TEXT, model_cloud INTEGER, created_at TEXT, updated_at TEXT)');
+    db.exec('CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT) WITHOUT ROWID');
+    db.prepare('INSERT INTO chats VALUES (?,?,?)').run('c1', 'test chat', '2026-08-10T09:00:00Z');
+    const ins = db.prepare('INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)');
+    ins.run('m1', 'c1', 'user', 'u'.repeat(40), null, null, 0, '2026-08-10T09:00:00Z', '2026-08-10T09:00:00Z');
+    ins.run('m2', 'c1', 'assistant', 'a'.repeat(6000), 't'.repeat(400), 'gemma3:4b', 0, '2026-08-10T09:00:30Z', '2026-08-10T09:00:30Z');
+    ins.run('m3', 'c1', 'user', 'u'.repeat(24), null, null, 0, '2026-08-10 21:10:00', '2026-08-10 21:10:00');
+    ins.run('m4', 'c1', 'assistant', 'b'.repeat(100), null, null, 0, '1786396260', '1786396260');
+    db.prepare('INSERT INTO kv VALUES (?,?)').run('schema', '1');
+    db.close();
+  }
 }
 
 if (process.argv[1] === import.meta.filename) await generate();
