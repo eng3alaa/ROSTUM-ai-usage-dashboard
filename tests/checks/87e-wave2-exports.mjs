@@ -203,6 +203,57 @@ export async function run({ browser, ok }) {
       && ex.hub.every(cls => /\bok\b/.test(cls)) && ['grok-export', 'deepseek-chat-export', 'meta-ai-export', 'perplexity-export', 'copilot-activity-csv'].every(id => ex.imports.includes(id))
       && ['Grok', 'Microsoft Copilot', 'Perplexity', 'Meta AI', 'DeepSeek chat', 'ChatGPT', 'Claude.ai'].every(pl => ex.order.includes(pl)) && ex.order.filter(pl => pl === 'ChatGPT').length === 1 && ex.order[ex.order.length - 1] === 'Other'
       && /Grok/.test(ex.badge) && /Perplexity/.test(ex.badge) && /Takeout/.test(ex.badge) && /Cursor/.test(ex.badge), JSON.stringify({ srcs: ex.srcs, pxSid: ex.pxSid, metaAfterSecond: ex.metaAfterSecond, metaAfterReimport: ex.metaAfterReimport, hub: ex.hub, note: ex.note, imports: ex.imports, order: ex.order, badge: ex.badge }));
+    // ---- fix set: merge-by-sid sources vs compactRows. Rows older than 90 days used to fold ACROSS sids into one day/platform/model bucket with a
+    //      sids[] list; the per-file "replaces only itself" filters then dropped that bucket on re-import (it listed the re-imported sid) and the
+    //      other threads'/files' old rows vanished. These sources compact per (day, platform, model, sid) — scalar sid kept, hour dropped, est kept.
+    const ps = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const sum = (rows) => rows.reduce((a, r) => ({ in: a.in + r.in, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, out: 0, msgs: 0 });
+      const day = addDays(todayKey(), -120);                                                   // 120 days old → past the 90-day compaction cutoff
+      const at = (hhmm) => new Date(day + 'T' + hhmm + ':00');                                 // local wall-clock → exportTimestamp's dayKey = day
+      const ms = (hhmm) => at(hhmm).getTime(), iso = (hhmm) => at(hhmm).toISOString();
+      const json = (o, name) => new File([JSON.stringify(o)], name, { type: 'application/json' });
+      const csv = (s, name) => new File([s], name, { type: 'text/csv' });
+      const rowsOf = (id) => (Store.sources[id] || {}).rows || [];
+      const shape = (rows) => rows.map(r => [r.sid, r.in, r.out, r.msgs, r.hour, r.est, r.sids]).sort((a, b) => (a[0] < b[0] ? -1 : 1));   // undefined → null in JSON
+      const bySid = (id, sid) => shape(rowsOf(id).filter(r => r.sid === sid || (Array.isArray(r.sids) && r.sids.includes(sid))));
+      // Meta AI (estTok = chars/4): thread A = 40→80 (in 10, out 20) + 20→8 (in 5, out 2) = in 15 out 22 msgs 2 · thread B = 4→5 (in 1, out 1) + 12→16 (in 3, out 4) = in 4 out 5 msgs 2 · same day, different hours
+      const thread = (path, msgs) => ({ participants: [{ name: 'Alaa' }, { name: 'Meta AI' }], title: 'Meta AI', thread_path: path, messages: msgs });
+      const metaA = thread('inbox/metaai_A', [
+        { sender_name: 'Meta AI', timestamp_ms: ms('21:30'), content: 'w'.repeat(8) }, { sender_name: 'Alaa', timestamp_ms: ms('21:29'), content: 'z'.repeat(20) },
+        { sender_name: 'Meta AI', timestamp_ms: ms('09:01'), content: 'y'.repeat(80) }, { sender_name: 'Alaa', timestamp_ms: ms('09:00'), content: 'x'.repeat(40) } ]);
+      const metaB = thread('inbox/metaai_B', [
+        { sender_name: 'Meta AI', timestamp_ms: ms('10:01'), content: 'y'.repeat(16) }, { sender_name: 'Alaa', timestamp_ms: ms('10:00'), content: 'x'.repeat(12) },
+        { sender_name: 'Meta AI', timestamp_ms: ms('08:01'), content: 'ok!!!' }, { sender_name: 'Alaa', timestamp_ms: ms('08:00'), content: 'abcd' } ]);
+      await App.handleImportFiles([json(metaA, 'message_1.json')]);
+      await App.handleImportFiles([json(metaB, 'message_2.json')]);
+      const metaBoth = { t: sum(rowsOf('meta-ai-export')), threads: Store.sources['meta-ai-export'].meta.threads, rows: shape(rowsOf('meta-ai-export')) };
+      await App.handleImportFiles([json(metaA, 'message_1.json')]);                            // re-import thread A → replaces only itself; B must stay
+      const metaRe = { t: sum(rowsOf('meta-ai-export')), threads: Store.sources['meta-ai-export'].meta.threads, a: bySid('meta-ai-export', 'inbox/metaai_A'), b: bySid('meta-ai-export', 'inbox/metaai_B') };
+      // Perplexity: file A = 40→80 + 20→8 = in 15 out 22 msgs 2 · file B = abcd→ok!!! = in 1 out 1 msgs 1 → in 16 out 23 msgs 3
+      const pxA = [{ query: 'x'.repeat(40), answer: 'y'.repeat(80), created_at: iso('09:00') }, { query: 'z'.repeat(20), answer: 'w'.repeat(8), created_at: iso('21:30') }];
+      const pxB = [{ query: 'abcd', answer: 'ok!!!', created_at: iso('08:00') }];
+      await App.handleImportFiles([json(pxA, 'threads-a.json')]); await App.handleImportFiles([json(pxB, 'threads-b.json')]); await App.handleImportFiles([json(pxA, 'threads-a.json')]);
+      const px = { t: sum(rowsOf('perplexity-export')), files: Store.sources['perplexity-export'].meta.files, b: bySid('perplexity-export', 'threads-b.json') };
+      // Microsoft Copilot activity CSV: file A (Copilot app) = 40→80 + 20→8 = in 15 out 22 msgs 2 · file B (Copilot in Edge) = abcd→ok!!! = in 1 out 1 msgs 1 → in 16 out 23 msgs 3
+      const head = 'Date,App,Prompt,Response\n';
+      const cpA = head + iso('09:00') + ',Copilot app,' + 'x'.repeat(40) + ',' + 'y'.repeat(80) + '\n' + iso('21:30') + ',Copilot app,' + 'z'.repeat(20) + ',' + 'w'.repeat(8) + '\n';
+      const cpB = head + iso('08:00') + ',Copilot in Edge,abcd,ok!!!\n';
+      await App.handleImportFiles([csv(cpA, 'copilot-app.csv')]); await App.handleImportFiles([csv(cpB, 'copilot-edge.csv')]); await App.handleImportFiles([csv(cpA, 'copilot-app.csv')]);
+      const cp = { t: sum(rowsOf('copilot-activity-csv')), files: Store.sources['copilot-activity-csv'].meta.files, b: bySid('copilot-activity-csv', 'copilot-edge.csv') };
+      Store.sources = {}; Store.connectors = {}; Store.billed = {}; Store.persist(); App._render();
+      return { metaBoth, metaRe, px, cp };
+    });
+    ok('meta ai + compaction: two 120-day-old threads land as one compacted row PER THREAD (scalar sid kept, hour dropped, est kept, no sids list) — A in=15 out=22 msgs=2, B in=4 out=5 msgs=2; 2 threads',
+      ps.metaBoth.t.in === 19 && ps.metaBoth.t.out === 27 && ps.metaBoth.t.msgs === 4 && ps.metaBoth.threads === 2
+      && JSON.stringify(ps.metaBoth.rows) === JSON.stringify([['inbox/metaai_A', 15, 22, 2, null, 1, null], ['inbox/metaai_B', 4, 5, 2, null, 1, null]]), JSON.stringify(ps.metaBoth));
+    ok('meta ai + compaction: re-importing 120-day-old thread A replaces only itself — thread B\'s rows are kept (still in=19 out=27 msgs=4, 2 threads; B in=4 out=5 msgs=2; A one row in=15 out=22 msgs=2)',
+      ps.metaRe.t.in === 19 && ps.metaRe.t.out === 27 && ps.metaRe.t.msgs === 4 && ps.metaRe.threads === 2
+      && JSON.stringify(ps.metaRe.a) === JSON.stringify([['inbox/metaai_A', 15, 22, 2, null, 1, null]]) && JSON.stringify(ps.metaRe.b) === JSON.stringify([['inbox/metaai_B', 4, 5, 2, null, 1, null]]), JSON.stringify(ps.metaRe));
+    ok('perplexity / ms copilot + compaction: re-importing 120-day-old file A keeps file B — Perplexity in=16 out=23 msgs=3, 2 files, B row in=1 out=1 msgs=1; Copilot activity in=16 out=23 msgs=3, 2 files, B row in=1 out=1 msgs=1',
+      ps.px.t.in === 16 && ps.px.t.out === 23 && ps.px.t.msgs === 3 && ps.px.files === 2 && JSON.stringify(ps.px.b) === JSON.stringify([['threads-b.json', 1, 1, 1, null, 1, null]])
+      && ps.cp.t.in === 16 && ps.cp.t.out === 23 && ps.cp.t.msgs === 3 && ps.cp.files === 2 && JSON.stringify(ps.cp.b) === JSON.stringify([['copilot-edge.csv', 1, 1, 1, null, 1, null]]), JSON.stringify({ px: ps.px, cp: ps.cp }));
   } finally {
     await page.close();
   }

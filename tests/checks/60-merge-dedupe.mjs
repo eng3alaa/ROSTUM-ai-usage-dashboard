@@ -136,6 +136,28 @@ export async function run({ browser, ok }) {
       JSON.stringify(age));
     ok('compactRows: a recent sid-less hour row is kept as-is (hour=8, in=5)',
       age.recN === 1 && age.rec.hour === 8 && age.rec.in === 5 && age.rec.est === 1, JSON.stringify(age.rec));
+    // Merge-by-sid sources (Meta AI threads, Perplexity files, Copilot activity CSVs: one file replaces only itself on re-import) compact
+    // per (day, platform, model, sid) — { perSid: true } keeps a scalar sid on each bucket (hour dropped, est kept, no sids list) so the
+    // per-file replace filter stays exact; the default (no opts) still folds across sids into one bucket with a sids list (Claude logs etc.).
+    const ps = await page.evaluate(async () => {
+      const agedDay = addDays(todayKey(), -200), recentDay = addDays(todayKey(), -5);
+      const base = { d: agedDay, platform: 'Meta AI', model: 'meta-ai', cw: 0, cr: 0, est: 1 };
+      const input = [
+        { ...base, sid: 'inbox/a', hour: 9, in: 10, out: 20, msgs: 1 }, { ...base, sid: 'inbox/a', hour: 21, in: 5, out: 2, msgs: 1 },   // a: in 15 out 22 msgs 2
+        { ...base, sid: 'inbox/b', hour: 8, in: 1, out: 1, msgs: 1 }, { ...base, sid: 'inbox/b', hour: 10, in: 3, out: 4, msgs: 1 },     // b: in 4 out 5 msgs 2
+        { ...base, d: recentDay, sid: 'inbox/a', hour: 7, in: 2, out: 3, msgs: 1 },                                                     // recent → untouched
+      ];
+      const shape = (rows) => rows.map(r => [r.d === agedDay ? 'aged' : 'recent', r.sid, r.in, r.out, r.msgs, r.hour, r.est, r.sids]).sort((a, b) => (String(a) < String(b) ? -1 : 1));   // undefined → null in JSON
+      const per = shape(Store.compactRows(input, { perSid: true })), def = shape(Store.compactRows(input));
+      Store.setSource('meta-ai-export', input, {}, { perSid: true });
+      const via = shape(Store.sources['meta-ai-export'].rows);
+      Store.sources = {}; Store.persist();
+      return { per, def, via };
+    });
+    ok('compactRows perSid: two sids on one aged day stay two rows with tokens summed per sid, scalar sid kept, hour dropped, est kept, no sids list; the recent row is untouched; setSource(id, rows, meta, { perSid: true }) passes it through',
+      JSON.stringify(ps.per) === JSON.stringify([['aged', 'inbox/a', 15, 22, 2, null, 1, null], ['aged', 'inbox/b', 4, 5, 2, null, 1, null], ['recent', 'inbox/a', 2, 3, 1, 7, 1, null]]) && JSON.stringify(ps.via) === JSON.stringify(ps.per), JSON.stringify({ per: ps.per, via: ps.via }));
+    ok('compactRows default (no opts) is unchanged: the same aged rows fold across sids into ONE bucket (in=19 out=27 msgs=4, sids [inbox/a, inbox/b], no scalar sid, no hour); the recent row is untouched',
+      JSON.stringify(ps.def) === JSON.stringify([['aged', null, 19, 27, 4, null, 1, ['inbox/a', 'inbox/b']], ['recent', 'inbox/a', 2, 3, 1, 7, 1, null]]), JSON.stringify(ps.def));
   } finally {
     await page.close();
   }

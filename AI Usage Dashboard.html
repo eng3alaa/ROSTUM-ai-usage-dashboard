@@ -1552,25 +1552,29 @@ const Store = {
     try { LS.set('data', { sources: this.sources, billed: this.billed, projects: this.projects, projectsBy: this.projectsBy, connectors: this.connectors }); }
     catch (e) { console.warn('persist failed', e); }
   },
-  compactRows(rows) {
+  compactRows(rows, opts) {
     // Compact by AGE regardless of sid: rows older than 90 days (sid-bearing Claude logs AND sid-less hour-granular
     // parsers — Takeout, Continue.dev, usage-logger JSONL, Cursor CSV) merge into day/platform/model[/local] buckets
     // (hour dropped). `sids` is only emitted when at least one merged row carried a sid (allRows dedupe contract).
+    // opts.perSid (merge-by-sid sources — Meta AI threads, Perplexity files, Copilot activity CSVs — where one file replaces only
+    // itself on re-import): buckets are per day/platform/model[/local]/sid and keep the scalar sid instead of folding across sids
+    // into a sids list, so the per-file "replaces only itself" filter never takes other files' old rows with it.
+    const perSid = !!(opts && opts.perSid);
     const cutoff = addDays(todayKey(), -90);
     const keep = [], merge = new Map();
     for (const r of rows) {
       if (!r.d || r.d >= cutoff) { keep.push(r); continue; }
-      const k = r.d + '\u0001' + r.platform + '\u0001' + r.model + '\u0001' + (r.local ? '1' : '');
+      const k = r.d + '\u0001' + r.platform + '\u0001' + r.model + '\u0001' + (r.local ? '1' : '') + (perSid ? '\u0001' + (r.sid || '') : '');
       let b = merge.get(k);
-      if (!b) { b = { d: r.d, platform: r.platform, model: r.model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0 }; if (r.est) b.est = 1; if (r.local) b.local = 1; merge.set(k, b); }
+      if (!b) { b = { d: r.d, platform: r.platform, model: r.model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0 }; if (r.est) b.est = 1; if (r.local) b.local = 1; if (perSid && r.sid) b.sid = r.sid; merge.set(k, b); }
       b.in += r.in || 0; b.cw += r.cw || 0; b.cr += r.cr || 0; b.out += r.out || 0; b.msgs += r.msgs || 0;
       if (r.est) b.est = 1;
       const sids = r.sid ? [r.sid] : (Array.isArray(r.sids) ? r.sids : null);
-      if (sids) { if (!b.sids) b.sids = []; for (const sd of sids) if (!b.sids.includes(sd)) b.sids.push(sd); }
+      if (sids && !(perSid && r.sid)) { if (!b.sids) b.sids = []; for (const sd of sids) if (!b.sids.includes(sd)) b.sids.push(sd); }   // perSid: the scalar sid is the bucket's identity (a legacy cross-sid sids list still folds)
     }
     return keep.concat([...merge.values()]);
   },
-  setSource(id, rows, meta) { this.sources[id] = { rows: this.compactRows(rows), meta: { ...meta, updated: Date.now() } }; this.persist(); },
+  setSource(id, rows, meta, opts) { this.sources[id] = { rows: this.compactRows(rows, opts), meta: { ...meta, updated: Date.now() } }; this.persist(); },
   clearAll() { this.sources = {}; this.billed = {}; this.projects = []; this.projectsBy = {}; this.connectors = {}; LS.del('data'); },
   allRows() {
     const localSids = new Set();
@@ -5764,14 +5768,14 @@ const App = {
       // Download-your-information splits threads into message_N.json files: rows carry the thread as sid, so a file replaces only its own thread
       const keep = ((Store.sources['meta-ai-export'] || {}).rows || []).filter(r => r.sid !== res.meta.sid && !(Array.isArray(r.sids) && r.sids.includes(res.meta.sid)));
       const all = keep.concat(res.rows);
-      Store.setSource('meta-ai-export', all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), threads: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size });
+      Store.setSource('meta-ai-export', all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), threads: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size }, { perSid: true });   // compaction keeps one bucket per thread (scalar sid) so the filter above stays exact
       notes.push(`${f.name}: Meta AI thread — ${fmtInt(res.meta.msgs)} replies (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} undated skipped` : ''}; threads merge, the same thread re-imported replaces itself)`);
       imported++;
     } else if (kind === 'perplexity-export') {
       const res = parsePerplexityExport(obj, f.name);
       const keep = ((Store.sources['perplexity-export'] || {}).rows || []).filter(r => r.sid !== res.meta.sid && !(Array.isArray(r.sids) && r.sids.includes(res.meta.sid)));
       const all = keep.concat(res.rows);
-      Store.setSource('perplexity-export', all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), files: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size });
+      Store.setSource('perplexity-export', all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), files: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size }, { perSid: true });   // compaction keeps one bucket per file (scalar sid) so the filter above stays exact
       notes.push(`${f.name}: Perplexity export — ${fmtInt(res.meta.msgs)} threads (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} undated skipped` : ''}; files merge, the same file re-imported replaces itself)`);
       imported++;
     } else if (kind === 'anthropic-usage') {
@@ -5890,7 +5894,7 @@ const App = {
             const res = parseCopilotActivityCSV(csvText, f.name);
             const keep = ((Store.sources['copilot-activity-csv'] || {}).rows || []).filter(r => r.sid !== res.meta.sid && !(Array.isArray(r.sids) && r.sids.includes(res.meta.sid)));   // one export per surface → files merge by name
             const all = keep.concat(res.rows);
-            Store.setSource('copilot-activity-csv', all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), files: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size, apps: res.meta.apps });
+            Store.setSource('copilot-activity-csv', all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), files: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size, apps: res.meta.apps }, { perSid: true });   // compaction keeps one bucket per file (scalar sid) so the filter above stays exact
             notes.push(`${f.name}: Microsoft Copilot activity CSV — ${fmtInt(res.meta.rows)} prompts (estimated tokens from prompt/response text${res.meta.apps.length ? '; ' + res.meta.apps.join(', ') : ''}${res.meta.skipped ? `; ${res.meta.skipped} row(s) with unreadable dates skipped` : ''})`);
             imported++;
             continue;
