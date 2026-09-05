@@ -515,6 +515,27 @@ export async function generate() {
   w('wave2/vertex/bigquery.json', JSON.stringify({ kind: 'bigquery#queryResponse', schema: { fields: [{ name: 'd', type: 'DATE', mode: 'NULLABLE' }, { name: 'c', type: 'FLOAT', mode: 'NULLABLE' }] },
     jobReference: { projectId: 'proj-a', jobId: 'job_x', location: 'US' }, totalRows: '2', rows: [{ f: [{ v: '2026-08-10' }, { v: '1.23' }] }, { f: [{ v: '2026-08-11' }, { v: '2.5' }] }],
     totalBytesProcessed: '1024', jobComplete: true, cacheHit: false }, null, 1));
+  // T12 — CloudWatch ListMetrics, TWO pages (page 1 carries NextToken 'n2'): claude twice (dedupe), a 2-dimension metric (ModelId+ImageSize →
+  //   skipped: GetMetricData would not match it with ModelId alone), nova on page 2. Expected models: ['anthropic.claude-sonnet-4-5', 'amazon.nova-pro-v1:0']
+  w('wave2/bedrock/list-metrics-1.json', JSON.stringify({ Metrics: [
+    { Namespace: 'AWS/Bedrock', MetricName: 'InputTokenCount', Dimensions: [{ Name: 'ModelId', Value: 'anthropic.claude-sonnet-4-5' }] },
+    { Namespace: 'AWS/Bedrock', MetricName: 'InputTokenCount', Dimensions: [{ Name: 'ModelId', Value: 'anthropic.claude-sonnet-4-5' }] },
+    { Namespace: 'AWS/Bedrock', MetricName: 'InputTokenCount', Dimensions: [{ Name: 'ModelId', Value: 'stability.sd3-5-large-v1:0' }, { Name: 'ImageSize', Value: '1024x1024' }] } ], NextToken: 'n2' }, null, 1));
+  w('wave2/bedrock/list-metrics-2.json', JSON.stringify({ Metrics: [
+    { Namespace: 'AWS/Bedrock', MetricName: 'InputTokenCount', Dimensions: [{ Name: 'ModelId', Value: 'amazon.nova-pro-v1:0' }] } ] }, null, 1));
+  // T12 — GetMetricData: Ids in<i>/out<i> index the models array (claude = 0, nova = 1); a stray Id is ignored.
+  //   Expected rows: claude 08-10 in 12000 out 1500 · claude 08-11 in 8000 out 900 · nova 08-11 in 400 out 50 → in = 20400 · out = 2450 · 3 rows
+  w('wave2/bedrock/get-metric-data.json', JSON.stringify({ MetricDataResults: [
+    { Id: 'in0', Label: 'InputTokenCount', Timestamps: ['2026-08-10T00:00:00Z', '2026-08-11T00:00:00Z'], Values: [12000, 8000], StatusCode: 'Complete' },
+    { Id: 'out0', Label: 'OutputTokenCount', Timestamps: ['2026-08-10T00:00:00Z', '2026-08-11T00:00:00Z'], Values: [1500, 900], StatusCode: 'Complete' },
+    { Id: 'in1', Label: 'InputTokenCount', Timestamps: ['2026-08-11T00:00:00Z'], Values: [400], StatusCode: 'Complete' },
+    { Id: 'out1', Label: 'OutputTokenCount', Timestamps: ['2026-08-11T00:00:00Z'], Values: [50], StatusCode: 'Complete' },
+    { Id: 'x9', Label: 'stray', Timestamps: ['2026-08-11T00:00:00Z'], Values: [99999], StatusCode: 'Complete' } ], Messages: [] }, null, 1));
+  // T12 — Cost Explorer GetCostAndUsage (DAILY): every day in range comes back, zero days included. Expected billed: 08-10 1.23 · 08-11 0.77 · 08-12 0 (3 rows, sum 2.00)
+  w('wave2/bedrock/cost.json', JSON.stringify({ ResultsByTime: [
+    { TimePeriod: { Start: '2026-08-10', End: '2026-08-11' }, Total: { UnblendedCost: { Amount: '1.23', Unit: 'USD' } }, Groups: [], Estimated: false },
+    { TimePeriod: { Start: '2026-08-11', End: '2026-08-12' }, Total: { UnblendedCost: { Amount: '0.77', Unit: 'USD' } }, Groups: [], Estimated: false },
+    { TimePeriod: { Start: '2026-08-12', End: '2026-08-13' }, Total: { UnblendedCost: { Amount: '0', Unit: 'USD' } }, Groups: [], Estimated: true } ], DimensionValueAttributes: [] }, null, 1));
 }
 
 if (process.argv[1] === import.meta.filename) await generate();

@@ -1394,6 +1394,17 @@ const CONNECTORS = [
     qualityNote: 'Exact tokens per publisher model (Gemini, Claude on Vertex, …) from Cloud Monitoring\'s aiplatform token_count metric, summed per model and input/output type in 24-hour windows ending at the time you sync (attributed to the UTC date of the window end); request counts are not pulled, so messages show 0. Billed dollars only come from a Cloud Billing export to BigQuery (service Vertex AI, per usage day): give the export table and the same token runs the query — there is no Cloud Billing REST endpoint for incurred cost, so without the export the card is tokens-only. Vertex has no API-key path: paste an OAuth access token from the gcloud CLI (about 1 hour; needs roles/monitoring.viewer, plus bigquery.jobUser and dataViewer for cost). The token is kept in this tab only — never saved; paste a fresh one after it expires. This is a different product and bill from the Gemini (Google AI Studio) API card.',
     paths: ['token: gcloud auth print-access-token (about 1 hour)', 'project id: console.cloud.google.com → project selector', 'billing export: Billing → Billing export → BigQuery export → dataset; table gcp_billing_export_v1_<billing account id>', 'no local usage files (~/.config/gcloud holds credentials only)'],
     links: { docs: 'https://docs.cloud.google.com/monitoring/api/metrics_gcp_a_b', usage: 'https://console.cloud.google.com/billing' } },
+  { id: 'bedrock', platform: 'AWS Bedrock', name: 'AWS Bedrock', category: 'cloud', kind: 'cloud-token', sessionOnly: true,
+    statusEl: 'bedrock-status', brand: '#ff9900', mark: 'Bd', srcIds: ['bedrock'], keyLS: 'key:bedrock', fetch: 'fetchBedrock',   // keyLS never written (sessionOnly)
+    keyLabel: 'Access key id', keyHint: 'AKIA… (a read-only IAM user, or STS keys with a session token)',
+    fields: [
+      { id: 'secret', label: 'Secret access key', type: 'password', secret: true },
+      { id: 'session', label: 'Session token (optional, STS)', type: 'password', secret: true },
+      { id: 'region', label: 'Region', placeholder: 'us-east-1' } ],
+    quality: 'exact',
+    qualityNote: 'Exact tokens per model and UTC day from CloudWatch (AWS/Bedrock InputTokenCount / OutputTokenCount, Sum per day, dimension ModelId) — CloudWatch lists only models that reported in the last two weeks, so an idle model\'s older days are not pulled; request counts are not pulled, so messages show 0. Billed dollars per day from Cost Explorer (UnblendedCost, service "Amazon Bedrock"; $0.01 per sync, about 24 hours behind; third-party models billed under their own "(Amazon Bedrock Edition)" service names are not included). Requests are SigV4-signed in this page with WebCrypto; use a read-only IAM user (cloudwatch:GetMetricData, cloudwatch:ListMetrics, ce:GetCostAndUsage) or short-lived STS keys. The access key, secret and session token are kept in this tab only — never saved. Bedrock writes no local usage logs (~/.aws holds credentials only); model-invocation logging to CloudWatch Logs/S3 is not read in this version.',
+    paths: ['IAM → Users → Security credentials → Create access key (read-only policy above)', 'region: the one you call Bedrock in (us-east-1, eu-west-1, …) — Cost Explorer is global', 'no local usage files'],
+    links: { docs: 'https://docs.aws.amazon.com/bedrock/latest/userguide/monitoring-runtime-metrics.html', usage: 'https://console.aws.amazon.com/costmanagement/home#/cost-explorer' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
     statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv'] },
 ];
@@ -3073,6 +3084,137 @@ async function fetchVertexAI(token, fields, opts = {}) {
   return { label: project,
     detail: `${rows.length} usage rows · ${nModels} model${nModels === 1 ? '' : 's'} · last ${days} days` + (billed ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from the billing export` : ' · no billing table — add the BigQuery export table for billed dollars'),
     rows, ...(billed ? { billed } : {}), meta: { days, project } };
+}
+
+/* ---------- AWS Signature V4 with WebCrypto (used by the Bedrock cloud-token fetcher; no SDK) ---------- */
+const WEBCRYPTO_MSG = 'WebCrypto unavailable — open the file over file:// or https';
+/** SHA-256 hex of a string or byte array. */
+async function sha256Hex(data) {
+  if (!(globalThis.crypto && globalThis.crypto.subtle)) throw new Error(WEBCRYPTO_MSG);
+  const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  const h = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+/** HMAC-SHA256(keyBytes, data) → Uint8Array (data: string or bytes). */
+async function hmacSha256(keyBytes, data) {
+  if (!(globalThis.crypto && globalThis.crypto.subtle)) throw new Error(WEBCRYPTO_MSG);
+  const key = await globalThis.crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await globalThis.crypto.subtle.sign('HMAC', key, typeof data === 'string' ? new TextEncoder().encode(data) : data);
+  return new Uint8Array(sig);
+}
+/** RFC 3986 percent-encoding (encodeURIComponent + the five characters it leaves alone). */
+const awsEncode = (s) => encodeURIComponent(s).replace(/[!'()*]/g, (ch) => '%' + ch.charCodeAt(0).toString(16).toUpperCase());
+/** AWS SigV4. Returns the headers to send: the input headers (caller's casing) + host, x-amz-date, x-amz-content-sha256, optional
+ *  x-amz-security-token, authorization. Canonical request: method · canonical URI (the URL parser already percent-encodes each path
+ *  segment once; AWS wants non-S3 paths encoded twice, so each segment is encoded once more — for the '/' root path CloudWatch and
+ *  Cost Explorer use this is a no-op) · canonical query (RFC 3986, sorted by key then value) · canonical headers (lower-cased names,
+ *  sorted; values trimmed with inner whitespace collapsed) · signed-header list · SHA-256 of the body (or of the empty string).
+ *  String to sign: 'AWS4-HMAC-SHA256' / amzDate / date/region/service/aws4_request / hash(canonical). Signing key: HMAC chain from
+ *  'AWS4' + secret over date → region → service → 'aws4_request'. Same algorithm as the AWS SigV4 test suite (whose get-vanilla vector
+ *  omits x-amz-content-sha256 — this signer always includes it; the pinned vectors in 87d-wave2-cloud are the reference). */
+async function sigv4Sign({ method = 'POST', url, headers = {}, body = '', service, region, accessKeyId, secretAccessKey, sessionToken, now = new Date() }) {
+  const u = new URL(url);
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');   // 20260810T120000Z
+  const date = amzDate.slice(0, 8);
+  const payloadHash = await sha256Hex(body || '');
+  const canon = {};
+  for (const [k, v] of Object.entries(headers)) canon[k.toLowerCase()] = String(v).trim().replace(/\s+/g, ' ');
+  canon.host = u.host; canon['x-amz-date'] = amzDate; canon['x-amz-content-sha256'] = payloadHash;
+  if (sessionToken) canon['x-amz-security-token'] = sessionToken;
+  const names = Object.keys(canon).sort();
+  const signedHeaders = names.join(';');
+  const canonicalUri = u.pathname.split('/').map(awsEncode).join('/') || '/';
+  const canonicalQuery = [...u.searchParams.entries()].map(([k, v]) => [awsEncode(k), awsEncode(v)])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0)).map(([k, v]) => k + '=' + v).join('&');
+  const canonicalRequest = [method.toUpperCase(), canonicalUri, canonicalQuery, names.map(n => n + ':' + canon[n] + '\n').join(''), signedHeaders, payloadHash].join('\n');
+  const scope = `${date}/${region}/${service}/aws4_request`;
+  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, scope, await sha256Hex(canonicalRequest)].join('\n');
+  let k = await hmacSha256(new TextEncoder().encode('AWS4' + secretAccessKey), date);
+  k = await hmacSha256(k, region); k = await hmacSha256(k, service); k = await hmacSha256(k, 'aws4_request');
+  const signature = [...await hmacSha256(k, stringToSign)].map(b => b.toString(16).padStart(2, '0')).join('');
+  const out = { ...headers, host: u.host, 'x-amz-date': amzDate, 'x-amz-content-sha256': payloadHash };   // fetch drops the forbidden `host` header itself; it is listed because it is signed
+  if (sessionToken) out['x-amz-security-token'] = sessionToken;
+  out.authorization = `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  return out;
+}
+
+/** AWS Bedrock — cloud-token fetcher. key: access key id; fields: { secret, session?, region }; opts: { days }. Every request is SigV4-signed
+ *  in-page (sigv4Sign) — key, secret and session token are used for these requests only, never stored. (1) CloudWatch ListMetrics
+ *  (AWS/Bedrock · InputTokenCount · dimension ModelId only) → the model ids that reported in the last two weeks (an idle model's older
+ *  days are therefore not pulled); (2) CloudWatch GetMetricData: InputTokenCount + OutputTokenCount, Sum, Period 86400 from a UTC
+ *  midnight (≤ 500 queries per call, NextToken paged) → exact tokens per model × UTC day, msgs 0 (request counts not pulled);
+ *  (3) Cost Explorer GetCostAndUsage (served from us-east-1 only; $0.01 per request; ~24 h lag), DAILY UnblendedCost filtered to
+ *  SERVICE 'Amazon Bedrock' → billed per day (zero days included). A Cost Explorer failure (e.g. no ce:GetCostAndUsage) degrades to
+ *  tokens-only and is reported in the status line; CloudWatch failures are errors (403 → the AWS rejection message). */
+async function fetchBedrock(key, fields, opts = {}) {
+  const days = Math.max(1, opts.days || 90);
+  const accessKeyId = String(key || '').trim(), secretAccessKey = String(fields.secret || '').trim(), sessionToken = String(fields.session || '').trim() || undefined;
+  const region = (String(fields.region || '').trim() || 'us-east-1').toLowerCase();
+  if (!secretAccessKey) throw new Error('Enter the secret access key (use a read-only IAM user: cloudwatch:GetMetricData, cloudwatch:ListMetrics, ce:GetCostAndUsage)');
+  if (!/^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-\d$/.test(region)) throw new Error('Region must look like us-east-1');
+  const auth = { denied: 'AWS returned 403 — bad key/secret/session token or region, or the IAM user lacks the read-only policy' };
+  const call = async (host, service, svcRegion, target, contentType, body) => {
+    const url = `https://${host}/`;
+    const headers = await sigv4Sign({ method: 'POST', url, headers: { 'Content-Type': contentType, 'X-Amz-Target': target }, body, service, region: svcRegion, accessKeyId, secretAccessKey, sessionToken, now: new Date() });
+    return cloudJSON(url, { method: 'POST', headers, body }, auth);
+  };
+  const cw = (target, body) => call(`monitoring.${region}.amazonaws.com`, 'monitoring', region, 'GraniteServiceVersion20100801.' + target, 'application/x-amz-json-1.0', JSON.stringify(body));
+  // (1) model ids — only metrics whose dimension set is exactly [ModelId]; other sets (ModelId+ImageSize …) are separate metrics GetMetricData would not match
+  const models = []; let next = null, guard = 0;
+  do {
+    const j = await cw('ListMetrics', { Namespace: 'AWS/Bedrock', MetricName: 'InputTokenCount', ...(next ? { NextToken: next } : {}) });
+    for (const m of (j && j.Metrics) || []) {
+      const dims = m.Dimensions || [];
+      if (dims.length === 1 && dims[0].Name === 'ModelId' && dims[0].Value && !models.includes(dims[0].Value)) models.push(dims[0].Value);
+    }
+    next = (j && j.NextToken) || null;
+  } while (next && ++guard < 20);
+  // (2) exact tokens per model × UTC day — StartTime on a UTC midnight so the 86400-s periods are calendar days
+  const agg = makeAgg();
+  const now = new Date(), nowSec = Math.floor(now.getTime() / 1000);
+  const startSec = Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) / 1000) - days * 86400;
+  for (let i = 0; i < models.length; i += 250) {   // 2 queries per model → ≤ 500 MetricDataQueries per call (the API limit)
+    const batch = models.slice(i, i + 250), queries = [];
+    batch.forEach((m, k) => {
+      for (const [pfx, metric] of [['in', 'InputTokenCount'], ['out', 'OutputTokenCount']])
+        queries.push({ Id: pfx + (i + k), MetricStat: { Metric: { Namespace: 'AWS/Bedrock', MetricName: metric, Dimensions: [{ Name: 'ModelId', Value: m }] }, Period: 86400, Stat: 'Sum' }, ReturnData: true });
+    });
+    let token = null, pages = 0;
+    do {
+      const j = await cw('GetMetricData', { StartTime: startSec, EndTime: nowSec, MetricDataQueries: queries, ScanBy: 'TimestampAscending', ...(token ? { NextToken: token } : {}) });
+      for (const r of (j && j.MetricDataResults) || []) {
+        const mm = /^(in|out)(\d+)$/.exec(r.Id || ''); if (!mm) continue;
+        const model = models[+mm[2]]; if (!model) continue;
+        const ts = r.Timestamps || [], vs = r.Values || [];
+        for (let k = 0; k < ts.length; k++) {
+          const v = finTok(Number(vs[k])); if (!v) continue;
+          const d = dayKeyUTC(ts[k]); if (!d) continue;
+          agg.add(d, 'AWS Bedrock', model, { [mm[1]]: v, msgs: 0 });
+        }
+      }
+      token = (j && j.NextToken) || null;
+    } while (token && ++pages < 50);
+  }
+  const rows = agg.rows();
+  // (3) billed per day — Cost Explorer is served from us-east-1 only; failure degrades to tokens-only
+  let billed, costNote = '';
+  try {
+    const start = dayKeyUTC(startSec * 1000), end = dayKeyUTC(now.getTime() + 864e5);   // End is exclusive → tomorrow
+    const byDay = new Map(); let tok = null, pages = 0;
+    do {
+      const j = await call('ce.us-east-1.amazonaws.com', 'ce', 'us-east-1', 'AWSInsightsIndexService.GetCostAndUsage', 'application/x-amz-json-1.1',
+        JSON.stringify({ TimePeriod: { Start: start, End: end }, Granularity: 'DAILY', Metrics: ['UnblendedCost'], Filter: { Dimensions: { Key: 'SERVICE', Values: ['Amazon Bedrock'] } }, ...(tok ? { NextPageToken: tok } : {}) }));
+      for (const r of (j && j.ResultsByTime) || []) {
+        const d = String(((r.TimePeriod || {}).Start) || '').slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+        byDay.set(d, (byDay.get(d) || 0) + finAmt(parseFloat((((r.Total || {}).UnblendedCost) || {}).Amount)));
+      }
+      tok = (j && j.NextPageToken) || null;
+    } while (tok && ++pages < 20);
+    billed = [...byDay.entries()].map(([d, amount]) => ({ d, amount })).sort((a, b) => a.d < b.d ? -1 : 1);
+  } catch (e) { costNote = ' · cost unavailable: ' + (e.message || String(e)).slice(0, 80); }
+  return { label: `${region} · key …${accessKeyId.slice(-4)}`,
+    detail: `${models.length} model${models.length === 1 ? '' : 's'} seen by CloudWatch (last 2 weeks) · ${rows.length} usage rows · last ${days} days` + (billed ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from Cost Explorer ($0.01 per sync)` : costNote),
+    rows, ...(billed ? { billed } : {}), meta: { days, region, models: models.length } };
 }
 
 async function fetchCopilotAll(token) {

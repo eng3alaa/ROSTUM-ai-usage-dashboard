@@ -1,8 +1,29 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { openDashboard, OUT } from '../lib/harness.mjs';
 
 const read = (...p) => fs.readFileSync(path.join(OUT, ...p), 'utf8');
+// Reference SigV4 (node:crypto) for the unit check — independent of the page's WebCrypto implementation. Same canonicalization / HMAC
+// chain as the AWS SigV4 test suite; note the suite's "get-vanilla" vector (Signature=5fa00fa3…) signs host;x-amz-date ONLY, while this
+// signer (and the page's) always adds x-amz-content-sha256 — so that vector is not reproduced verbatim; the two PINNED constants below
+// (recomputed independently by the plan reviewer with node:crypto — they match) are the reference for this implementation.
+const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+const hmac = (key, s) => crypto.createHmac('sha256', key).update(s).digest();
+function refSigV4({ method, url, headers, body, service, region, accessKeyId, secretAccessKey, sessionToken, now }) {
+  const u = new URL(url);
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, ''), date = amzDate.slice(0, 8);
+  const payloadHash = sha256(body || '');
+  const all = {}; for (const [k, v] of Object.entries(headers)) all[k.toLowerCase()] = String(v).trim().replace(/\s+/g, ' ');
+  all.host = u.host; all['x-amz-date'] = amzDate; all['x-amz-content-sha256'] = payloadHash;
+  if (sessionToken) all['x-amz-security-token'] = sessionToken;
+  const names = Object.keys(all).sort();
+  const canonical = [method, u.pathname || '/', '', names.map(n => n + ':' + all[n] + '\n').join(''), names.join(';'), payloadHash].join('\n');
+  const scope = `${date}/${region}/${service}/aws4_request`;
+  const toSign = ['AWS4-HMAC-SHA256', amzDate, scope, sha256(canonical)].join('\n');
+  let k = hmac('AWS4' + secretAccessKey, date); k = hmac(k, region); k = hmac(k, service); k = hmac(k, 'aws4_request');
+  return { amzDate, payloadHash, authorization: `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=${names.join(';')}, Signature=${hmac(k, toSign).toString('hex')}` };
+}
 
 export async function run({ browser, ok }) {
   const { page } = await openDashboard(browser);
@@ -165,6 +186,127 @@ export async function run({ browser, ok }) {
       !vx.missing && vx.storage.keyEntry === null && !vx.storage.tokenLeaked && vx.storage.project === 'proj-a'
       && vx.expired.err === 'token expired — mint a new one (gcloud auth print-access-token)' && vx.expired.status === 'warn' && /token rejected \(403\)/.test(vx.denied.err || '') && vx.denied.status === 'warn'
       && vx.noTable.err === null && vx.noTable.status === 'ok' && /no billing table/.test(vx.noTable.statusText) && vx.noTable.billed === 2, JSON.stringify({ storage: vx.storage, expired: vx.expired, denied: vx.denied, noTable: vx.noTable }));
+
+    // ---- T12a: sigv4Sign — page-side WebCrypto signature must equal the node:crypto reference (and the pinned constant) for a fixed input ----
+    const vec = { method: 'POST', url: 'https://monitoring.us-east-1.amazonaws.com/', headers: { 'content-type': 'application/x-amz-json-1.0', 'x-amz-target': 'GraniteServiceVersion20100801.ListMetrics' },
+      body: '{"Namespace":"AWS/Bedrock"}', region: 'us-east-1', service: 'monitoring', accessKeyId: 'AKIDEXAMPLE', secretAccessKey: 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY', now: '2026-08-10T12:00:00Z' };
+    const ref = refSigV4({ ...vec, now: new Date(vec.now) });
+    const refSess = refSigV4({ ...vec, sessionToken: 'FwoGZXIvYXdzEBYaDSESSIONTOKEN', now: new Date(vec.now) });
+    // pinned: computed once from the reference above — a silent change in either implementation fails here
+    const PINNED = 'AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260810/us-east-1/monitoring/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date;x-amz-target, Signature=41b24c289c3ce57586339e02afc6a16dffa2024e8a5507b844bfd89c06924db5';
+    const PINNED_SESS = 'AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260810/us-east-1/monitoring/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date;x-amz-security-token;x-amz-target, Signature=7e4e730f84a0fefbc010a03fcff967d9388c84763822f2ab6e0e5d370409fe7d';
+    const sv = await page.evaluate(async (v) => {
+      if (typeof sigv4Sign !== 'function' || typeof sha256Hex !== 'function' || typeof hmacSha256 !== 'function') return { missing: true };
+      const h = await sigv4Sign({ ...v, now: new Date(v.now) });
+      const hs = await sigv4Sign({ ...v, sessionToken: 'FwoGZXIvYXdzEBYaDSESSIONTOKEN', now: new Date(v.now) });
+      const empty = await sha256Hex('');
+      const mac = [...await hmacSha256(new TextEncoder().encode('key'), 'The quick brown fox jumps over the lazy dog')].map(b => b.toString(16).padStart(2, '0')).join('');
+      // guard: with crypto.subtle gone the helpers must throw the documented message, not a TypeError
+      const realSubtle = Object.getOwnPropertyDescriptor(Crypto.prototype, 'subtle');
+      let guardMsg = null;
+      try { Object.defineProperty(Crypto.prototype, 'subtle', { get: () => undefined, configurable: true }); try { await sha256Hex('x'); } catch (e) { guardMsg = e.message; } }
+      finally { Object.defineProperty(Crypto.prototype, 'subtle', realSubtle); }
+      return { h, hs, empty, mac, guardMsg, secure: window.isSecureContext };
+    }, vec);
+    ok('sigv4: page signature equals the node:crypto reference AND the pinned vector (authorization, x-amz-date, payload hash); host / x-amz-date / x-amz-content-sha256 added, input headers kept; sha256("") and HMAC test vectors hold on file://',
+      !sv.missing && sv.h.authorization === ref.authorization && ref.authorization === PINNED && sv.h['x-amz-date'] === '20260810T120000Z' && sv.h['x-amz-content-sha256'] === ref.payloadHash
+      && sv.h['x-amz-content-sha256'] === 'fffa09e26f3b1322b37ab6ff1059c594cc4bc2915c9ae33123b182cf987bb246' && sv.h.host === 'monitoring.us-east-1.amazonaws.com'
+      && sv.h['content-type'] === vec.headers['content-type'] && sv.h['x-amz-target'] === vec.headers['x-amz-target'] && !('x-amz-security-token' in sv.h)
+      && sv.empty === 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' && sv.mac === 'f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8' && sv.secure === true,
+      JSON.stringify({ got: sv.h, want: ref, empty: sv.empty, mac: sv.mac }));
+    ok('sigv4: session token travels as x-amz-security-token and is signed (reference + pinned agree); WebCrypto guard throws the documented message',
+      !sv.missing && sv.hs['x-amz-security-token'] === 'FwoGZXIvYXdzEBYaDSESSIONTOKEN' && sv.hs.authorization === refSess.authorization && refSess.authorization === PINNED_SESS
+      && /SignedHeaders=[^,]*x-amz-security-token/.test(sv.hs.authorization) && sv.hs.authorization !== sv.h.authorization
+      && sv.guardMsg === 'WebCrypto unavailable — open the file over file:// or https', JSON.stringify({ got: sv.hs && sv.hs.authorization, want: refSess.authorization, guard: sv.guardMsg }));
+
+    // ---- T12b: AWS Bedrock (CloudWatch ListMetrics paged + GetMetricData + Cost Explorer, all through sigv4Sign) ----
+    const bdL1 = read('wave2', 'bedrock', 'list-metrics-1.json'), bdL2 = read('wave2', 'bedrock', 'list-metrics-2.json'), bdData = read('wave2', 'bedrock', 'get-metric-data.json'), bdCost = read('wave2', 'bedrock', 'cost.json');
+    const bd = await page.evaluate(async (l1, l2, dataText, costText) => {
+      const c = connectorById('bedrock');
+      if (!c || typeof fetchBedrock !== 'function' || typeof App.connectKey !== 'function') return { missing: true };
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      App.ensureSourceCard(c);
+      const card = document.getElementById('src-bedrock');
+      const keyEl = document.getElementById('bedrock-key'), secEl = document.getElementById('bedrock-f-secret'), sesEl = document.getElementById('bedrock-f-session'), regEl = document.getElementById('bedrock-f-region');
+      const ui = { card: !!card, note: card ? card.querySelectorAll('.session-only').length : 0, pwd: keyEl && keyEl.type, secretPwd: secEl && secEl.type, sessionPwd: sesEl && sesEl.type, regionInput: regEl && regEl.tagName, noRemember: card ? !card.querySelector('input[type="checkbox"]') : false,
+        reg: { kind: c.kind, cat: c.category, so: c.sessionOnly === true, q: c.quality, fetch: c.fetch, platform: c.platform, srcIds: c.srcIds, statusEl: c.statusEl, fields: (c.fields || []).map(f => f.id + (f.secret ? '!' : '')), keyLabel: c.keyLabel } };
+      const calls = [];
+      const origFetch = window.fetch;
+      const lower = (init) => { const h = {}; for (const [k, v] of Object.entries(init.headers || {})) h[k.toLowerCase()] = String(v); return h; };
+      const json = (text, status = 200) => new Response(text, { status, headers: { 'content-type': 'application/x-amz-json-1.0' } });
+      window.fetch = async (url, init = {}) => {
+        const h = lower(init); const body = init.body ? JSON.parse(init.body) : null;
+        calls.push({ url: String(url), method: init.method || 'GET', headers: h, body });
+        const t = h['x-amz-target'] || '';
+        if (t.endsWith('.ListMetrics')) return json(body && body.NextToken === 'n2' ? l2 : l1);
+        if (t.endsWith('.GetMetricData')) return json(dataText);
+        if (t.endsWith('.GetCostAndUsage')) return json(costText);
+        return json(JSON.stringify({ __type: 'UnknownOperationException', message: 'unexpected ' + t }), 400);
+      };
+      let out;
+      try {
+        keyEl.value = 'AKIDEXAMPLE'; secEl.value = 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY'; sesEl.value = ''; regEl.value = 'eu-west-1';
+        await App.connectKey(c);
+        const rows = (Store.sources.bedrock || { rows: [] }).rows;
+        const t = rows.reduce((a, r) => ({ in: a.in + r.in, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, out: 0, msgs: 0 });
+        const st = Store.connectors.bedrock || {};
+        const happy = { ...t, n: rows.length, models: [...new Set(rows.map(r => r.model))].sort(), days: [...new Set(rows.map(r => r.d))].sort(), platforms: [...new Set(rows.map(r => r.platform))], est: rows.some(r => r.est),
+          billed: Store.billedRows('bedrock'), status: Store.connectorStatus(c), label: st.label, err: st.err || null, statusText: document.getElementById('bedrock-status').textContent };
+        const byTarget = (s) => calls.filter(x => (x.headers['x-amz-target'] || '').endsWith(s));
+        const pick = (x) => ({ url: x.url, method: x.method, auth: x.headers.authorization, date: x.headers['x-amz-date'], ct: x.headers['content-type'], sha: x.headers['x-amz-content-sha256'], sess: x.headers['x-amz-security-token'] || null, target: x.headers['x-amz-target'], body: x.body });
+        const sig = { lm: byTarget('.ListMetrics').map(pick), gmd: byTarget('.GetMetricData').map(pick), ce: byTarget('.GetCostAndUsage').map(pick), total: calls.length };
+        const lsKeys = Object.keys(localStorage).filter(k => k.startsWith('aiusage:'));
+        const storage = { keyEntry: localStorage.getItem('aiusage:key:bedrock'), leaked: lsKeys.some(k => /AKIDEXAMPLE|wJalrXUtnFEMI/.test(String(localStorage.getItem(k)))), region: LS.get('field:bedrock:region', null) };
+        // Cost Explorer denied → tokens still land, status line says cost unavailable, NOT an error state
+        window.fetch = async (url, init = {}) => { const h = lower(init); const body = init.body ? JSON.parse(init.body) : null; const t = h['x-amz-target'] || '';
+          if (t.endsWith('.ListMetrics')) return json(body && body.NextToken === 'n2' ? l2 : l1); if (t.endsWith('.GetMetricData')) return json(dataText);
+          return json(JSON.stringify({ __type: 'AccessDeniedException', Message: 'User: arn:aws:iam::123:user/ro is not authorized to perform: ce:GetCostAndUsage' }), 400); };
+        await App.connectKey(c);
+        const degraded = { err: (Store.connectors.bedrock || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('bedrock-status').textContent, rows: (Store.sources.bedrock || { rows: [] }).rows.length };
+        // CloudWatch rejects the signature/key (403) → attention with the AWS message
+        window.fetch = async () => json(JSON.stringify({ __type: 'InvalidSignatureException', message: 'The request signature we calculated does not match the signature you provided.' }), 403);
+        await App.connectKey(c);
+        const denied = { err: (Store.connectors.bedrock || {}).err || null, status: Store.connectorStatus(c) };
+        // blank secret → clear message, no network call
+        let n0 = 0; window.fetch = async () => { n0++; return json('{}'); };
+        secEl.value = '';
+        await App.connectKey(c);
+        const noSecret = { err: (Store.connectors.bedrock || {}).err || null, calls: n0 };
+        out = { ui, happy, sig, storage, degraded, denied, noSecret };
+      } finally {
+        window.fetch = origFetch;
+        keyEl.value = ''; secEl.value = ''; sesEl.value = ''; regEl.value = '';
+        LS.del('field:bedrock:region');
+        Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist(); App._render();
+      }
+      return out;
+    }, bdL1, bdL2, bdData, bdCost);
+    ok('bedrock: registry entry (cloud-token · sessionOnly · cloud · exact · fetchBedrock · platform AWS Bedrock · fields secret! session! region) + card UI (session-only note, password key/secret/session inputs, region input, no Remember)',
+      !bd.missing && bd.ui.card && bd.ui.note === 1 && bd.ui.pwd === 'password' && bd.ui.secretPwd === 'password' && bd.ui.sessionPwd === 'password' && bd.ui.regionInput === 'INPUT' && bd.ui.noRemember
+      && bd.ui.reg.kind === 'cloud-token' && bd.ui.reg.cat === 'cloud' && bd.ui.reg.so && bd.ui.reg.q === 'exact' && bd.ui.reg.fetch === 'fetchBedrock' && bd.ui.reg.platform === 'AWS Bedrock' && bd.ui.reg.keyLabel === 'Access key id'
+      && bd.ui.reg.srcIds.join() === 'bedrock' && bd.ui.reg.statusEl === 'bedrock-status' && bd.ui.reg.fields.join() === 'secret!,session!,region', JSON.stringify(bd.ui || bd));
+    ok('bedrock: exact rows per model × UTC day from GetMetricData (in=20400 out=2450, 3 rows, 2 models — duplicate and 2-dimension metrics dropped, stray Id ignored); billed per day from Cost Explorer (1.23, 0.77, 0); label names region + key tail',
+      !bd.missing && bd.happy.in === 20400 && bd.happy.out === 2450 && bd.happy.msgs === 0 && bd.happy.n === 3 && bd.happy.models.join() === 'amazon.nova-pro-v1:0,anthropic.claude-sonnet-4-5'
+      && bd.happy.days.join() === '2026-08-10,2026-08-11' && bd.happy.platforms.join() === 'AWS Bedrock' && !bd.happy.est
+      && bd.happy.billed.length === 3 && bd.happy.billed.map(b => b.d).join() === '2026-08-10,2026-08-11,2026-08-12' && Math.abs(bd.happy.billed[0].amount - 1.23) < 1e-9 && Math.abs(bd.happy.billed[1].amount - 0.77) < 1e-9 && bd.happy.billed[2].amount === 0
+      && bd.happy.status === 'ok' && bd.happy.err === null && bd.happy.label === 'eu-west-1 · key …MPLE' && /Connected/.test(bd.happy.statusText) && /2 models seen by CloudWatch/.test(bd.happy.statusText) && /billed 3 days/.test(bd.happy.statusText), JSON.stringify(bd.happy));
+    ok('bedrock: 4 signed POSTs — ListMetrics ×2 (NextToken n2 on the 2nd) + GetMetricData (4 queries, Period 86400, Stat Sum, ModelId dims, batch ≤ 500) on monitoring.eu-west-1 with x-amz-json-1.0, GetCostAndUsage on ce.us-east-1 with x-amz-json-1.1 (DAILY, UnblendedCost, SERVICE = Amazon Bedrock); Authorization "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/…" with the right service scope; no session-token header when blank',
+      !bd.missing && bd.sig.total === 4 && bd.sig.lm.length === 2 && bd.sig.gmd.length === 1 && bd.sig.ce.length === 1
+      && [...bd.sig.lm, ...bd.sig.gmd].every(x => x.url === 'https://monitoring.eu-west-1.amazonaws.com/' && x.method === 'POST' && x.ct === 'application/x-amz-json-1.0' && /^\d{8}T\d{6}Z$/.test(x.date || '') && /^[0-9a-f]{64}$/.test(x.sha || '') && x.sess === null
+        && x.auth.startsWith('AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/') && /\/eu-west-1\/monitoring\/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date;x-amz-target, Signature=[0-9a-f]{64}$/.test(x.auth))
+      && bd.sig.lm[0].target === 'GraniteServiceVersion20100801.ListMetrics' && bd.sig.lm[0].body.Namespace === 'AWS/Bedrock' && bd.sig.lm[0].body.MetricName === 'InputTokenCount' && !('NextToken' in bd.sig.lm[0].body) && bd.sig.lm[1].body.NextToken === 'n2'
+      && (() => { const b = bd.sig.gmd[0].body, q = b.MetricDataQueries; return bd.sig.gmd[0].target === 'GraniteServiceVersion20100801.GetMetricData' && Number.isInteger(b.StartTime) && Number.isInteger(b.EndTime) && b.EndTime > b.StartTime && b.EndTime - b.StartTime >= 90 * 86400
+        && q.length === 4 && q.map(x => x.Id).join() === 'in0,out0,in1,out1' && q.every(x => x.MetricStat.Period === 86400 && x.MetricStat.Stat === 'Sum' && x.MetricStat.Metric.Namespace === 'AWS/Bedrock' && x.MetricStat.Metric.Dimensions.length === 1 && x.MetricStat.Metric.Dimensions[0].Name === 'ModelId')
+        && q[0].MetricStat.Metric.MetricName === 'InputTokenCount' && q[1].MetricStat.Metric.MetricName === 'OutputTokenCount' && q[0].MetricStat.Metric.Dimensions[0].Value === 'anthropic.claude-sonnet-4-5' && q[2].MetricStat.Metric.Dimensions[0].Value === 'amazon.nova-pro-v1:0'; })()
+      && (() => { const x = bd.sig.ce[0], b = x.body; return x.url === 'https://ce.us-east-1.amazonaws.com/' && x.method === 'POST' && x.ct === 'application/x-amz-json-1.1' && x.target === 'AWSInsightsIndexService.GetCostAndUsage'
+        && x.auth.startsWith('AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/') && /\/us-east-1\/ce\/aws4_request, SignedHeaders=/.test(x.auth) && x.sess === null
+        && b.Granularity === 'DAILY' && b.Metrics.join() === 'UnblendedCost' && b.Filter.Dimensions.Key === 'SERVICE' && b.Filter.Dimensions.Values.join() === 'Amazon Bedrock' && /^\d{4}-\d{2}-\d{2}$/.test(b.TimePeriod.Start) && /^\d{4}-\d{2}-\d{2}$/.test(b.TimePeriod.End) && b.TimePeriod.End > b.TimePeriod.Start; })(),
+      JSON.stringify(bd.sig));
+    ok('bedrock: key id / secret never persisted (no key:bedrock; neither string in any aiusage:* value; region field persists); Cost Explorer denied → tokens still land + "cost unavailable" without an error state; CloudWatch 403 → attention; blank secret → clear error, no network call',
+      !bd.missing && bd.storage.keyEntry === null && !bd.storage.leaked && bd.storage.region === 'eu-west-1'
+      && bd.degraded.err === null && bd.degraded.status === 'ok' && /cost unavailable/.test(bd.degraded.statusText) && bd.degraded.rows === 3
+      && /AWS returned 403/.test(bd.denied.err || '') && bd.denied.status === 'warn'
+      && /secret access key/i.test(bd.noSecret.err || '') && bd.noSecret.calls === 0, JSON.stringify({ storage: bd.storage, degraded: bd.degraded, denied: bd.denied, noSecret: bd.noSecret }));
   } finally {
     await page.close();
   }
