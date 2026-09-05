@@ -3414,21 +3414,24 @@ async function cloudJSON(url, init = {}, auth = {}) {
  *  https://management.azure.com), fields: { resources: one Cognitive Services resource id per line, scope?: '/subscriptions/<id>' or a
  *  resource group }, opts: { days }. (1) per resource: Azure Monitor metrics → exact tokens per ModelName × UTC day. Azure exposes two
  *  metric generations — ProcessedPromptTokens/GeneratedTokens and the newer InputTokens/OutputTokens — which overlap on some deployments,
- *  so per model-day and per field the newer metric wins when it has a data point (total > 0), else the older one; never both. Request
+ *  so per resource × model-day and per field the newer metric wins when it has a data point (total > 0), else the older one; never both;
+ *  resources are then summed. The Monitor timespan starts at today's UTC midnight − days so the P1D buckets are calendar UTC days. Request
  *  counts are not pulled → msgs 0. (2) when scope is given: Cost Management query → billed PreTaxCost per UsageDate (yyyymmdd) for
  *  ServiceName 'Cognitive Services' (all Cognitive Services in the scope — narrow the scope to the resource group that holds only
- *  Azure OpenAI if you also run Speech/Vision there). 401 → 'token expired — mint a new one (az account get-access-token)'. */
+ *  Azure OpenAI if you also run Speech/Vision there). Resource ids and the scope are validated BEFORE any call — both are concatenated into
+ *  the management.azure.com URL. Without a scope billed is [] (truthful empty). 401 → 'token expired — mint a new one (az account get-access-token)'. */
 async function fetchAzureOpenAI(token, fields, opts = {}) {
   const days = Math.min(Math.max(1, opts.days || 90), 90);   // Azure Monitor keeps 93 days of platform metrics
   const resources = String(fields.resources || '').split(/[\r\n,]+/).map(s => s.trim()).filter(Boolean);
   if (!resources.length) throw new Error('Enter at least one Cognitive Services resource id (Azure portal → the Azure OpenAI resource → Properties → Resource ID)');
-  for (const r of resources) if (!/^\/subscriptions\/[^/]+\/resourceGroups\/[^/]+\/providers\/Microsoft\.CognitiveServices\/accounts\/[^/]+$/i.test(r)) throw new Error('Not a Cognitive Services resource id: ' + r.slice(0, 60));
+  for (const r of resources) if (!/^\/subscriptions\/[^/?#\\]+\/resourceGroups\/[^/?#\\]+\/providers\/Microsoft\.CognitiveServices\/accounts\/[^/?#\\]+$/i.test(r)) throw new Error('Not a Cognitive Services resource id: ' + r.slice(0, 60));   // SECURITY: concatenated into the management.azure.com URL — no query/fragment/backslash bytes
   const scope = String(fields.scope || '').trim().replace(/\/+$/, '');
+  if (scope && !/^\/subscriptions\/[^/?#\\]+(\/resourceGroups\/[^/?#\\]+)?$/i.test(scope)) throw new Error('Cost scope must be /subscriptions/<id> or /subscriptions/<id>/resourceGroups/<rg>');   // SECURITY: the scope is concatenated into the management.azure.com URL — a host suffix ('.evil.example'), userinfo ('@…'), a deeper path or a query would send the bearer token elsewhere; rejected before any network call
   const auth = { expired: 'token expired — mint a new one (az account get-access-token)', denied: 'HTTP 403 — this identity lacks Monitoring Reader / Cost Management Reader on that resource or scope' };
   const headers = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
   const iso = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
-  const endMs = Date.now(), startMs = endMs - days * 864e5;
-  // per (day, model): the older metric pair and the newer pair are kept apart, merged below (key = JSON of [day, model] — no separator bytes)
+  const now = new Date(), endMs = now.getTime(), startMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - days * 864e5;   // start on a UTC midnight: Monitor anchors P1D buckets to the timespan START, so a start at the sync time-of-day would stamp every bucket with that hour (and the row with the previous UTC date)
+  // per (resource, day, model): the older metric pair and the newer pair are kept apart PER RESOURCE, merged below (key = JSON of [resourceId, day, model] — no separator bytes); keyed by (day, model) alone, one resource's InputTokens would drop another resource's ProcessedPromptTokens for the same model-day
   const older = new Map(), newer = new Map();
   const bump = (map, key, field, v) => { let b = map.get(key); if (!b) { b = { in: null, out: null }; map.set(key, b); } b[field] = (b[field] || 0) + v; };
   const FIELD = { processedprompttokens: ['in', older], generatedtokens: ['out', older], inputtokens: ['in', newer], outputtokens: ['out', newer] };
@@ -3444,21 +3447,21 @@ async function fetchAzureOpenAI(token, fields, opts = {}) {
         for (const p of ts.data || []) {
           if (!p || typeof p.total !== 'number' || !(p.total > 0)) continue;   // Azure omits `total` when there is no data for that day
           const d = dayKeyUTC(p.timeStamp); if (!d) continue;
-          bump(spec[1], JSON.stringify([d, model]), spec[0], finTok(p.total));
+          bump(spec[1], JSON.stringify([rid, d, model]), spec[0], finTok(p.total));
         }
       }
     }
   }
   const agg = makeAgg();
   for (const key of new Set([...older.keys(), ...newer.keys()])) {
-    const [d, model] = JSON.parse(key);
+    const [, d, model] = JSON.parse(key);   // the resource id only keys the dedupe — rows sum across resources per (day, model)
     const o = older.get(key) || {}, n = newer.get(key) || {};
     const tin = n.in != null ? n.in : (o.in || 0), tout = n.out != null ? n.out : (o.out || 0);   // newer metric wins per field when it has data
     if (!tin && !tout) continue;
     agg.add(d, 'Azure OpenAI', model, { in: tin, out: tout, msgs: 0 });
   }
   const rows = agg.rows();
-  let billed;
+  let billed = [];   // [] = truthful empty when no scope is configured → connectKey stores it (a previous scope's envelope must not stay "fresh" behind "no cost scope")
   if (scope) {
     const body = { type: 'ActualCost', timeframe: 'Custom', timePeriod: { from: dayKeyUTC(startMs) + 'T00:00:00Z', to: dayKeyUTC(endMs) + 'T23:59:59Z' },
       dataset: { granularity: 'Daily', aggregation: { totalCost: { name: 'PreTaxCost', function: 'Sum' } },
@@ -3483,8 +3486,8 @@ async function fetchAzureOpenAI(token, fields, opts = {}) {
   }
   const nModels = new Set(rows.map(r => r.model)).size;
   return { label: `${resources.length} resource${resources.length === 1 ? '' : 's'}`,
-    detail: `${rows.length} usage rows · ${nModels} model${nModels === 1 ? '' : 's'} · last ${days} days` + (billed ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from Cost Management` : ' · no cost scope — add one for billed dollars'),
-    rows, ...(billed ? { billed } : {}), meta: { days, resources: resources.length } };
+    detail: `${rows.length} usage rows · ${nModels} model${nModels === 1 ? '' : 's'} · last ${days} days` + (scope ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from Cost Management` : ' · no cost scope — add one for billed dollars'),
+    rows, billed, meta: { days, resources: resources.length } };
 }
 
 /** Google Vertex AI — cloud-token fetcher. token: OAuth access token (gcloud auth print-access-token), fields: { project, billingTable? },
@@ -3493,7 +3496,7 @@ async function fetchAzureOpenAI(token, fields, opts = {}) {
  *  exact tokens per publisher model. Monitoring anchors alignment windows to interval.endTime (= the sync time), so each point is the 24 h
  *  ending then, attributed to the UTC date of (window end − 1 s). Request counts are not pulled → msgs 0. (2) when billingTable is given:
  *  BigQuery jobs.query against the Cloud Billing export (service.description 'Vertex AI') → billed per usage day; there is no Cloud Billing
- *  REST endpoint for incurred cost, the export is the only path. 401 → 'token expired — mint a new one (gcloud auth print-access-token)';
+ *  REST endpoint for incurred cost, the export is the only path; without a table billed is [] (truthful empty). 401 → 'token expired — mint a new one (gcloud auth print-access-token)';
  *  403 → token rejected (expired or missing roles). API keys are not accepted by either API. */
 async function fetchVertexAI(token, fields, opts = {}) {
   const days = Math.max(1, opts.days || 90);
@@ -3535,7 +3538,7 @@ async function fetchVertexAI(token, fields, opts = {}) {
     pageToken = (j && j.nextPageToken) || null;
   } while (pageToken && ++pages < 50);
   const rows = agg.rows();
-  let billed;
+  let billed = [];   // [] = truthful empty when no billing table is configured → connectKey stores it (a previous table's envelope must not stay "fresh" behind "no billing table")
   if (table) {
     const body = { query: "SELECT DATE(usage_start_time) d, SUM(cost) c FROM `" + table + "` WHERE service.description = 'Vertex AI' AND usage_start_time >= TIMESTAMP('" + dayKeyUTC(startMs) + "') GROUP BY d ORDER BY d", useLegacySql: false, timeoutMs: 30000, maxResults: 1000 };
     const j = await cloudJSON(`https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(project)}/queries`, { method: 'POST', headers, body: JSON.stringify(body) }, auth);
@@ -3545,8 +3548,8 @@ async function fetchVertexAI(token, fields, opts = {}) {
   }
   const nModels = new Set(rows.map(r => r.model)).size;
   return { label: project,
-    detail: `${rows.length} usage rows · ${nModels} model${nModels === 1 ? '' : 's'} · last ${days} days` + (billed ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from the billing export` : ' · no billing table — add the BigQuery export table for billed dollars'),
-    rows, ...(billed ? { billed } : {}), meta: { days, project } };
+    detail: `${rows.length} usage rows · ${nModels} model${nModels === 1 ? '' : 's'} · last ${days} days` + (table ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from the billing export` : ' · no billing table — add the BigQuery export table for billed dollars'),
+    rows, billed, meta: { days, project } };
 }
 
 /* ---------- AWS Signature V4 with WebCrypto (used by the Bedrock cloud-token fetcher; no SDK) ---------- */
@@ -5449,7 +5452,8 @@ const App = {
   /** One code path for every key-bearing Wave-2 card: reads '<id>-key' (+ extra `fields` '<id>-f-<field>'), honors the Remember opt-in
    *  (never for sessionOnly), calls globalThis[c.fetch](key, fields, { days: 90 }) → { label, detail, rows?, billed?, meta? } and stores
    *  rows → Store.setSource(c.id), billed → Store.setBilled(c.id) (undefined = fetcher has no billed path, envelope untouched · null = billed fetch
-   *  failed → stale envelope · array = fresh, [] = truthful empty), then the connector entry. Own gen slot
+   *  failed → stale envelope · array = fresh, [] = truthful empty — a fetcher WITH a billed path returns [] when it is not configured now), then the
+   *  connector entry; extra field values persist (LS 'field:<id>:<field>') only after the fetcher accepted them. Own gen slot
    *  this._gen[c.id]: a superseded call (newer connect, disconnect, clear-data) commits nothing and clears only its own placeholder —
    *  the fetchGemini rule (status.dataset.gen). */
   async connectKey(c) {
@@ -5463,11 +5467,6 @@ const App = {
     const rem = $('remember-' + c.id);
     const remember = !c.sessionOnly && !!(rem && rem.checked);
     if (remember) LS.set(c.keyLS, key);
-    for (const f of c.fields || []) {
-      const lsKey = 'field:' + c.id + ':' + f.id;
-      if (fieldIsSecret(f)) { if (remember && fields[f.id]) LS.set(lsKey, fields[f.id]); }          // secrets follow the key's Remember rule; sessionOnly never persists them
-      else if (fields[f.id]) LS.set(lsKey, fields[f.id]); else LS.del(lsKey);                        // non-secret values (region, subscription id, …) persist for convenience
-    }
     status.textContent = 'Validating…'; status.dataset.gen = String(gen);
     try {
       const fn = globalThis[c.fetch];
@@ -5476,6 +5475,11 @@ const App = {
       if (gen !== this._gen[c.id]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
       if (Array.isArray(res.rows)) Store.setSource(c.id, res.rows, res.meta || {});
       if (res.billed !== undefined) Store.setBilled(c.id, res.billed);                               // contract: undefined = no billed path (untouched) · null = billed fetch failed → Store.setBilled(null) marks the stored envelope stale · array = fresh ([] = truthful empty)
+      for (const f of c.fields || []) {   // field values persist only once the fetcher accepted them — a rejected value (bad cost scope / resource id) is never remembered, so refreshAll cannot replay it after a reload
+        const lsKey = 'field:' + c.id + ':' + f.id;
+        if (fieldIsSecret(f)) { if (remember && fields[f.id]) LS.set(lsKey, fields[f.id]); }          // secrets follow the key's Remember rule; sessionOnly never persists them
+        else if (fields[f.id]) LS.set(lsKey, fields[f.id]); else LS.del(lsKey);                        // non-secret values (region, subscription id, …) persist for convenience; a blanked field forgets its stored value
+      }
       Store.setConnector(c.id, { label: res.label || ((c.keyLabel || 'key') + ' · last 4: ' + key.slice(-4)), lastSync: Date.now(), err: null });
       status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));

@@ -29,8 +29,8 @@ export async function run({ browser, ok }) {
   const { page } = await openDashboard(browser);
   try {
     // ---- T10: cloud-token plumbing + Azure OpenAI (Monitor metrics + Cost Management) ----
-    const azMetrics = read('wave2', 'azure', 'metrics.json'), azCost = read('wave2', 'azure', 'cost.json');
-    const az = await page.evaluate(async (metricsText, costText) => {
+    const azMetrics = read('wave2', 'azure', 'metrics.json'), azEast = read('wave2', 'azure', 'metrics-east.json'), azCost = read('wave2', 'azure', 'cost.json');
+    const az = await page.evaluate(async (metricsText, eastText, costText) => {
       const c = connectorById('azure-openai');
       if (!c || typeof App.connectKey !== 'function' || typeof fetchAzureOpenAI !== 'function' || typeof cloudJSON !== 'function') return { missing: true };
       Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
@@ -42,25 +42,32 @@ export async function run({ browser, ok }) {
         reg: { kind: c.kind, cat: c.category, so: c.sessionOnly === true, q: c.quality, fetch: c.fetch, platform: c.platform, srcIds: c.srcIds, statusEl: c.statusEl, fields: (c.fields || []).map(f => f.id) } };
       const calls = [];
       const origFetch = window.fetch;
-      window.fetch = async (url, init = {}) => {
+      const stub = async (url, init = {}) => {   // west = the two-generation resource, east = the legacy-only resource (metrics-east.json)
         const u = String(url); const h = {}; for (const [k, v] of Object.entries(init.headers || {})) h[k.toLowerCase()] = String(v);
         calls.push({ url: u, method: init.method || 'GET', headers: h, body: init.body || null });
-        if (u.includes('/providers/microsoft.insights/metrics')) return new Response(u.includes('/accounts/aoai-west/') ? metricsText : JSON.stringify({ value: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+        if (u.includes('/providers/microsoft.insights/metrics')) return new Response(u.includes('/accounts/aoai-west/') ? metricsText : u.includes('/accounts/aoai-east/') ? eastText : JSON.stringify({ value: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
         if (u.includes('/providers/Microsoft.CostManagement/query')) return new Response(costText, { status: 200, headers: { 'content-type': 'application/json' } });
         return new Response(JSON.stringify({ error: { code: 'NotFound', message: 'unexpected ' + u } }), { status: 404, headers: { 'content-type': 'application/json' } });
       };
+      window.fetch = stub;
+      // the Monitor timespan must start on a UTC midnight (today 00:00Z − 90 d) so P1D buckets are calendar UTC days; computed before AND after the call in case midnight rolls over meanwhile
+      const midnightStart = (t) => { const n = new Date(t); return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()) - 90 * 864e5).toISOString().replace(/\.\d{3}Z$/, 'Z'); };
+      const TWO_RES = '/subscriptions/s1/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/aoai-west\n\n/subscriptions/s1/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/aoai-east\n';
       let out;
       try {
         keyEl.value = 'eyJ-test-token-azure';
-        resEl.value = '/subscriptions/s1/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/aoai-west\n\n/subscriptions/s1/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/aoai-east\n';
+        resEl.value = TWO_RES;
         scopeEl.value = '/subscriptions/s1';
+        const t0 = Date.now();
         await App.connectKey(c);
+        const t1 = Date.now();
         const rows = (Store.sources['azure-openai'] || { rows: [] }).rows;
         const t = rows.reduce((a, r) => ({ in: a.in + r.in, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, out: 0, msgs: 0 });
         const st = Store.connectors['azure-openai'] || {};
         const happy = { ...t, n: rows.length, models: [...new Set(rows.map(r => r.model))].sort(), days: [...new Set(rows.map(r => r.d))].sort(), platforms: [...new Set(rows.map(r => r.platform))],
-          est: rows.some(r => r.est), billed: Store.billedRows('azure-openai'), status: Store.connectorStatus(c), label: st.label, err: st.err || null,
-          statusText: document.getElementById('azure-openai-status').textContent };
+          est: rows.some(r => r.est), byKey: rows.map(r => r.d + '|' + r.model + '|' + r.in + '|' + r.out).sort(),
+          billed: Store.billedRows('azure-openai'), billedStale: (Store.billed['azure-openai'] || {}).stale, status: Store.connectorStatus(c), label: st.label, err: st.err || null,
+          statusText: document.getElementById('azure-openai-status').textContent, tsStartWant: [midnightStart(t0), midnightStart(t1)], t0, t1 };
         const metricsCalls = calls.filter(x => x.url.includes('/microsoft.insights/metrics')).map(x => { const p = new URL(x.url); return { host: p.host, path: p.pathname, auth: x.headers.authorization, method: x.method, q: Object.fromEntries(p.searchParams.entries()) }; });
         const costCalls = calls.filter(x => x.url.includes('/Microsoft.CostManagement/query')).map(x => { const p = new URL(x.url); return { host: p.host, path: p.pathname, auth: x.headers.authorization, method: x.method, ct: x.headers['content-type'], q: Object.fromEntries(p.searchParams.entries()), body: JSON.parse(x.body) }; });
         // nothing secret in storage: no key entry, and the token string appears in NO aiusage:* value (non-secret fields DO persist — resource ids / scope are not secrets)
@@ -75,7 +82,32 @@ export async function run({ browser, ok }) {
         resEl.value = '   ';
         await App.connectKey(c);
         const noRes = { err: (Store.connectors['azure-openai'] || {}).err || null, calls: n0 };
-        out = { ui, happy, metricsCalls, costCalls, storage, expired, noRes };
+        // SECURITY: the cost scope is concatenated into the management.azure.com URL — anything but /subscriptions/<id>[/resourceGroups/<rg>]
+        // (a host suffix, a userinfo '@', a deeper path, a query/fragment) must be rejected BEFORE any network call (the bearer token would
+        // otherwise travel to management.azure.com.evil.example) and must never be persisted (refreshAll would replay it after a reload)
+        resEl.value = TWO_RES;
+        const badScopes = ['.evil.example', '@evil.example/subscriptions/s1', '/subscriptions/s1/resourceGroups/rg/providers/Microsoft.CostManagement', '/subscriptions/s1?api-version=2019-11-01', '/subscriptions/s1#x', 'subscriptions/s1', '/subscriptions/s1\\..\\..'];
+        const badScope = [];
+        for (const s of badScopes) {
+          let n = 0; window.fetch = async () => { n++; return new Response('{}', { status: 200 }); };
+          scopeEl.value = s;
+          await App.connectKey(c);
+          badScope.push({ s, calls: n, err: (Store.connectors['azure-openai'] || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('azure-openai-status').textContent, scopeLS: LS.get('field:azure-openai:scope', null) });
+        }
+        // a resource id carrying a query byte is not a resource id either (the strict form is /subscriptions/…/providers/Microsoft.CognitiveServices/accounts/<name>)
+        let nBadRes = 0; window.fetch = async () => { nBadRes++; return new Response('{}', { status: 200 }); };
+        scopeEl.value = '/subscriptions/s1'; resEl.value = '/subscriptions/s1?x=1/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/aoai-west';
+        await App.connectKey(c);
+        const badRes = { calls: nBadRes, err: (Store.connectors['azure-openai'] || {}).err || null, resLS: LS.get('field:azure-openai:resources', null) };
+        // cost scope REMOVED → the fetcher has a billed path that is not configured now → billed: [] (truthful empty) replaces the previous
+        // scope's envelope (never left "fresh" behind a status line that says "no cost scope"); no Cost Management call
+        window.fetch = stub; calls.length = 0;
+        resEl.value = TWO_RES; scopeEl.value = '';
+        await App.connectKey(c);
+        const noScope = { billed: Store.billedRows('azure-openai').length, stale: (Store.billed['azure-openai'] || {}).stale, rows: (Store.sources['azure-openai'] || { rows: [] }).rows.length,
+          err: (Store.connectors['azure-openai'] || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('azure-openai-status').textContent,
+          costCalls: calls.filter(x => x.url.includes('/Microsoft.CostManagement/query')).length, scopeLS: LS.get('field:azure-openai:scope', null) };
+        out = { ui, happy, metricsCalls, costCalls, storage, expired, noRes, badScope, badRes, noScope };
       } finally {
         window.fetch = origFetch;
         keyEl.value = ''; resEl.value = ''; scopeEl.value = '';
@@ -83,17 +115,21 @@ export async function run({ browser, ok }) {
         Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist(); App._render();
       }
       return out;
-    }, azMetrics, azCost);
+    }, azMetrics, azEast, azCost);
     ok('azure: registry entry (cloud-token · sessionOnly · cloud group · exact · fetchAzureOpenAI · srcIds [azure-openai]) + card UI: one session-only note, keyHint placeholder, password input, no Remember box, textarea for resource ids',
       !az.missing && az.ui.card && az.ui.note.length === 1 && /kept in this tab only — never saved/.test(az.ui.note[0])
       && az.ui.placeholder === 'az account get-access-token --resource https://management.azure.com --query accessToken -o tsv' && az.ui.pwd === 'password' && az.ui.noRemember
       && az.ui.textarea === 'TEXTAREA' && az.ui.scopeInput === 'INPUT'
       && az.ui.reg.kind === 'cloud-token' && az.ui.reg.cat === 'cloud' && az.ui.reg.so && az.ui.reg.q === 'exact' && az.ui.reg.fetch === 'fetchAzureOpenAI' && az.ui.reg.platform === 'Azure OpenAI'
       && az.ui.reg.srcIds.join() === 'azure-openai' && az.ui.reg.statusEl === 'azure-openai-status' && az.ui.reg.fields.join() === 'resources,scope', JSON.stringify(az.ui || az));
-    ok('azure: exact rows per model × UTC day — InputTokens/OutputTokens win over Processed/Generated for the same model-day, a point without total is no data, no metadata → azure-openai (in=1780 out=357, 4 rows, 3 models); billed per day from Cost Management (12.34, 1.66); connected with label "2 resources"',
-      !az.missing && az.happy.in === 1780 && az.happy.out === 357 && az.happy.msgs === 0 && az.happy.n === 4 && az.happy.models.join() === 'azure-openai,gpt-4.1-mini,gpt-4o'
+    // Expected (fixture comment in gen.mjs): west gpt-4o 08-10 1000/200 + east 150/0 (east's InputTokens 150 beats ITS OWN legacy 999) = 1150/200 ·
+    // west gpt-4o 08-11 480/90 (newer wins over west's legacy 500/100) + east legacy 250/40 = 730/130 · gpt-4.1-mini 08-10 300/60 · azure-openai 08-12 0/7
+    // → in = 1150+730+300+0 = 2180 · out = 200+130+60+7 = 397. A dedupe keyed by (day, model) across resources would read 930/357 instead.
+    ok('azure: exact rows per model × UTC day — InputTokens/OutputTokens win over Processed/Generated for the same RESOURCE + model-day only (legacy tokens from a second resource are summed, not dropped: in=2180 out=397, 4 rows, 3 models), a point without total is no data, no metadata → azure-openai; billed per day from Cost Management (12.34, 1.66, stale:false); connected with label "2 resources"',
+      !az.missing && az.happy.in === 2180 && az.happy.out === 397 && az.happy.msgs === 0 && az.happy.n === 4 && az.happy.models.join() === 'azure-openai,gpt-4.1-mini,gpt-4o'
+      && az.happy.byKey.join(';') === '2026-08-10|gpt-4.1-mini|300|60;2026-08-10|gpt-4o|1150|200;2026-08-11|gpt-4o|730|130;2026-08-12|azure-openai|0|7'
       && az.happy.days.join() === '2026-08-10,2026-08-11,2026-08-12' && az.happy.platforms.join() === 'Azure OpenAI' && !az.happy.est
-      && az.happy.billed.length === 2 && az.happy.billed[0].d === '2026-08-10' && Math.abs(az.happy.billed[0].amount - 12.34) < 1e-9 && az.happy.billed[1].d === '2026-08-11' && Math.abs(az.happy.billed[1].amount - 1.66) < 1e-9
+      && az.happy.billed.length === 2 && az.happy.billed[0].d === '2026-08-10' && Math.abs(az.happy.billed[0].amount - 12.34) < 1e-9 && az.happy.billed[1].d === '2026-08-11' && Math.abs(az.happy.billed[1].amount - 1.66) < 1e-9 && az.happy.billedStale === false
       && az.happy.status === 'ok' && az.happy.err === null && /^2 resources$/.test(az.happy.label || '') && /Connected/.test(az.happy.statusText) && /billed 2 days/.test(az.happy.statusText), JSON.stringify(az.happy));
     ok('azure: one Monitor GET per resource with Bearer auth + the documented query (api-version 2024-02-01, the 4 metric names, P1D, Total, ModelName filter, ISO timespan); one Cost Management POST to the scope (2025-03-01, ActualCost / Custom / Daily / PreTaxCost Sum / ServiceName In [Cognitive Services])',
       !az.missing && az.metricsCalls.length === 2 && az.metricsCalls.every(m => m.method === 'GET' && m.host === 'management.azure.com' && m.auth === 'Bearer eyJ-test-token-azure'
@@ -110,6 +146,22 @@ export async function run({ browser, ok }) {
       !az.missing && az.storage.keyEntry === null && !az.storage.tokenLeaked && az.storage.scopeField === '/subscriptions/s1'
       && az.expired.err === 'token expired — mint a new one (az account get-access-token)' && az.expired.status === 'warn' && /token expired/.test(az.expired.statusText)
       && /resource id/i.test(az.noRes.err || '') && az.noRes.calls === 0, JSON.stringify({ storage: az.storage, expired: az.expired, noRes: az.noRes }));
+    // Monitor buckets are anchored to the timespan START: a start at the sync time-of-day would stamp every P1D bucket with that hour and the
+    // row with the previous UTC date; the page must start at today's UTC midnight − 90 d (the fixture's timeStamps are T00:00:00Z on that
+    // premise) and the Cost Management timePeriod.from must be the same calendar day.
+    ok('azure: Monitor timespan starts at a UTC midnight (today 00:00Z − 90 d) and ends at the sync time; the Cost Management timePeriod.from is that same day',
+      !az.missing && az.metricsCalls.length === 2 && az.metricsCalls.every(m => { const [s, e] = String(m.q.timespan).split('/'); const eMs = Date.parse(e);
+        return /T00:00:00Z$/.test(s) && az.happy.tsStartWant.includes(s) && eMs >= az.happy.t0 - 1000 && eMs <= az.happy.t1 + 1000; })
+      && az.costCalls.length === 1 && az.happy.tsStartWant.some(s => s.slice(0, 10) + 'T00:00:00Z' === az.costCalls[0].body.timePeriod.from),
+      JSON.stringify({ timespans: az.metricsCalls.map(m => m.q.timespan), want: az.happy.tsStartWant, from: az.costCalls.length && az.costCalls[0].body.timePeriod.from }));
+    ok('azure SECURITY: a cost scope that is not /subscriptions/<id>[/resourceGroups/<rg>] (host suffix ".evil.example", "@evil.example/…", a deeper path, query, fragment, no leading slash, backslashes) is rejected with "Cost scope must be …" BEFORE any network call, warn state, and the last validated scope stays persisted (the bad value never reaches LS); a resource id with a query byte is rejected the same way',
+      // connector err = the message's 80-char slice (existing hub contract); the status line carries the full message
+      !az.missing && az.badScope.length === 7 && az.badScope.every(b => b.calls === 0 && /^Cost scope must be \/subscriptions\/<id> or \/subscriptions\/<id>\/resourceGroups\/<rg/.test(b.err || '') && b.status === 'warn'
+        && /^Validation failed: Cost scope must be \/subscriptions\/<id> or \/subscriptions\/<id>\/resourceGroups\/<rg>$/.test(b.statusText) && b.scopeLS === '/subscriptions/s1')
+      && az.badRes.calls === 0 && /resource id/i.test(az.badRes.err || '') && az.badRes.resLS !== null && !/\?/.test(az.badRes.resLS), JSON.stringify({ badScope: az.badScope, badRes: az.badRes }));
+    ok('azure: cost scope removed → billed: [] (truthful empty) replaces the previous envelope (0 billed rows, stale:false, no Cost Management call), tokens still land (4 rows), status ok + "no cost scope", the scope LS entry is gone',
+      !az.missing && az.noScope.billed === 0 && az.noScope.stale === false && az.noScope.costCalls === 0 && az.noScope.rows === 4 && az.noScope.err === null && az.noScope.status === 'ok'
+      && /no cost scope/.test(az.noScope.statusText) && az.noScope.scopeLS === null, JSON.stringify(az.noScope));
     // ---- T11: Google Vertex AI (Monitoring token_count, paginated + BigQuery billing export) ----
     const vxP1 = read('wave2', 'vertex', 'timeseries-1.json'), vxP2 = read('wave2', 'vertex', 'timeseries-2.json'), vxBq = read('wave2', 'vertex', 'bigquery.json');
     const vx = await page.evaluate(async (p1, p2, bqText) => {
@@ -155,7 +207,9 @@ export async function run({ browser, ok }) {
         window.fetch = async (url) => { const u = String(url); if (u.includes('bigquery')) throw new Error('must not query BigQuery without a table'); const p = new URL(u); return new Response(p.searchParams.get('pageToken') === 'p2' ? p2 : p1, { status: 200, headers: { 'content-type': 'application/json' } }); };
         tblEl.value = '';
         await App.connectKey(c);
-        const noTable = { err: (Store.connectors.vertex || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('vertex-status').textContent, billed: Store.billedRows('vertex').length };
+        // billing table REMOVED after a run that billed 2 days → billed: [] (truthful empty) replaces that envelope; the table's LS entry goes away
+        const noTable = { err: (Store.connectors.vertex || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('vertex-status').textContent, billed: Store.billedRows('vertex').length,
+          stale: (Store.billed.vertex || {}).stale, tableLS: LS.get('field:vertex:billingTable', null), rows: (Store.sources.vertex || { rows: [] }).rows.length };
         out = { ui, happy, mon, bq, storage, expired, denied, noTable };
       } finally {
         window.fetch = origFetch;
@@ -182,10 +236,11 @@ export async function run({ browser, ok }) {
       && vx.bq.length === 1 && vx.bq[0].method === 'POST' && vx.bq[0].auth === 'Bearer ya29.test-token-vertex' && /application\/json/.test(vx.bq[0].ct || '') && vx.bq[0].body.useLegacySql === false
       && /^SELECT DATE\(usage_start_time\) d, SUM\(cost\) c FROM `proj-a\.billing\.gcp_billing_export_v1_ABC` WHERE service\.description = 'Vertex AI' AND usage_start_time >= TIMESTAMP\('\d{4}-\d{2}-\d{2}'\) GROUP BY d ORDER BY d$/.test(vx.bq[0].body.query),
       JSON.stringify({ mon: vx.mon, bq: vx.bq }));
-    ok('vertex: token never persisted (no key:vertex; token in no aiusage:* value; project field persists); 401 → "token expired — mint a new one (gcloud auth print-access-token)"; 403 → token rejected; no billing table → tokens-only, no BigQuery call, status says so',
+    ok('vertex: token never persisted (no key:vertex; token in no aiusage:* value; project field persists); 401 → "token expired — mint a new one (gcloud auth print-access-token)"; 403 → token rejected; billing table removed → tokens-only (4 rows), no BigQuery call, status says so, and billed: [] replaces the earlier 2-day envelope (0 rows, stale:false, table LS gone)',
       !vx.missing && vx.storage.keyEntry === null && !vx.storage.tokenLeaked && vx.storage.project === 'proj-a'
       && vx.expired.err === 'token expired — mint a new one (gcloud auth print-access-token)' && vx.expired.status === 'warn' && /token rejected \(403\)/.test(vx.denied.err || '') && vx.denied.status === 'warn'
-      && vx.noTable.err === null && vx.noTable.status === 'ok' && /no billing table/.test(vx.noTable.statusText) && vx.noTable.billed === 2, JSON.stringify({ storage: vx.storage, expired: vx.expired, denied: vx.denied, noTable: vx.noTable }));
+      && vx.noTable.err === null && vx.noTable.status === 'ok' && /no billing table/.test(vx.noTable.statusText) && vx.noTable.rows === 4
+      && vx.noTable.billed === 0 && vx.noTable.stale === false && vx.noTable.tableLS === null, JSON.stringify({ storage: vx.storage, expired: vx.expired, denied: vx.denied, noTable: vx.noTable }));
 
     // ---- T12a: sigv4Sign — page-side WebCrypto signature must equal the node:crypto reference (and the pinned constant) for a fixed input ----
     const vec = { method: 'POST', url: 'https://monitoring.us-east-1.amazonaws.com/', headers: { 'content-type': 'application/x-amz-json-1.0', 'x-amz-target': 'GraniteServiceVersion20100801.ListMetrics' },

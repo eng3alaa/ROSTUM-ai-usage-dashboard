@@ -526,14 +526,16 @@ export async function generate() {
     ceBucket(2, [{ amount: '184.50', currency: 'USD', model: 'claude-sonnet-4-5', cost_type: 'tokens', token_type: 'uncached_input_tokens' }]),
   ], has_more: false, next_page: null }, null, 1));
   // ---- Plan 4b wave-2 cloud fixtures (JSON bodies the stubbed fetch returns) ----
-  // T10 — Azure Monitor metrics (one resource). Two metric generations overlap for gpt-4o on 08-11: ProcessedPromptTokens 500 /
+  // T10 — Azure Monitor metrics, resource aoai-west. Two metric generations overlap for gpt-4o on 08-11: ProcessedPromptTokens 500 /
   //   GeneratedTokens 100 AND InputTokens 480 / OutputTokens 90 → the newer pair wins for that model-day (no double count).
   //   gpt-4.1-mini 08-11 has a data point WITHOUT `total` (Azure's "no data") → no row. A timeseries without metadata → model 'azure-openai'.
-  //   Expected rows: gpt-4o 08-10 in 1000 out 200 · gpt-4o 08-11 in 480 out 90 · gpt-4.1-mini 08-10 in 300 out 60 · azure-openai 08-12 in 0 out 7
-  //   → in = 1000+480+300 = 1780 · out = 200+90+60+7 = 357 · 4 rows · 3 models · days 08-10/11/12
+  //   west rows: gpt-4o 08-10 in 1000 out 200 · gpt-4o 08-11 in 480 out 90 · gpt-4.1-mini 08-10 in 300 out 60 · azure-openai 08-12 in 0 out 7
+  //   Wire format: Monitor echoes the request timespan; the page asks for <UTC midnight − 90 d>/<sync time> (sync 2026-08-12T09:30Z → start
+  //   2026-05-14T00:00Z), so with interval P1D every bucket timeStamp is a calendar UTC day (T00:00:00Z) — a start at the sync time-of-day
+  //   would shift every bucket to that hour instead.
   const azTs = (model, data) => ({ metadatavalues: model ? [{ name: { value: 'modelname', localizedValue: 'modelname' }, value: model }] : [], data });
-  const azMetric = (name, timeseries) => ({ id: '/subscriptions/s1/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/aoai-west/providers/Microsoft.Insights/metrics/' + name, type: 'Microsoft.Insights/metrics', name: { value: name, localizedValue: name }, displayDescription: '', unit: 'Count', timeseries, errorCode: 'Success' });
-  w('wave2/azure/metrics.json', JSON.stringify({ cost: 0, timespan: '2026-05-12T12:00:00Z/2026-08-10T12:00:00Z', interval: 'P1D', value: [
+  const azMetric = (name, timeseries, acct = 'aoai-west') => ({ id: '/subscriptions/s1/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/' + acct + '/providers/Microsoft.Insights/metrics/' + name, type: 'Microsoft.Insights/metrics', name: { value: name, localizedValue: name }, displayDescription: '', unit: 'Count', timeseries, errorCode: 'Success' });
+  w('wave2/azure/metrics.json', JSON.stringify({ cost: 0, timespan: '2026-05-14T00:00:00Z/2026-08-12T09:30:00Z', interval: 'P1D', value: [
     azMetric('ProcessedPromptTokens', [
       azTs('gpt-4o', [{ timeStamp: '2026-08-10T00:00:00Z', total: 1000 }, { timeStamp: '2026-08-11T00:00:00Z', total: 500 }]),
       azTs('gpt-4.1-mini', [{ timeStamp: '2026-08-10T00:00:00Z', total: 300 }, { timeStamp: '2026-08-11T00:00:00Z' }]) ]),
@@ -543,6 +545,19 @@ export async function generate() {
     azMetric('InputTokens', [ azTs('gpt-4o', [{ timeStamp: '2026-08-10T00:00:00Z' }, { timeStamp: '2026-08-11T00:00:00Z', total: 480 }]) ]),
     azMetric('OutputTokens', [ azTs('gpt-4o', [{ timeStamp: '2026-08-11T00:00:00Z', total: 90 }]), azTs(null, [{ timeStamp: '2026-08-12T00:00:00Z', total: 7 }]) ]),
   ], namespace: 'Microsoft.CognitiveServices/accounts', resourceregion: 'westus' }, null, 1));
+  // T10 — a SECOND resource, aoai-east, on an older deployment: legacy ProcessedPromptTokens/GeneratedTokens, plus ONE InputTokens point
+  //   (08-10: 150) that overrides its OWN legacy 999 for that day (per-resource dedupe). Its gpt-4o days overlap aoai-west's, so the
+  //   old/new dedupe must be keyed by (resource, day, model): keyed by (day, model) alone, west's InputTokens 480 on 08-11 would drop
+  //   east's legacy 250/40, and east's InputTokens 150 on 08-10 would drop west's legacy 1000.
+  //   east rows: gpt-4o 08-10 in 150 (newer wins over legacy 999) out 0 · gpt-4o 08-11 in 250 out 40
+  //   Expected with both resources: gpt-4o 08-10 in 1000+150 = 1150 out 200+0 = 200 · gpt-4o 08-11 in 480+250 = 730 out 90+40 = 130 ·
+  //   gpt-4.1-mini 08-10 300/60 · azure-openai 08-12 0/7 → in = 1150+730+300+0 = 2180 · out = 200+130+60+7 = 397 · 4 rows · 3 models · days 08-10/11/12
+  w('wave2/azure/metrics-east.json', JSON.stringify({ cost: 0, timespan: '2026-05-14T00:00:00Z/2026-08-12T09:30:00Z', interval: 'P1D', value: [
+    azMetric('ProcessedPromptTokens', [ azTs('gpt-4o', [{ timeStamp: '2026-08-10T00:00:00Z', total: 999 }, { timeStamp: '2026-08-11T00:00:00Z', total: 250 }]) ], 'aoai-east'),
+    azMetric('GeneratedTokens', [ azTs('gpt-4o', [{ timeStamp: '2026-08-10T00:00:00Z' }, { timeStamp: '2026-08-11T00:00:00Z', total: 40 }]) ], 'aoai-east'),
+    azMetric('InputTokens', [ azTs('gpt-4o', [{ timeStamp: '2026-08-10T00:00:00Z', total: 150 }]) ], 'aoai-east'),
+    azMetric('OutputTokens', [], 'aoai-east'),
+  ], namespace: 'Microsoft.CognitiveServices/accounts', resourceregion: 'eastus' }, null, 1));
   // T10 — Cost Management query result (Daily, no grouping): UsageDate is a yyyymmdd NUMBER. Expected billed: 08-10 = 12.34 · 08-11 = 0.5 + 1.16 = 1.66
   w('wave2/azure/cost.json', JSON.stringify({ id: '/subscriptions/s1/providers/Microsoft.CostManagement/query/abc', name: 'abc', type: 'Microsoft.CostManagement/query',
     properties: { nextLink: null, columns: [{ name: 'PreTaxCost', type: 'Number' }, { name: 'UsageDate', type: 'Number' }, { name: 'Currency', type: 'String' }],
