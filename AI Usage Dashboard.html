@@ -1314,8 +1314,8 @@ const CONNECTORS = [
     baseUrl: 'http://localhost:8080', validate: 'validateLocalAI',
     corsHint: 'Something answered at {base} but this page could not read it — LocalAI\'s default CORS allows any origin (LOCALAI_CORS unset); if it runs with --cors=true, add this page\'s origin to --cors-allow-origins (file:// pages send Origin: null, so "*" is the practical value), restart LocalAI, then validate again. If LocalAI runs with --api-keys, GET /api/usage needs that key and this card sends none.',
     quality: 'exact',
-    qualityNote: 'Exact tokens and request counts from LocalAI\'s built-in usage history (GET /api/usage?period=all — LocalAI v4.4+, mid-2026: per-bucket prompt / completion tokens and request_count per model), refreshed into this card on every Validate, Sync and Refresh; no cost is reported. Without --auth that history is an in-memory ring buffer that a LocalAI restart empties — the dashboard keeps days older than the fresh payload from earlier syncs, but the restart day may undercount; start LocalAI with --auth for a durable SQLite store, and never with --disable-stats (the endpoint then answers 503 and this card says so). CORS is permissive by default (LOCALAI_CORS unset → any origin); with --cors=true add this page\'s origin to --cors-allow-origins. If --api-keys is set, GET /api/usage needs the key and this card sends none — validate against a keyless local instance or use LocalAI\'s own Usage page. LocalAI rows are priced $0 — they run on your hardware (gated on the LocalAI platform, not on model name); llama.cpp also defaults to port 8080, so an HTTP 404 here usually means another server owns that port.',
-    paths: ['server: http://localhost:8080 (LOCALAI_ADDRESS / --address)', 'history: GET /api/usage?period=all (in-memory unless --auth; 503 with --disable-stats)', 'also on the server: GET /metrics localai_tokens_total (not used by this card)'],
+    qualityNote: 'Exact tokens and request counts from LocalAI\'s built-in usage history (GET /api/usage — LocalAI v4.4+, mid-2026: per-bucket prompt / completion tokens and request_count per model); no cost is reported. Every Validate, Sync and Refresh reads period=week (the server\'s daily YYYY-MM-DD buckets for the last 7 days) and merges them into this card\'s stored days — later days are replaced, older days from earlier syncs are kept, and on the payload\'s first day each model keeps the larger of stored vs fresh — so daily history accumulates while you keep syncing (at least weekly); period=all is read only for the "history since …" totals, because its buckets are calendar months and a month\'s total would otherwise land on the 1st. Without --auth-enabled (LOCALAI_AUTH) that history is an in-memory ring buffer (50,000 records) that a LocalAI restart empties and that wraps under heavy use — the days this card already stored survive, but the restart day and the oldest day of a wrapped buffer may undercount; start LocalAI with --auth-enabled for a durable SQLite store, and never with --disable-stats (the endpoint then answers 503 and this card says so). CORS is permissive by default (LOCALAI_CORS unset → any origin); with --cors=true add this page\'s origin to --cors-allow-origins. If --api-keys is set, GET /api/usage needs the key and this card sends none — validate against a keyless local instance or use LocalAI\'s own Usage page. LocalAI rows are priced $0 — they run on your hardware (gated on the LocalAI platform, not on model name); llama.cpp also defaults to port 8080, so an HTTP 404 here usually means another server owns that port.',
+    paths: ['server: http://localhost:8080 (LOCALAI_ADDRESS / --address)', 'history: GET /api/usage?period=week — daily YYYY-MM-DD buckets, merged into the stored days on every sync (in-memory ring buffer unless --auth-enabled; 503 with --disable-stats)', 'label only: GET /api/usage?period=all totals (calendar-month buckets, never turned into day rows)', 'also on the server: GET /metrics localai_tokens_total (not used by this card)'],
     links: { get: 'https://localai.io/basics/getting_started/', docs: 'https://localai.io/docs/reference/cli-reference/' } },
   { id: 'vllm', platform: 'vLLM', name: 'vLLM', category: 'local', kind: 'local-server',
     statusEl: 'vllm-status', brand: '#2e6fe8', mark: 'vL', srcIds: ['vllm'],
@@ -3071,34 +3071,69 @@ async function validateOllama(base) {
   return { label: `${n} models installed`, detail: `${n} models installed · ${loaded} loaded now · no usage history on the server (usage-logger JSONL — exact — and the desktop app's db.sqlite — estimated — are read from the folder below)` };
 }
 
-/** LocalAI history: GET /api/usage?period=all → { usage: [{ bucket, model, prompt_tokens, completion_tokens, total_tokens, request_count }] }.
- *  Exact tokens + request counts per UTC day bucket. 503 = --disable-stats (the server answered → e.answered, not a CORS guess).
- *  Without --auth the server keeps an in-memory ring buffer that a restart empties: rows for days OLDER than the fresh payload are kept
- *  from earlier syncs (Store.sources.localai), days the payload covers are replaced (never doubled); an empty payload keeps everything. */
+/** LocalAI history: GET /api/usage?period=week → { usage: [{ bucket, model, prompt_tokens, completion_tokens, total_tokens, request_count }], totals, viewer }.
+ *  Buckets are the server's own labels with no zone attached — period=week/month 'YYYY-MM-DD' days, period=day 'YYYY-MM-DD HH:00', period=all
+ *  'YYYY-MM' calendar MONTHS (SQLite strftime / Postgres to_char / the in-memory store's Go time.Format, all on the server's clock) — so the
+ *  date part is read literally (never new Date(local string), which would shift a day by the browser's zone) and period=all is never turned
+ *  into rows (a month's total would land on the 1st): it is read best-effort for the "history since …" totals in the label/detail only.
+ *  Exact tokens + request counts per day. 503 = --disable-stats (the server answered → e.answered, not a CORS guess).
+ *  Merge with earlier syncs (Store.sources.localai) so daily history accumulates while the user keeps syncing: days OLDER than the payload's
+ *  first day are kept (the no-auth ring buffer forgets them on restart), days strictly AFTER it are replaced (never doubled), and on the first
+ *  day itself each model keeps the LARGER of stored vs fresh (a wrapped ring buffer reports a partial first day; a stored model missing from
+ *  the payload stays). An empty payload keeps everything. */
 async function validateLocalAI(base) {
-  const res = await fetch(base + '/api/usage?period=all', { cache: 'no-store' });
+  const res = await fetch(base + '/api/usage?period=week', { cache: 'no-store' });
   if (res.status === 503) { const e = new Error('LocalAI answered 503 on /api/usage: usage stats are disabled (--disable-stats) — restart LocalAI without that flag, then validate again.'); e.answered = true; throw e; }
   if (!res.ok) { const e = new Error(`HTTP ${res.status} on /api/usage — not a LocalAI v4.4+ server? (llama.cpp and other servers also default to port 8080)`); e.answered = true; throw e; }
   const j = await res.json();
   const list = Array.isArray(j && j.usage) ? j.usage : [];
-  const agg = makeAgg(); const models = new Set(); let tin = 0, tout = 0, minDay = null;
+  // epoch seconds/ms → UTC day; strings → their literal date part ('2026-08-10', '2026-08-10 01:00', '2026-08-10T00:00:00Z'); 'YYYY-MM' months and garbage → null
+  const bucketDay = (b) => { if (typeof b === 'number') return dayKeyUTC(b < 1e12 ? b * 1000 : b); const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(b == null ? '' : b)); return m ? m[1] : null; };
+  const agg = makeAgg(); const models = new Set(); const days = new Set(); let tin = 0, tout = 0, nb = 0, minDay = null;
   for (const u of list) {
     if (!u || typeof u !== 'object') continue;
-    const b = typeof u.bucket === 'number' && u.bucket < 1e12 ? u.bucket * 1000 : u.bucket;   // epoch seconds → ms; ISO strings pass through
-    const d = dayKeyUTC(b); if (!d) continue;                                                  // provider day buckets are UTC days
+    const d = bucketDay(u.bucket); if (!d) continue;
     const model = String(u.model || 'unknown');
     const t = { in: finTok(+u.prompt_tokens || 0), out: finTok(+u.completion_tokens || 0), msgs: finTok(+u.request_count || 0) };
-    agg.add(d, 'LocalAI', model, t); models.add(model); tin += t.in; tout += t.out;
+    agg.add(d, 'LocalAI', model, t); models.add(model); days.add(d); nb++; tin += t.in; tout += t.out;
     if (!minDay || d < minDay) minDay = d;
   }
   const existing = ((Store.sources.localai || {}).rows || []);
-  const kept = minDay ? existing.filter(r => r.d < minDay) : existing;
   const fresh = agg.rows();
-  const n = list.length, nm = models.size;
-  return { label: `history: ${n} bucket${n === 1 ? '' : 's'}`,
-    detail: `${n} usage bucket${n === 1 ? '' : 's'} · ${fmtInt(tin)} in / ${fmtInt(tout)} out tokens · ${nm} model${nm === 1 ? '' : 's'} · all-time history from /api/usage`
-      + (kept.length ? ` (+ ${kept.length} older row${kept.length === 1 ? '' : 's'} kept from earlier syncs)` : ''),
-    rows: kept.concat(fresh), meta: { buckets: n, period: 'all', msgs: fresh.reduce((a, r) => a + r.msgs, 0) } };
+  let rows = existing, kept = existing, firstKept = 0;
+  if (minDay) {
+    kept = existing.filter(r => r.d < minDay);
+    const size = (r) => (r.in || 0) + (r.out || 0) + (r.msgs || 0);
+    const freshFirst = new Map(fresh.filter(r => r.d === minDay).map(r => [r.model, r]));
+    const first = [];
+    for (const r of existing) {
+      if (r.d !== minDay) continue;
+      const f = freshFirst.get(r.model);
+      if (f && size(f) >= size(r)) continue;                     // the fresh count is complete (or equal): it replaces the stored row
+      first.push(r); firstKept++; freshFirst.delete(r.model);    // stored row is larger (ring buffer wrapped) or its model is gone from the payload
+    }
+    rows = kept.concat(first, [...freshFirst.values()], fresh.filter(r => r.d !== minDay));
+  }
+  // period=all: totals only — "history since <first month>"; its month buckets are never day rows, and a failure here is not a validate failure
+  let allOk = false, since = null, allTok = 0, allMsgs = 0;
+  try {
+    const r2 = await fetch(base + '/api/usage?period=all', { cache: 'no-store' });
+    if (r2.ok) {
+      const j2 = await r2.json(); allOk = true;
+      const months = (Array.isArray(j2 && j2.usage) ? j2.usage : []).map(u => (/^\d{4}-\d{2}/.exec(String(u && u.bucket != null ? u.bucket : '')) || [])[0]).filter(Boolean);
+      const tt = (j2 && j2.totals) || {};
+      since = months.length ? months.reduce((a, b) => (b < a ? b : a)) : null;
+      allTok = finTok(+tt.total_tokens || 0) || finTok(+tt.prompt_tokens || 0) + finTok(+tt.completion_tokens || 0);
+      allMsgs = finTok(+tt.request_count || 0);
+    }
+  } catch (e) { allOk = false; since = null; }
+  const nm = models.size, pl = (n) => (n === 1 ? '' : 's');
+  return { label: since ? `history since ${since}: ${fmtInt(allTok)} tokens` : `last 7 days: ${fmtInt(tin + tout)} tokens`,
+    detail: `${nb} daily bucket${pl(nb)} over the last 7 days (period=week) · ${fmtInt(tin)} in / ${fmtInt(tout)} out tokens · ${nm} model${pl(nm)}`
+      + (since ? ` · history since ${since}: ${fmtInt(allTok)} tokens / ${fmtInt(allMsgs)} request${pl(allMsgs)} (period=all totals; its month buckets are not turned into rows)` : allOk ? ' · period=all: no history yet' : ' · period=all totals unavailable')
+      + (kept.length ? ` · ${kept.length} older row${pl(kept.length)} kept from earlier syncs` : '')
+      + (firstKept ? ` · earliest day ${minDay}: ${firstKept} stored row${pl(firstKept)} kept over a smaller or missing fresh count (ring buffer wrapped?)` : ''),
+    rows, meta: { buckets: nb, period: 'week', days: days.size, msgs: fresh.reduce((a, r) => a + r.msgs, 0), since } };
 }
 
 /** Groq validate-only: GET /openai/v1/models with the key (api.groq.com allows browser origins). Groq has no usage or spend API —

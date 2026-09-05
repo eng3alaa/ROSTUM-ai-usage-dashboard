@@ -9,33 +9,51 @@ export async function run({ browser, ok }) {
   try {
     // ---- T4: LocalAI history through the connectServer rows extension ----
     // fetch is stubbed (not fetchJSON): validateLocalAI reads the HTTP status itself (503 = stats disabled) and probeServer uses fetch too.
-    const localaiText = read('wave2', 'localai-usage.json');
-    const la = await page.evaluate(async (text) => {
+    // The stub routes by URL: period=week → the server's daily 'YYYY-MM-DD' buckets (the rows); period=all → 'YYYY-MM' month buckets (label totals only).
+    const localaiText = read('wave2', 'localai-usage.json'), localaiAllText = read('wave2', 'localai-usage-all.json');
+    const la = await page.evaluate(async (weekText, allText) => {
       Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
       const c = connectorById('localai');
       const origFetch = window.fetch;
       const calls = [];
-      window.fetch = async (url, init) => { calls.push(String(url)); return new Response(text, { status: 200, headers: { 'content-type': 'application/json' } }); };
-      // earlier syncs: a day OLDER than the fresh payload (kept — LocalAI's ring buffer forgets it on restart) and a day the payload covers (replaced, never doubled)
+      const json = (text) => new Response(text, { status: 200, headers: { 'content-type': 'application/json' } });
+      window.fetch = async (url, init) => { const u = String(url); calls.push(u); return /period=week/.test(u) ? json(weekText) : /period=all/.test(u) ? json(allText) : new Response('{"error":"unexpected period"}', { status: 404 }); };
+      // earlier syncs (the fresh payload covers the last 7 days, first day 2026-08-10):
+      //   A 2026-08-01 llama    in 7     → OLDER than the payload → kept (the no-auth ring buffer forgets it on restart)
+      //   B 2026-08-10 llama    in 5000  → first day, LARGER than the fresh 1200 → kept (a wrapped ring buffer reports a partial first day)
+      //   C 2026-08-10 qwen3-8b in 100   → first day, smaller than the fresh 500 → the fresh row wins
+      //   D 2026-08-10 phi-4    in 42    → first day, model absent from the payload → kept
+      //   E 2026-08-11 llama    in 88888 → strictly after the first day → replaced by the fresh 20 (never doubled)
       Store.setSource('localai', [
         { d: '2026-08-01', platform: 'LocalAI', model: 'llama-3.2-3b', in: 7, cw: 0, cr: 0, out: 3, msgs: 1 },
-        { d: '2026-08-10', platform: 'LocalAI', model: 'llama-3.2-3b', in: 99999, cw: 0, cr: 0, out: 99999, msgs: 99 },
+        { d: '2026-08-10', platform: 'LocalAI', model: 'llama-3.2-3b', in: 5000, cw: 0, cr: 0, out: 1000, msgs: 50 },
+        { d: '2026-08-10', platform: 'LocalAI', model: 'qwen3-8b', in: 100, cw: 0, cr: 0, out: 20, msgs: 1 },
+        { d: '2026-08-10', platform: 'LocalAI', model: 'phi-4', in: 42, cw: 0, cr: 0, out: 8, msgs: 2 },
+        { d: '2026-08-11', platform: 'LocalAI', model: 'llama-3.2-3b', in: 88888, cw: 0, cr: 0, out: 88888, msgs: 88 },
       ], {});
       await App.connectServer(c);
       App._render();
       const rows = (Store.sources.localai || {}).rows || [];
       const sum = (f, pred) => rows.filter(pred || (() => true)).reduce((a, r) => a + (r[f] || 0), 0);
       const st = Store.connectors.localai || {};
-      // expected: 4 fresh rows (in 1720 / out 415 / msgs 7) + the kept 2026-08-01 row (in 7 / out 3 / msgs 1) = 5 rows, in 1727, out 418, msgs 8
+      // expected 6 rows: A (7/3/1) + B (5000/1000/50) + fresh 08-10 qwen (500/100/1) + D (42/8/2) + fresh 08-11 llama (20/10/1) + fresh 08-11 qwen (0/5/1)
+      //   in = 7+5000+500+42+20+0 = 5569 · out = 3+1000+100+8+10+5 = 1126 · msgs = 1+50+1+2+1+1 = 56 · nothing on 2026-06-01 / 07-01 from the month buckets
       const okState = { calls, label: st.label, status: Store.connectorStatus(c), text: document.getElementById('localai-status').textContent, url: LS.get('url:localai', null),
-        n: rows.length, in: sum('in'), out: sum('out'), msgs: sum('msgs'), est: rows.some(r => r.est),
-        old: sum('in', r => r.d === '2026-08-01'), aug10llama: sum('in', r => r.d === '2026-08-10' && r.model === 'llama-3.2-3b'),
+        n: rows.length, in: sum('in'), out: sum('out'), msgs: sum('msgs'), est: rows.some(r => r.est), meta: (Store.sources.localai || {}).meta || {},
+        old: sum('in', r => r.d === '2026-08-01'), aug10llama: sum('in', r => r.d === '2026-08-10' && r.model === 'llama-3.2-3b'), aug10qwen: sum('in', r => r.d === '2026-08-10' && r.model === 'qwen3-8b'),
+        aug10phi: sum('in', r => r.d === '2026-08-10' && r.model === 'phi-4'), aug11llama: sum('in', r => r.d === '2026-08-11' && r.model === 'llama-3.2-3b'),
         aug11qwen: { in: sum('in', r => r.d === '2026-08-11' && r.model === 'qwen3-8b'), out: sum('out', r => r.d === '2026-08-11' && r.model === 'qwen3-8b') },
+        monthRows: rows.filter(r => r.d === '2026-06-01' || r.d === '2026-07-01').length, days: [...new Set(rows.map(r => r.d))].sort(),
         platforms: [...new Set(rows.map(r => r.platform))], cost: rows.reduce((a, r) => a + Pricing.cost(r.model, r), 0),
         cardShown: document.getElementById('src-localai').hidden === false,
         hub: !!document.querySelector('#accounts-hub .hub-group[data-group="local"] .acct[data-connector="localai"]') };
+      // period=all is decoration: when it fails the validate still succeeds on the daily rows (re-sync is idempotent: still 6 rows) and the label falls back to the 7-day total
+      window.fetch = async (url) => { const u = String(url); if (/period=week/.test(u)) return json(weekText); throw new TypeError('Failed to fetch'); };
+      await App.connectServer(c);
+      const rows2 = (Store.sources.localai || {}).rows || [];
+      const noAll = { label: (Store.connectors.localai || {}).label, status: Store.connectorStatus(c), text: document.getElementById('localai-status').textContent, n: rows2.length, in: rows2.reduce((a, r) => a + (r.in || 0), 0) };
       // 503 = stats disabled: the server ANSWERED, so this is not a CORS guess — the card shows LocalAI's own message; stored rows stay
-      window.fetch = async () => new Response('{"error":"usage stats are disabled"}', { status: 503 });
+      window.fetch = async () => new Response('{"error":"usage tracking is disabled (--disable-stats)"}', { status: 503 });
       await App.connectServer(c);
       const disabled = { err: (Store.connectors.localai || {}).err || null, status: Store.connectorStatus(c), text: document.getElementById('localai-status').textContent, rowsKept: ((Store.sources.localai || {}).rows || []).length };
       // CORS-blocked: the validator's fetch throws TypeError, the no-cors probe (also fetch) succeeds → attention + the LocalAI CORS fix
@@ -48,22 +66,57 @@ export async function run({ browser, ok }) {
       const down = { has: !!Store.connectors.localai, status: Store.connectorStatus(c), text: document.getElementById('localai-status').textContent, rowsKept: ((Store.sources.localai || {}).rows || []).length };
       window.fetch = origFetch;
       Store.sources = {}; Store.connectors = {}; Store.persist();
-      return { okState, disabled, cors, down, kind: c.kind, cat: c.category, quality: c.quality, srcIds: c.srcIds, statusEl: c.statusEl, base: c.baseUrl, hasPoll: !!c.poll,
+      return { okState, noAll, disabled, cors, down, kind: c.kind, cat: c.category, quality: c.quality, srcIds: c.srcIds, statusEl: c.statusEl, base: c.baseUrl, hasPoll: !!c.poll,
         card: !!document.getElementById('src-localai') && !!document.getElementById('localai-url') && !!document.getElementById('localai-validate') && !document.getElementById('localai-pick'),
-        note: /--disable-stats/.test(c.qualityNote) && /restart/i.test(c.qualityNote) && /--auth/.test(c.qualityNote) && /\$0/.test(c.qualityNote) && /cors-allow-origins/.test(c.corsHint) };
-    }, localaiText);
-    ok('localai: /api/usage?period=all → exact rows under the localai source (5 rows: in=1727 out=418 msgs=8; fresh day replaced, older day kept, garbage count → 0); label "history: 4 buckets"; URL persisted',
-      la.okState.calls[0] === 'http://localhost:8080/api/usage?period=all' && la.okState.label === 'history: 4 buckets' && la.okState.status === 'ok'
-      && /Connected/.test(la.okState.text) && /4 usage buckets/.test(la.okState.text) && /1,720 in \/ 415 out/.test(la.okState.text) && /2 models/.test(la.okState.text) && /1 older row kept/.test(la.okState.text)
-      && la.okState.url === 'http://localhost:8080' && la.okState.n === 5 && la.okState.in === 1727 && la.okState.out === 418 && la.okState.msgs === 8 && !la.okState.est
-      && la.okState.old === 7 && la.okState.aug10llama === 1200 && la.okState.aug11qwen.in === 0 && la.okState.aug11qwen.out === 5, JSON.stringify(la.okState));
-    ok('localai: registry = local-server / local / exact, srcIds [localai], no folder half, no poll; rows are LocalAI platform priced $0; card + hub card in the Local group; honest note (ring buffer, --auth, --disable-stats, CORS hint)',
+        note: /--disable-stats/.test(c.qualityNote) && /restart/i.test(c.qualityNote) && /--auth/.test(c.qualityNote) && /\$0/.test(c.qualityNote) && /cors-allow-origins/.test(c.corsHint)
+          && /period=week/.test(c.qualityNote) && /accumulates/i.test(c.qualityNote) && /ring buffer/.test(c.qualityNote) && /period=all/.test(c.qualityNote) && /calendar months/.test(c.qualityNote)
+          && (c.paths || []).some(p => /period=week/.test(p)) && !(c.paths || []).some(p => /history: GET \/api\/usage\?period=all/.test(p)) };
+    }, localaiText, localaiAllText);
+    ok('localai: validate reads period=week (daily YYYY-MM-DD buckets) for the rows and period=all only for the "history since" totals → 6 rows (in=5569 out=1126 msgs=56): older day kept, first day per model keeps the larger of stored vs fresh (5000 over 1200; absent phi-4 kept; 100 → 500), later day replaced (88888 → 20), month buckets never become rows; label "history since 2026-06: 52,135 tokens"; URL persisted',
+      la.okState.calls.length === 2 && la.okState.calls[0] === 'http://localhost:8080/api/usage?period=week' && la.okState.calls[1] === 'http://localhost:8080/api/usage?period=all'
+      && la.okState.label === 'history since 2026-06: 52,135 tokens' && la.okState.status === 'ok'
+      && /Connected/.test(la.okState.text) && /4 daily buckets/.test(la.okState.text) && /1,720 in \/ 415 out/.test(la.okState.text) && /2 models/.test(la.okState.text)
+      && /history since 2026-06: 52,135 tokens \/ 87 requests/.test(la.okState.text) && /1 older row kept/.test(la.okState.text) && /earliest day 2026-08-10: 2 stored rows kept/.test(la.okState.text)
+      && la.okState.url === 'http://localhost:8080' && la.okState.n === 6 && la.okState.in === 5569 && la.okState.out === 1126 && la.okState.msgs === 56 && !la.okState.est
+      && la.okState.old === 7 && la.okState.aug10llama === 5000 && la.okState.aug10qwen === 500 && la.okState.aug10phi === 42 && la.okState.aug11llama === 20 && la.okState.aug11qwen.in === 0 && la.okState.aug11qwen.out === 5
+      && la.okState.monthRows === 0 && JSON.stringify(la.okState.days) === JSON.stringify(['2026-08-01', '2026-08-10', '2026-08-11'])
+      && la.okState.meta.period === 'week' && la.okState.meta.since === '2026-06' && la.okState.meta.buckets === 4, JSON.stringify(la.okState));
+    ok('localai: period=all unavailable → still connected on the daily rows (6 rows, in=5569, re-sync idempotent), label falls back to "last 7 days: 2,135 tokens", detail says the all-time totals are unavailable',
+      la.noAll.status === 'ok' && la.noAll.label === 'last 7 days: 2,135 tokens' && /Connected/.test(la.noAll.text) && /period=all totals unavailable/.test(la.noAll.text) && !/history since/.test(la.noAll.text)
+      && la.noAll.n === 6 && la.noAll.in === 5569, JSON.stringify(la.noAll));
+    ok('localai: registry = local-server / local / exact, srcIds [localai], no folder half, no poll; rows are LocalAI platform priced $0; card + hub card in the Local group; honest note (period=week daily buckets accumulate, period=all = calendar months for totals only, ring buffer lost on restart unless --auth, --disable-stats, CORS hint)',
       la.kind === 'local-server' && la.cat === 'local' && la.quality === 'exact' && JSON.stringify(la.srcIds) === JSON.stringify(['localai']) && la.statusEl === 'localai-status' && la.base === 'http://localhost:8080' && !la.hasPoll
       && la.card && la.note && la.okState.platforms.length === 1 && la.okState.platforms[0] === 'LocalAI' && la.okState.cost === 0 && la.okState.cardShown && la.okState.hub, JSON.stringify(la));
     ok('localai: 503 → "Server answered … --disable-stats" (attention, not CORS, rows kept); CORS-blocked → attention with the LocalAI CORS fix; unreachable → off, rows kept',
-      /503/.test(la.disabled.err || '') && /disable-stats/.test(la.disabled.err || '') && la.disabled.status === 'warn' && /Server answered:/.test(la.disabled.text) && !/CORS/.test(la.disabled.text) && la.disabled.rowsKept === 5
+      /503/.test(la.disabled.err || '') && /disable-stats/.test(la.disabled.err || '') && la.disabled.status === 'warn' && /Server answered:/.test(la.disabled.text) && !/CORS/.test(la.disabled.text) && la.disabled.rowsKept === 6
       && /CORS/.test(la.cors.err || '') && la.cors.status === 'warn' && /cors-allow-origins/.test(la.cors.text)
-      && !la.down.has && la.down.status === 'off' && /not running/i.test(la.down.text) && la.down.rowsKept === 5, JSON.stringify({ disabled: la.disabled, cors: la.cors, down: la.down }));
+      && !la.down.has && la.down.status === 'off' && /not running/i.test(la.down.text) && la.down.rowsKept === 6, JSON.stringify({ disabled: la.disabled, cors: la.cors, down: la.down }));
+    // Bucket labels are the server's own (local-clock) strings: the date part is read literally, never through new Date(local string) — under a
+    // UTC+9 clock '2026-08-10 01:00' (period=day style) would otherwise shift to 08-09 and a '2026-08' month bucket would become 08-01.
+    const { page: pTz } = await openDashboard(browser, { tz: 'Asia/Tokyo' });
+    try {
+      const tz = await pTz.evaluate(async () => {
+        Store.sources = {}; Store.connectors = {};
+        const origFetch = window.fetch;
+        const payload = JSON.stringify({ usage: [
+          { bucket: '2026-08-10 01:00', model: 'm', prompt_tokens: 1, completion_tokens: 0, total_tokens: 1, request_count: 1 },      // period=day style label
+          { bucket: '2026-08-10 23:00', model: 'm', prompt_tokens: 2, completion_tokens: 0, total_tokens: 2, request_count: 1 },
+          { bucket: '2026-08-10T00:00:00Z', model: 'm', prompt_tokens: 4, completion_tokens: 0, total_tokens: 4, request_count: 1 },   // ISO string: date part
+          { bucket: 1786320000, model: 'm', prompt_tokens: 8, completion_tokens: 0, total_tokens: 8, request_count: 1 },              // epoch seconds = 2026-08-10T00:00:00Z
+          { bucket: '2026-08', model: 'm', prompt_tokens: 16, completion_tokens: 0, total_tokens: 16, request_count: 1 },             // month bucket → never a day row
+          { bucket: 'garbage', model: 'm', prompt_tokens: 32, completion_tokens: 0, total_tokens: 32, request_count: 1 },
+        ], totals: { prompt_tokens: 63, completion_tokens: 0, total_tokens: 63, request_count: 6 } });
+        window.fetch = async (url) => /period=week/.test(String(url)) ? new Response(payload, { status: 200, headers: { 'content-type': 'application/json' } }) : new Response('{}', { status: 500 });
+        let res = null, err = null;
+        try { res = await validateLocalAI('http://localhost:8080'); } catch (e) { err = String(e && e.message || e); }
+        window.fetch = origFetch;
+        Store.sources = {}; Store.connectors = {}; Store.persist();
+        const rows = (res && res.rows) || [];
+        return { err, offset: new Date('2026-08-10T00:00:00').getTimezoneOffset(), days: rows.map(r => r.d), in: rows.reduce((a, r) => a + (r.in || 0), 0), label: res && res.label, buckets: res && res.meta && res.meta.buckets };
+      });
+      ok('localai: bucket labels read literally — under a UTC+9 clock "2026-08-10 01:00" / "23:00", "2026-08-10T00:00:00Z" and epoch 1786320000 all land on 2026-08-10 (in = 1+2+4+8 = 15, 4 buckets); "2026-08" (month) and garbage are skipped; label "last 7 days: 15 tokens" when period=all answers 500',
+        !tz.err && tz.offset === -540 && JSON.stringify(tz.days) === JSON.stringify(['2026-08-10']) && tz.in === 15 && tz.buckets === 4 && tz.label === 'last 7 days: 15 tokens', JSON.stringify(tz));
+    } finally { await pTz.close(); }
 
     // ---- T5a: parsePrometheus ----
     const promText = read('wave2', 'prometheus-sample.txt');

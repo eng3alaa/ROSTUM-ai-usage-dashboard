@@ -261,19 +261,37 @@ export async function generate() {
   ].join('\n') + '\n');
 
   // ---- Plan 4b (Wave 2) fixtures: wave2/ subtree ----
-  // T4 — LocalAI GET /api/usage?period=all. 4 buckets: one model on two UTC days, two models on one day, one bucket with a garbage count.
-  //   Rows (UTC day / model): 2026-08-10 llama-3.2-3b in=1200 out=300 msgs=4 · 2026-08-10 qwen3-8b in=500 out=100 msgs=1
-  //                           2026-08-11 llama-3.2-3b in=20 out=10 msgs=1 · 2026-08-11 qwen3-8b ('abc' prompt_tokens → 0) in=0 out=5 msgs=1
-  //   Payload totals: in = 1200+500+20+0 = 1720 · out = 300+100+10+5 = 415 · msgs = 4+1+1+1 = 7 · 4 buckets · 2 models · earliest day 2026-08-10
+  // T4 — LocalAI GET /api/usage?period=week (the card's DATA fetch). Buckets are the server's own labels with no zone attached —
+  //   SQLite strftime('%Y-%m-%d', created_at), Postgres to_char(date_trunc('day'), 'YYYY-MM-DD'), in-memory Go time.Format("2006-01-02")
+  //   (core/http/auth/usage.go periodToWindow, core/services/routing/billing/inmem.go) — i.e. plain 'YYYY-MM-DD' strings. period=day would be
+  //   'YYYY-MM-DD HH:00' and period=all 'YYYY-MM' calendar months (see the -all fixture below). viewer = {id, name, role, provider}.
+  //   4 buckets: one model on two days, two models on one day, one bucket with a garbage count (int64 on the real wire — robustness only).
+  //   Rows (day / model): 2026-08-10 llama-3.2-3b in=1200 out=300 msgs=4 · 2026-08-10 qwen3-8b in=500 out=100 msgs=1
+  //                       2026-08-11 llama-3.2-3b in=20 out=10 msgs=1 · 2026-08-11 qwen3-8b ('abc' prompt_tokens → 0) in=0 out=5 msgs=1
+  //   Payload totals: in = 1200+500+20+0 = 1720 · out = 300+100+10+5 = 415 · msgs = 4+1+1+1 = 7 · 4 buckets · 2 days · 2 models · first day 2026-08-10
   w('wave2/localai-usage.json', JSON.stringify({
     usage: [
-      { bucket: '2026-08-10T00:00:00Z', model: 'llama-3.2-3b', prompt_tokens: 1200, completion_tokens: 300, total_tokens: 1500, request_count: 4 },
-      { bucket: '2026-08-10T00:00:00Z', model: 'qwen3-8b', prompt_tokens: 500, completion_tokens: 100, total_tokens: 600, request_count: 1 },
-      { bucket: '2026-08-11T00:00:00Z', model: 'llama-3.2-3b', prompt_tokens: 20, completion_tokens: 10, total_tokens: 30, request_count: 1 },
-      { bucket: '2026-08-11T00:00:00Z', model: 'qwen3-8b', prompt_tokens: 'abc', completion_tokens: 5, total_tokens: 5, request_count: 1 },
+      { bucket: '2026-08-10', model: 'llama-3.2-3b', prompt_tokens: 1200, completion_tokens: 300, total_tokens: 1500, request_count: 4 },
+      { bucket: '2026-08-10', model: 'qwen3-8b', prompt_tokens: 500, completion_tokens: 100, total_tokens: 600, request_count: 1 },
+      { bucket: '2026-08-11', model: 'llama-3.2-3b', prompt_tokens: 20, completion_tokens: 10, total_tokens: 30, request_count: 1 },
+      { bucket: '2026-08-11', model: 'qwen3-8b', prompt_tokens: 'abc', completion_tokens: 5, total_tokens: 5, request_count: 1 },
     ],
     totals: { prompt_tokens: 1720, completion_tokens: 415, total_tokens: 2135, request_count: 7 },
-    viewer: { user_id: 'local', is_admin: true },
+    viewer: { id: 'local', name: 'local', role: 'admin', provider: 'local' },
+  }, null, 1));
+  // T4 — LocalAI GET /api/usage?period=all: calendar-MONTH buckets ('YYYY-MM' — strftime('%Y-%m') / to_char('YYYY-MM') / Format("2006-01")),
+  //   so a month's whole total would land on the 1st if it were ever turned into day rows — the card reads ONLY its totals for the
+  //   "history since …" label. 4 buckets over 3 months, earliest 2026-06:
+  //   totals: prompt = 30000+10000+1220+500 = 41720 · completion = 8000+2000+310+105 = 10415 · total = 41720+10415 = 52135 · requests = 60+20+5+2 = 87
+  w('wave2/localai-usage-all.json', JSON.stringify({
+    usage: [
+      { bucket: '2026-06', model: 'llama-3.2-3b', prompt_tokens: 30000, completion_tokens: 8000, total_tokens: 38000, request_count: 60 },
+      { bucket: '2026-07', model: 'llama-3.2-3b', prompt_tokens: 10000, completion_tokens: 2000, total_tokens: 12000, request_count: 20 },
+      { bucket: '2026-08', model: 'llama-3.2-3b', prompt_tokens: 1220, completion_tokens: 310, total_tokens: 1530, request_count: 5 },
+      { bucket: '2026-08', model: 'qwen3-8b', prompt_tokens: 500, completion_tokens: 105, total_tokens: 605, request_count: 2 },
+    ],
+    totals: { prompt_tokens: 41720, completion_tokens: 10415, total_tokens: 52135, request_count: 87 },
+    viewer: { id: 'local', name: 'local', role: 'admin', provider: 'local' },
   }, null, 1));
 
   // T5a — Prometheus text exposition sample for parsePrometheus. Expected: 5 metrics (HELP/TYPE/comment + 'bad line without value' dropped):
