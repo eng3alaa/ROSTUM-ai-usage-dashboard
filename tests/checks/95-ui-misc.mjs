@@ -57,6 +57,40 @@ export async function run({ browser, ok }) {
     });
     ok('storage: mid-import quota warning survives the status clear', quotaSurvivesImport, '');
 
+    // fix (clear-data): "Clear stored data" resets every status line to its initial text — link-only cards keep their permanent "No data path"
+    // line, key cards read "Not connected.", dual-driver folder lines read "No <folder> folder chosen." — never blank
+    const cleared = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      App._render();
+      const at = Date.now();
+      Store.setConnector('groq', { label: 'API key · last 4: abcd', lastSync: at, err: null });
+      Store.setConnector('jan', { serverLabel: '1 model', label: '1 model', lastSync: at, err: null });
+      const gs = document.getElementById('groq-status'); gs.textContent = 'Validating…'; gs.dataset.gen = '3';   // an in-flight placeholder: clear-data bumps the gen, so the line resets too
+      document.getElementById('jan-scan-status').textContent = 'Scanning…';
+      const origConfirm = window.confirm; window.confirm = () => true;
+      try { document.getElementById('clear-data').click(); } finally { window.confirm = origConfirm; }
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const t = (id) => document.getElementById(id).textContent;
+      return { replicate: t('replicate-status'), groq: t('groq-status'), groqGen: gs.dataset.gen || '', jan: t('jan-status'), janScan: t('jan-scan-status'), anthropic: t('anthropic-status'), grok: t('grok-status'), conns: Object.keys(Store.connectors).length };
+    });
+    ok('clear-data: status lines reset to their initial text — link-only keeps "No data path", key cards "Not connected." (gen cleared), dual-driver folder line "No Jan data folder chosen.", export-file "No export imported yet." — never blank',
+      /No data path/.test(cleared.replicate) && cleared.groq === 'Not connected.' && cleared.groqGen === '' && cleared.jan === 'Not connected.' && cleared.janScan === 'No Jan data folder chosen.'
+      && cleared.anthropic === 'Not connected.' && /No export imported yet/.test(cleared.grok) && cleared.conns === 0, JSON.stringify(cleared));
+
+    // copy: the Projects table lists Claude Code sessions AND Codex / Gemini CLI / Copilot CLI / Junie folder-log projects — title and hint must say so
+    const proj = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {};
+      App.renderProjects();
+      const h2 = document.querySelector('#card-projects h2').textContent, hintEmpty = document.getElementById('projects-hint').textContent;
+      Store.projectsBy.codex = [{ project: 'D:/Code/rostum', msgs: 3, in: 100, cw: 0, cr: 0, out: 50, model: 'gpt-5-codex', platform: 'Codex' }];
+      App.renderProjects();
+      const hintData = document.getElementById('projects-hint').textContent, row = (document.querySelector('#projects-table td.name') || {}).textContent;
+      Store.projectsBy = {}; App.renderProjects();
+      return { h2, hintEmpty, hintData, row };
+    });
+    ok('copy: Projects card is titled "Projects" (not "local Claude sessions") and its hint names Claude Code, Codex, Gemini CLI, Copilot CLI and Junie logs (empty and with data)',
+      proj.h2 === 'Projects' && proj.hintEmpty === 'from Claude Code, Codex, Gemini CLI, Copilot CLI and Junie logs' && proj.hintData === 'all time, from Claude Code, Codex, Gemini CLI, Copilot CLI and Junie logs' && proj.row === 'D:/Code/rostum', JSON.stringify(proj));
+
     // palette: ColorMap slots must be RELEASED when a platform no longer has data. Before this fix, once 12 platforms had ever
     // been seen in a browser profile every later platform folded into the 'Other' gray forever — even as the only platform on
     // the page. 12 platforms → replace every source with 1 new platform → it must get a real slot, and the persisted map must

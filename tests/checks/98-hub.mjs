@@ -329,6 +329,49 @@ export async function run({ browser, ok }) {
     ok('hub: the seven export-file cards (ChatGPT, Claude.ai, Grok, Microsoft Copilot, Perplexity, Meta AI, DeepSeek chat) are chat / estimated, copy is quality-first and export-based, each has links, paths, hint and a live status element',
       JSON.stringify(exp.kinds) === JSON.stringify([['chatgpt-app', 'ChatGPT', 'chat', 'estimated', 'chatgpt'], ['claudeai-app', 'Claude.ai', 'chat', 'estimated', 'claudeai'], ['grok', 'Grok', 'chat', 'estimated', 'grok-export'], ['mscopilot', 'Microsoft Copilot', 'chat', 'estimated', 'copilot-activity-csv'],
         ['perplexity', 'Perplexity', 'chat', 'estimated', 'perplexity-export'], ['meta-ai', 'Meta AI', 'chat', 'estimated', 'meta-ai-export'], ['deepseek-chat', 'DeepSeek chat', 'chat', 'estimated', 'deepseek-chat-export']]) && exp.copyOk, JSON.stringify(exp.kinds));
+    // fix (modal): the in-modal "Import file…" of an export-file card switches the modal to Imports — the export card goes home first
+    // (re-hidden while off), the Imports card is hosted alone, and close leaves #modal-body empty (no orphan, no stacked cards)
+    const stack = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load(); App._hubQuery = '';
+      App._render();
+      const dlg = document.getElementById('connector-modal'), body = document.getElementById('modal-body');
+      document.querySelector('#accounts-hub .acct[data-connector="grok"] .acct-manage').click();
+      const manage = { open: dlg.open, hostsGrok: !!dlg.querySelector('#src-grok'), n: body.children.length };
+      document.getElementById('grok-import').click();   // in-modal Import file… → openImportsFor → openConnectorModal('imports') while the dialog is open
+      const switched = { open: dlg.open, hostsImports: !!dlg.querySelector('#src-import'), hostsGrok: !!dlg.querySelector('#src-grok'), n: body.children.length, title: document.getElementById('modal-title').textContent,
+        grokHome: !!document.querySelector('#sources #src-grok'), grokHidden: !!document.getElementById('src-grok').hidden };
+      const closed = new Promise(r => dlg.addEventListener('close', r, { once: true })); dlg.close(); await closed;
+      const after = { open: dlg.open, n: body.children.length, importHome: !!document.querySelector('#sources #src-import'), grokHome: !!document.querySelector('#sources #src-grok') };
+      return { manage, switched, after };
+    });
+    ok('hub: in-modal "Import file…" on an export-file card swaps the modal to Imports (export card home + hidden, one card hosted, dialog stays open); close sends Imports home and leaves #modal-body empty',
+      stack.manage.open && stack.manage.hostsGrok && stack.manage.n === 1 && stack.switched.open && stack.switched.hostsImports && !stack.switched.hostsGrok && stack.switched.n === 1 && stack.switched.title === 'Imports'
+      && stack.switched.grokHome && stack.switched.grokHidden && !stack.after.open && stack.after.n === 0 && stack.after.importHome && stack.after.grokHome, JSON.stringify(stack));
+    // fix (status line): an entry that appears without a connectKey / scan run in this page (restored from storage on reload; DeepSeek connected
+    // by its usage ZIP alone) reveals the source card as connected — its own status line must not keep saying "Not connected."
+    const restored = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load(); App._hubQuery = '';
+      App._render();
+      const g = document.getElementById('groq-status'), d = document.getElementById('deepseek-status');
+      const before = { groq: g.textContent, deepseek: d.textContent, groqHidden: document.getElementById('src-groq').hidden };
+      const at = new Date(2026, 8, 6, 9, 5).getTime();   // local time → 'Sep 6, 9:05 AM' in every zone
+      Store.connectors.groq = { label: 'API key · last 4: abcd', lastSync: at, err: null };   // restored entry: no fetch ran in this page
+      Store.setConnector('deepseek', { label: 'usage export (no key)', lastSync: at });      // the landDeepSeek path (ZIP-only, no key)
+      App._render();
+      const after = { groq: g.textContent, deepseek: d.textContent, groqHidden: document.getElementById('src-groq').hidden, groqOk: !!g.querySelector('.ok'), deepseekOk: !!d.querySelector('.ok'),
+        groqDot: document.querySelector('#accounts-hub .acct[data-connector="groq"] .dot').className };
+      // dataset.gen guard: a line an in-flight fetch owns is never rewritten
+      Store.connectors.openrouter = { label: 'k', lastSync: at, err: null };
+      const o = document.getElementById('openrouter-status'); o.textContent = 'Not connected.'; o.dataset.gen = '7';
+      App._render();
+      const guarded = o.textContent; o.dataset.gen = '';
+      Store.connectors = {}; Store.persist(); App._render();
+      return { before, after, guarded };
+    });
+    ok('hub: a key-driver card revealed by a restored entry (no connectKey run) gets a state-derived status line ("● Connected (stored data) · synced <time>"); DeepSeek via its usage ZIP reads "usage export imported — key optional"; an in-flight line (dataset.gen) is left alone',
+      restored.before.groq === 'Not connected.' && restored.before.groqHidden && !restored.after.groqHidden && /\bok\b/.test(restored.after.groqDot) && restored.after.groqOk && restored.after.deepseekOk
+      && restored.after.groq === '● Connected (stored data) · synced Sep 6, 9:05 AM' && /usage export imported — key optional/.test(restored.after.deepseek) && !/Not connected/.test(restored.after.deepseek)
+      && restored.guarded === 'Not connected.', JSON.stringify(restored));
     // ---- Plan 4b: the hub at ~46 cards ----
     const big = await page.evaluate(async () => {
       Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load(); App._hubQuery = '';

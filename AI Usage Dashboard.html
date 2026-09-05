@@ -546,8 +546,8 @@ progress { width: 160px; height: 8px; }
 
     <div class="card wide" id="card-projects">
       <div class="card-head">
-        <h2>Projects (local Claude sessions)</h2>
-        <span class="hint" id="projects-hint"></span>
+        <h2>Projects</h2>
+        <span class="hint" id="projects-hint">from Claude Code, Codex, Gemini CLI, Copilot CLI and Junie logs</span>
       </div>
       <div class="tbl-wrap" id="projects-table"></div>
     </div>
@@ -4722,6 +4722,7 @@ const App = {
         continue;
       }
       const src = $('src-' + c.id);
+      this._syncStatusLine(c);   // an entry without a connectKey / scan in this page (reload, DeepSeek ZIP) must not leave "Not connected." under a green dot
       if (!src || (!/^(gemini|copilot|openrouter)$/.test(c.id) && !src.classList.contains('generic'))) continue;   // generic = every ensureSourceCard kind (folder-log, local-server, link-only, key driver)
       if (src.parentNode !== $('modal-body')) src.hidden = !Store.connectors[c.id];
     }
@@ -4741,21 +4742,50 @@ const App = {
     $('modal-mark').textContent = c.mark;
     $('modal-mark').style.background = c.brand;
     const src = document.getElementById('src-' + (id === 'imports' ? 'import' : id));
+    // switching cards while the dialog is open (an export-file card's in-modal "Import file…" → Imports): send the hosted card home
+    // first (same restore + re-hide rule as close) so cards never stack in #modal-body — a stacked card was orphaned on close
+    if (dlg.open && !(src && src.parentNode === $('modal-body'))) this._restoreModalCard();
     if (src) {
       if (src.parentNode !== $('modal-body')) this._modalHome = src.parentNode;   // guard against a corrupted home
       src.hidden = false;
       $('modal-body').appendChild(src);
     }
-    dlg.showModal();
+    if (!dlg.open) dlg.showModal();   // already open → the dialog just swaps content (showModal() again is invalid on an open dialog)
   },
   closeConnectorModal() { $('connector-modal').close(); },   // 'close' event (fires for Close-button AND Escape) does the restore
   _restoreModalCard() {
-    const src = $('modal-body').firstElementChild;
-    if (!src || !this._modalHome) return;
-    this._modalHome.appendChild(src);
-    const cid = src.id.slice(4), cc = connectorById(cid);
-    const connected = cc && cc.kind === 'export-file' ? Store.connectorStatus(cc) !== 'off' : !!Store.connectors[cid];   // export-file cards have no entry — data presence decides
-    if ((/^src-(gemini|copilot|openrouter)$/.test(src.id) || src.classList.contains('generic')) && !connected) src.hidden = true;
+    if (!this._modalHome) return;
+    for (const src of [...$('modal-body').children]) {   // EVERY hosted card goes home, not just the first — nothing is ever left orphaned in the dialog
+      this._modalHome.appendChild(src);
+      const cid = src.id.slice(4), cc = connectorById(cid);
+      const connected = cc && cc.kind === 'export-file' ? Store.connectorStatus(cc) !== 'off' : !!Store.connectors[cid];   // export-file cards have no entry — data presence decides
+      if ((/^src-(gemini|copilot|openrouter)$/.test(src.id) || src.classList.contains('generic')) && !connected) src.hidden = true;
+    }
+  },
+  /** Initial text of a card's status line — shared by ensureSourceCard, disconnectConnector and Clear stored data so a reset never blanks
+   *  a line: link-only cards keep their permanent "no data path" sentence, export-file cards wait for an export, the Imports drop zone starts
+   *  empty, dual-driver folder lines (scan = true) name the folder they wait for, every other card reads "Not connected.". */
+  initialStatusText(c, scan) {
+    if (scan) return 'No ' + (c.folderLabel || 'usage-log') + ' folder chosen.';
+    if (c.kind === 'link-only') return 'No data path — nothing to connect here; use the links below.';
+    if (c.kind === 'export-file') return 'No export imported yet.';
+    if (c.kind === 'files') return '';
+    return 'Not connected.';
+  },
+  /** A card whose entry exists while its status line still shows the initial "Not connected." (entry restored from storage on reload; DeepSeek
+   *  connected by its usage ZIP alone — no connectKey / scan wrote the line in this page) is revealed as connected by renderHub, so derive the
+   *  line from the entry instead of contradicting the green dot. dataset.gen guard: an in-flight fetch / validation owns its line. */
+  _syncStatusLine(c) {
+    const s = $(c.statusEl), st = Store.connectors[c.id];
+    if (!s || !st || s.dataset.gen || !s.textContent.startsWith('Not connected.')) return;
+    s.textContent = '';
+    if (st.err) { s.appendChild(el('span', { class: 'err', text: 'Needs attention: ' })); s.appendChild(document.createTextNode(st.err)); return; }
+    const when = st.lastSync ? ' · synced ' + new Date(st.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+    if (c.id === 'deepseek' && /^usage export/.test(st.label || '')) {   // landDeepSeek's entry: the monthly ZIP connects the card, a key only validates
+      s.appendChild(el('span', { class: 'ok', text: '● Connected. ' })); s.appendChild(document.createTextNode('usage export imported — key optional' + when));
+      return;
+    }
+    s.appendChild(el('span', { class: 'ok', text: '● Connected' })); s.appendChild(document.createTextNode(' (stored data)' + when));
   },
   syncConnector(id) {
     if (id === 'local') return this.rescan();
@@ -4787,12 +4817,12 @@ const App = {
     if (id === 'local') { IDB.del('claudeDir'); this.dirHandle = null; }
     // 'Not connected.' must survive an in-flight fetch/validation that bails on the gen bump: those clear the status only while
     // status.dataset.gen is still theirs, so reset it here (the scan-status line carries no gen)
-    if (c.keyLS) { const s = $(c.statusEl); if (s) { s.textContent = 'Not connected.'; s.dataset.gen = ''; } }
+    if (c.keyLS) { const s = $(c.statusEl); if (s) { s.textContent = this.initialStatusText(c); s.dataset.gen = ''; } }
     if (c.kind === 'folder-log' || c.kind === 'local-server') {
       if (c.poll) { this.stopPoll(c); LS.del('poll:' + id); }   // metrics-poll: stop the loop and forget the counter baseline (a reconnect starts from the current counters)
       delete this._dirHandles[id]; IDB.del('dir:' + id);   // unconditional: a handle may be persisted in IDB without being restored into memory (denied permission, early disconnect)
-      const rs = $(id + '-rescan'); if (rs) rs.hidden = true; const s = $(c.statusEl); if (s) { s.textContent = 'Not connected.'; s.dataset.gen = ''; }
-      const ss = $(id + '-scan-status'); if (ss) ss.textContent = 'No ' + (c.folderLabel || 'usage-log') + ' folder chosen.';   // dual-driver cards: reset the folder line too (same noun as ensureSourceCard)
+      const rs = $(id + '-rescan'); if (rs) rs.hidden = true; const s = $(c.statusEl); if (s) { s.textContent = this.initialStatusText(c); s.dataset.gen = ''; }
+      const ss = $(id + '-scan-status'); if (ss) ss.textContent = this.initialStatusText(c, true);   // dual-driver cards: reset the folder line too (same noun as ensureSourceCard)
     }
     if (confirm(`Also delete ${c.name}'s stored usage data? OK = delete, Cancel = keep the data.`)) {
       for (const sid of c.srcIds) delete Store.sources[sid];
@@ -5142,7 +5172,7 @@ const App = {
     // project-hash folder, Copilot CLI cwd, Junie project dir) — same row shape, merged by project name below, so the same repo used
     // from several tools is ONE row (the Models column lists every model seen). Pricing.cost honours each row's platform / local flag.
     const raw = (Store.projects || []).concat(Object.values(Store.projectsBy || {}).flat());
-    $('projects-hint').textContent = raw.length ? 'all time, from local session logs' : '';
+    $('projects-hint').textContent = (raw.length ? 'all time, ' : '') + 'from Claude Code, Codex, Gemini CLI, Copilot CLI and Junie logs';
     if (!raw.length) { wrap.appendChild(el('div', { class: 'empty', text: 'Connect a local log folder (Claude Code, Codex CLI, Gemini CLI, Copilot CLI or JetBrains Junie) to see per-project usage.' })); return; }
     const byProj = new Map();
     for (const pb of raw) {
@@ -5273,9 +5303,8 @@ const App = {
     // URL row) and '<id>-scan-status' for the folder scan — the drivers run concurrently (syncConnector / refreshAll) and must never
     // blank or overwrite each other's line. Single-driver cards keep the one '<id>-status' at the bottom.
     const dual = !!(c.baseUrl && c.patterns);
-    const statusEl = el('div', { class: 'status', id: c.id + '-status', text: c.kind === 'link-only' ? 'No data path — nothing to connect here; use the links below.' : 'Not connected.' });
+    const statusEl = el('div', { class: 'status', id: c.id + '-status', text: this.initialStatusText(c) });
     if (c.kind === 'export-file') {
-      statusEl.textContent = 'No export imported yet.';
       kids.push(el('div', { class: 'row' }, el('button', { class: 'btn primary', id: c.id + '-import', text: 'Import file…', onclick: () => this.openImportsFor(c) })));
       kids.push(el('div', { class: 'note', text: 'Looking for: ' + (c.hint || 'your data export') + '. Files are read in your browser only; the rows land under Imports and show on this card.' }));
     }
@@ -5297,7 +5326,7 @@ const App = {
       const link = el('a', { href: '#', text: 'use the classic folder chooser' });
       link.addEventListener('click', (e) => { e.preventDefault(); fb.click(); });
       kids.push(el('div', { class: 'note' }, 'Files are read in your browser only. Looking for: ' + (c.hint || 'log files') + '. If the folder picker does not open, ', link, ' instead.'));
-      if (dual) kids.push(el('div', { class: 'status', id: c.id + '-scan-status', text: 'No ' + (c.folderLabel || 'usage-log') + ' folder chosen.' }));
+      if (dual) kids.push(el('div', { class: 'status', id: c.id + '-scan-status', text: this.initialStatusText(c, true) }));
     }
     if (!dual) kids.push(statusEl);
     const L = c.links || {}, ln = [];
@@ -5850,6 +5879,7 @@ const App = {
     const notes = [];
     const jsonlFiles = [];
     let imported = 0;   // count of successful import branches — only these justify a connected 'imports' card
+    const expBefore = CONNECTORS.filter(c => c.kind === 'export-file').map(c => [c, Store.connectorStatus(c)]);   // export-file cards have no entry (no setConnector → no onConnectorChange): apply the off→connected auto-reveal rule below
     // DeepSeek API usage export (monthly ZIP, or its loose amount-/cost- CSVs): every month is a separate export, so rows MERGE by
     // (day, model) and billed by day — importing August never deletes July. Rows live under the deepseek connector's srcId
     // 'deepseek-usage-zip' (platform 'DeepSeek API'), not under Imports; the deepseek card reads connected through the export alone — so the
@@ -5975,6 +6005,7 @@ const App = {
     // only a real success justifies showing the imports card as connected — a batch that
     // was entirely unparseable/unrecognized/failed must not fake a connected state.
     if (imported > 0) Store.setConnector('imports', { label: imported + ' file(s) imported', lastSync: Date.now() });
+    for (const [c, prev] of expBefore) View.onConnectorChange(c.id, prev, Store.connectorStatus(c));   // a card hidden with ✕ comes back once its export lands (same rule as a key / folder connect)
     this.render();
   },
 
@@ -6190,7 +6221,10 @@ const App = {
         for (const id of Object.keys(this._pollTimers)) this.stopPoll(id);   // a running /metrics poll would otherwise re-create the source it just cleared (baselines in LS 'poll:*' are kept: they are counters, not usage)
         for (const id of Object.keys(this._dirHandles)) IDB.del('dir:' + id); this._dirHandles = {}; document.querySelectorAll('.src.generic .rescan').forEach(b => { b.hidden = true; });
         $('rescan-local').hidden = true;
-        for (const c of CONNECTORS) { const s = document.getElementById(c.statusEl); if (s) s.textContent = ''; }
+        for (const c of CONNECTORS) {   // every status line back to its initial text — never blank: link-only keeps "No data path", key / folder cards "Not connected." (the gen bump above released any in-flight placeholder)
+          const s = document.getElementById(c.statusEl); if (s) { s.textContent = this.initialStatusText(c); s.dataset.gen = ''; }
+          const ss = $(c.id + '-scan-status'); if (ss) ss.textContent = this.initialStatusText(c, true);
+        }
         this.render();
       }
     });

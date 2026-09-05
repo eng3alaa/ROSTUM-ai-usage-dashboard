@@ -1,4 +1,4 @@
-import { openDashboard } from '../lib/harness.mjs';
+import { openDashboard, readFixture } from '../lib/harness.mjs';
 
 export async function run({ browser, ok }) {
   const { page } = await openDashboard(browser);
@@ -125,6 +125,28 @@ export async function run({ browser, ok }) {
       return { hiddenBefore, stillHidden, revealed };
     });
     ok('view: auto-reveal only on the off→connected transition', autoReveal.hiddenBefore && autoReveal.stillHidden && autoReveal.revealed, JSON.stringify(autoReveal));
+
+    // fix: export-file cards never write a connector entry (no Store.setConnector → no onConnectorChange), so a card hidden with ✕ stayed
+    // hidden after its export was imported — handleImportFiles applies the same off→connected auto-reveal rule to them
+    const grokTxt = readFixture('wave2/grok/grok-export.json');
+    const expReveal = await page.evaluate(async (grokTxt) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      View.hideCard('grok'); App._render();
+      const hiddenBefore = !document.querySelector('#accounts-hub .acct[data-connector="grok"]');
+      await App.handleImportFiles([new File([grokTxt], 'grok-export.json', { type: 'application/json' })]);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const revealed = !!document.querySelector('#accounts-hub .acct[data-connector="grok"]') && !View.isCardHidden('grok');
+      const status = Store.connectorStatus(connectorById('grok')), noEntry = Store.connectors.grok === undefined;
+      // ok → ok (a re-import) must NOT reveal a card hidden while already connected
+      View.hideCard('grok'); App._render();
+      await App.handleImportFiles([new File([grokTxt], 'grok-export.json', { type: 'application/json' })]);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const stillHidden = !document.querySelector('#accounts-hub .acct[data-connector="grok"]') && View.isCardHidden('grok');
+      Store.sources = {}; Store.connectors = {}; Store.persist(); LS.del('view'); View.load(); App._render();
+      return { hiddenBefore, revealed, status, noEntry, stillHidden };
+    }, grokTxt);
+    ok('view: importing an export reveals the export-file card hidden with ✕ (off→connected, no connector entry); a re-import of an already-connected hidden card does not',
+      expReveal.hiddenBefore && expReveal.revealed && expReveal.status === 'ok' && expReveal.noEntry && expReveal.stillHidden, JSON.stringify(expReveal));
   } finally {
     await page.close();
   }
