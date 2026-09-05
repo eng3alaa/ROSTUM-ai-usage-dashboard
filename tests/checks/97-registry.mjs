@@ -93,6 +93,26 @@ export async function run({ browser, ok }) {
       && pr.sonar === 'Perplexity Sonar' && pr.pplx === 'Perplexity Sonar' && pr.meta === 'Meta AI (consumer, no API price)' && /ChatGPT/.test(pr.copilot) && pr.copilot === pr.chatgpt && pr.gpt4o === 'GPT-4o' && pr.unknown === 'Unknown model'
       && Math.abs(pr.grokCost - 18.75) < 1e-9 && Math.abs(pr.dsCost - 1.44) < 1e-9 && pr.metaCost === 0 && Math.abs(pr.sonarCost - 2) < 1e-9 && pr.lastIsFallback, JSON.stringify(pr));
 
+    // Bedrock / Vertex spellings of the same Anthropic models: 'anthropic.' + id + '-v1:0' (Bedrock; us./eu./global. prefixes are the
+    // cross-region inference profiles) and id + '@YYYYMMDD' (Vertex). The vendor tails hid the trailing date from normalizeModelId, so
+    // Opus 4.1 fell through to 'Claude (other)' ($3/$15) instead of Opus 4 / 4.1 ($15/$75). Bedrock's DeepSeek-R1 is 'deepseek.r1-v1:0'.
+    const vend = await page.evaluate(() => {
+      const L = (m) => Pricing.resolve(m).label;
+      const M = { in: 1e6, out: 1e6, cw: 0, cr: 1e6 };
+      return {
+        br41: L('anthropic.claude-opus-4-1-20250805-v1:0'), brUs4: L('us.anthropic.claude-opus-4-20250514-v1:0'), vx41: L('claude-opus-4-1@20250805'),
+        brGlobal45: L('global.anthropic.claude-opus-4-5-20251101-v1:0'), brEuSonnet: L('eu.anthropic.claude-sonnet-4-5-20250929-v1:0'), vxHaiku: L('claude-haiku-4-5@20251001'),
+        cc41: L('claude-opus-4-1-20250805'), bare4: L('claude-opus-4'), dsR1: L('deepseek.r1-v1:0'),
+        // Opus 4 / 4.1 at 1M in + 1M out + 1M cache-read = 15 + 75 + 1.5 = 91.5
+        br41Cost: Pricing.cost('anthropic.claude-opus-4-1-20250805-v1:0', M),
+        norm: [normalizeModelId('anthropic.claude-opus-4-1-20250805-v1:0'), normalizeModelId('us.anthropic.claude-opus-4-20250514-v1:0'), normalizeModelId('claude-opus-4-1@20250805')],
+      };
+    });
+    ok('pricing: Bedrock/Vertex ids price like the bare Anthropic id — anthropic.claude-opus-4-1-…-v1:0 / us.anthropic.claude-opus-4-…-v1:0 / claude-opus-4-1@20250805 → Opus 4 / 4.1 ($15/$75 = 91.5 at 1M each); global./eu. profiles and Vertex Haiku hit their rows; deepseek.r1-v1:0 → Reasoner',
+      vend.br41 === 'Claude Opus 4 / 4.1' && vend.brUs4 === 'Claude Opus 4 / 4.1' && vend.vx41 === 'Claude Opus 4 / 4.1' && vend.cc41 === 'Claude Opus 4 / 4.1' && vend.bare4 === 'Claude Opus 4 / 4.1'
+      && vend.brGlobal45 === 'Claude Opus 5 / 4.5+' && vend.brEuSonnet === 'Claude Sonnet 4.x / 3.x' && vend.vxHaiku === 'Claude Haiku 4.5' && vend.dsR1 === 'DeepSeek Reasoner'
+      && Math.abs(vend.br41Cost - 91.5) < 1e-9 && JSON.stringify(vend.norm) === JSON.stringify(['claude-opus-4-1', 'claude-opus-4', 'claude-opus-4-1']), JSON.stringify(vend));
+
     // ---- Plan 4b: registry invariants for EVERY Wave 2 entry (everything that is not a Wave 1 id) ----
     const WAVE1_IDS = ['local', 'anthropic', 'openai', 'gemini', 'copilot', 'openrouter', 'codex', 'gemini-cli', 'copilot-cli', 'continue', 'cline', 'roo', 'aider', 'junie', 'lmstudio', 'ollama', 'imports'];
     const WAVE2_PLATFORMS = ['LocalAI', 'vLLM', 'llama.cpp', 'GPT4All', 'Jan', 'text-generation-webui',

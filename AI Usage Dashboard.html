@@ -700,7 +700,7 @@ progress { width: 160px; height: 8px; }
   <!-- ================= Pricing ================= -->
   <div class="section-title" id="pricing-title">
     <h2>API price list</h2>
-    <span class="hint">USD per million tokens — list prices as of Aug 2026, editable; first matching pattern wins. Patterns also match a normalized Claude id (dots→hyphens, family-first for 4+, trailing date stripped), so vendor spellings like claude-opus-4.1 / claude-4.1-opus / claude-opus-4-1-20250805 all hit the same row.</span>
+    <span class="hint">USD per million tokens — list prices as of Aug 2026, editable; first matching pattern wins. Patterns also match a normalized Claude id (dots→hyphens, family-first for 4+, trailing date and the Bedrock anthropic.…-v1:0 / Vertex …@date wrappers stripped), so vendor spellings like claude-opus-4.1 / claude-4.1-opus / claude-opus-4-1-20250805 / anthropic.claude-opus-4-1-20250805-v1:0 all hit the same row.</span>
     <span class="spacer" style="flex:1"></span>
     <button class="btn small" id="add-price">+ Add model</button>
     <button class="btn small" id="reset-prices">Reset to defaults</button>
@@ -914,7 +914,7 @@ const DEFAULT_PRICES = [
   // --- Anthropic (cache write = 5m rate; cache read = 10% of input)
   { pat: 'claude-(fable|mythos)-5',        label: 'Claude Fable/Mythos 5', in: 10,   out: 50,  cw: 12.5,  cr: 1 },
   { pat: 'claude-opus-(5|4-[5-9])',        label: 'Claude Opus 5 / 4.5+',  in: 5,    out: 25,  cw: 6.25,  cr: 0.5 },
-  { pat: 'claude-opus-4(-1)?$',            label: 'Claude Opus 4 / 4.1',   in: 15,   out: 75,  cw: 18.75, cr: 1.5 },
+  { pat: 'claude-opus-4(-1)?(?=$|-\\d{8})', label: 'Claude Opus 4 / 4.1',   in: 15,   out: 75,  cw: 18.75, cr: 1.5 },
   { pat: 'claude-sonnet-5',                label: 'Claude Sonnet 5',       in: 2,    out: 10,  cw: 2.5,   cr: 0.2 },
   { pat: 'claude-sonnet-4|claude-3-7-sonnet|claude-3-5-sonnet', label: 'Claude Sonnet 4.x / 3.x', in: 3, out: 15, cw: 3.75, cr: 0.3 },
   { pat: 'claude-haiku-4-5',               label: 'Claude Haiku 4.5',      in: 1,    out: 5,   cw: 1.25,  cr: 0.1 },
@@ -953,7 +953,7 @@ const DEFAULT_PRICES = [
   //     first-match rule: the fast/mini and reasoner rows MUST precede their family rows ('^grok-4' would otherwise swallow grok-4-fast)
   { pat: 'grok-3-mini|grok-4-fast',        label: 'Grok fast/mini',        in: 0.2,  out: 0.5,  cw: 0, cr: 0.05 },
   { pat: '^grok-4|^grok$',                 label: 'Grok 4 (xAI list)',     in: 3,    out: 15,   cw: 0, cr: 0.75 },
-  { pat: 'deepseek-reasoner|deepseek-r1',  label: 'DeepSeek Reasoner',     in: 0.55, out: 2.19, cw: 0, cr: 0.14 },
+  { pat: 'deepseek-reasoner|deepseek[.-]r1', label: 'DeepSeek Reasoner',   in: 0.55, out: 2.19, cw: 0, cr: 0.14 },   // Bedrock spells DeepSeek-R1 'deepseek.r1-v1:0'
   { pat: 'deepseek',                       label: 'DeepSeek chat (V3 list)', in: 0.27, out: 1.10, cw: 0, cr: 0.07 },
   { pat: '^sonar|^perplexity$',            label: 'Perplexity Sonar',      in: 1,    out: 1,    cw: 0, cr: 0 },
   { pat: '^meta-ai$',                      label: 'Meta AI (consumer, no API price)', in: 0, out: 0, cw: 0, cr: 0 },
@@ -965,11 +965,16 @@ const DEFAULT_PRICES = [
  *  three ways: Copilot CLI dotted ('claude-opus-4.1'), Cursor family-last ('claude-4.1-opus', 'claude-3.5-sonnet'),
  *  Claude Code dated ('claude-opus-4-1-20250805'). Anthropic's own scheme is family-FIRST for 4+ ('claude-opus-4-1')
  *  and family-LAST for 3.x ('claude-3-5-sonnet'), which is how DEFAULT_PRICES is written — so: dots→hyphens,
- *  reorder to that scheme, strip a trailing -YYYYMMDD date and Cursor's '-thinking' suffix. Non-Claude ids pass through. */
+ *  reorder to that scheme, strip a trailing -YYYYMMDD date and Cursor's '-thinking' suffix. Bedrock wraps the same id as
+ *  'anthropic.<id>-v1:0' (with a us./eu./apac./global. cross-region prefix) and Vertex as '<id>@YYYYMMDD' — those wrappers
+ *  come off first, or the end-anchored date strip never fires and Opus 4.1 prices as 'Claude (other)'. Non-Claude ids pass through. */
 function normalizeModelId(model) {
   const m = String(model || '').toLowerCase();
   if (!m.includes('claude')) return m;
-  return m.replace(/\./g, '-')
+  return m.replace(/^(?:[a-z]+\.)?anthropic\./, '')   // Bedrock 'anthropic.' / 'us.anthropic.' / 'eu.anthropic.' / 'global.anthropic.' …
+    .replace(/-v\d+:\d+$/, '')                        // Bedrock version tail '-v1:0'
+    .replace(/@\d{8}$/, '')                           // Vertex date tail '@20250805'
+    .replace(/\./g, '-')
     .replace(/claude-([4-9](?:-\d+)?)-(opus|sonnet|haiku)/, 'claude-$2-$1')      // 4+: family-last → family-first
     .replace(/claude-(opus|sonnet|haiku)-(3(?:-\d+)?)(?=$|-)/, 'claude-$2-$1')  // 3.x: family-first → family-last
     .replace(/-\d{8}$/, '')
@@ -1612,6 +1617,11 @@ const ColorMap = {
     // -1 is the "no free slot" overflow sentinel, not a real assignment — entities persisted
     // with it (e.g. from before the palette widened past 8 slots) must be free to re-assign.
     if (map[name] != null && map[name] !== -1) return map[name];
+    // release first: an entry whose entity no longer has data (not among the current candidates) or that only holds the
+    // overflow sentinel gives its slot back — otherwise 12 platforms ever seen in this browser profile would fold every
+    // later one into 'Other' forever, even as the only platform on the page. save() below persists the cleaned map.
+    const keep = new Set(orderedCandidates);
+    for (const k of Object.keys(map)) if (!keep.has(k) || map[k] === -1) delete map[k];
     // assign next free slot, seeding in the given deterministic order
     const used = new Set(Object.values(map));
     for (const cand of orderedCandidates) {
@@ -4805,6 +4815,15 @@ const App = {
   },
 
   /* ---------- platform chips ---------- */
+  /** platforms with data split by palette slot: 'slotted' keep their own color; 'folded' (no free slot, ColorMap -1) draw as
+   *  ONE gray 'Other' in the chips, the share bar and its legend/table — the rule seriesFor already applies to the daily
+   *  series. A real 'Other' platform (generic CSV rows) joins the fold when one exists, so no view shows two entries named Other. */
+  foldPlatforms(platforms, candidates) {
+    const slotted = [], folded = [];
+    for (const p of platforms) (ColorMap.slotFor('platform', p, candidates) === -1 ? folded : slotted).push(p);
+    if (folded.length && slotted.includes('Other')) { slotted.splice(slotted.indexOf('Other'), 1); folded.push('Other'); }
+    return { slotted, folded, otherColor: getComputedStyle(document.documentElement).getPropertyValue('--other').trim() };
+  },
   renderChips() {
     const box = $('platform-chips');
     clear(box);
@@ -4816,18 +4835,28 @@ const App = {
     }
     const platforms = Store.platforms();
     const candidates = platforms;
-    for (const p of platforms) {
+    const { slotted, folded, otherColor } = this.foldPlatforms(platforms, candidates);
+    const toggle = (names, hide) => {
+      for (const p of names) hide ? this.filters.hiddenPlatforms.add(p) : this.filters.hiddenPlatforms.delete(p);
+      LS.set('hiddenPlatforms', [...this.filters.hiddenPlatforms]);
+      this.render();
+    };
+    for (const p of slotted) {
       const color = ColorMap.colorOf('platform', p, candidates);
       const chip = el('button', { class: 'chip', 'aria-pressed': this.filters.hiddenPlatforms.has(p) ? 'false' : 'true' },
         el('span', { class: 'sw', style: { background: color } }),
         el('span', { text: p })
       );
-      chip.addEventListener('click', () => {
-        if (this.filters.hiddenPlatforms.has(p)) this.filters.hiddenPlatforms.delete(p);
-        else this.filters.hiddenPlatforms.add(p);
-        LS.set('hiddenPlatforms', [...this.filters.hiddenPlatforms]);
-        this.render();
-      });
+      chip.addEventListener('click', () => toggle([p], !this.filters.hiddenPlatforms.has(p)));
+      box.appendChild(chip);
+    }
+    if (folded.length) {   // overflow platforms: one chip toggles them together; its title names them
+      const allHidden = folded.every(p => this.filters.hiddenPlatforms.has(p));
+      const chip = el('button', { class: 'chip', 'aria-pressed': allHidden ? 'false' : 'true', title: 'Other: ' + folded.join(', ') },
+        el('span', { class: 'sw', style: { background: otherColor } }),
+        el('span', { text: 'Other' })
+      );
+      chip.addEventListener('click', () => toggle(folded, !allHidden));
       box.appendChild(chip);
     }
   },
@@ -5028,14 +5057,15 @@ const App = {
     const candidates = Store.platforms();
     const totals = new Map();
     for (const r of rows) totals.set(r.platform, (totals.get(r.platform) || 0) + this.metricOf(r));
-    const items = candidates.filter(p => totals.get(p) > 0 && !this.hiddenShare.has(p))
-      .map(p => ({ name: p, value: totals.get(p), color: ColorMap.colorOf('platform', p, candidates) }));
+    const { slotted, folded, otherColor } = this.foldPlatforms(candidates.filter(p => totals.get(p) > 0), candidates);
+    const entries = slotted.map(p => ({ name: p, value: totals.get(p), color: ColorMap.colorOf('platform', p, candidates) }));
+    if (folded.length) entries.push({ name: 'Other', value: folded.reduce((a, p) => a + totals.get(p), 0), color: otherColor });   // overflow platforms → one wedge
+    const items = entries.filter(it => !this.hiddenShare.has(it.name));
     const box = $('share-chart');
     $('share-hint').textContent = metric === 'cost' ? 'of API-equivalent cost' : 'of tokens';
     if (!items.length) { clear(box); box.appendChild(this.emptyNode()); clear($('share-legend')); clear($('share-table')); return; }
     renderShareBar(box, { items, metric });
-    const allItems = candidates.filter(p => totals.get(p) > 0)
-      .map(p => ({ name: p, color: ColorMap.colorOf('platform', p, candidates) }));
+    const allItems = entries.map(it => ({ name: it.name, color: it.color }));
     renderLegend($('share-legend'), allItems, this.hiddenShare, (name) => {
       this.hiddenShare.has(name) ? this.hiddenShare.delete(name) : this.hiddenShare.add(name);
       this.render();
