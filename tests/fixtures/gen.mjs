@@ -294,11 +294,16 @@ export async function generate() {
   ].join('\n'));
 
   // T5b — vLLM /metrics snapshots. L = Llama counters {in, out, cr, stop, len} (request_success_total split by finished_reason), Q = Qwen {in, out}.
-  //   A (baseline):  L 1000/200/100, stop 3, len 1 · Q 50/10            → first tick seeds the baseline, nothing counted
-  //   B (grew):      L 1600/350/130, stop 5, len 1 · Q 50/10            → deltas L in=600 out=150 cr=30 msgs=(5+1)-(3+1)=2 · Q all 0 (no Qwen row)
-  //   C (restart):   L 120/30/0,     stop 1, len 0 · Q 5/1              → every counter LOWER → nothing added, baseline = C
+  //   vllm:prompt_tokens_total counts EVERY prompt token, prefix-cache hits included, so pollVllm books in = prompt − cached (uncached input,
+  //   the dashboard convention) and cr = cached; the baseline stores those derived counters.
+  //   A (baseline):  L 1000/200/100, stop 3, len 1 · Q 50/10            → first tick seeds the baseline (in = 1000−100 = 900), nothing counted
+  //   B (grew):      L 1600/350/130, stop 5, len 1 · Q 50/10            → in = 1600−130 = 1470; deltas L in=1470−900=570 out=150 cr=30 msgs=(5+1)-(3+1)=2 · Q all 0 (no Qwen row)
+  //   C (restart):   L 120/30/0,     stop 1, len 0 · Q 5/1              → every counter LOWER → nothing added, baseline = C (in=120)
   //   D (after):     L 220/60/0,     stop 2, len 0 · Q 5/1              → deltas L in=100 out=30 cr=0 msgs=1 · Q 0
-  //   Running totals after D: in=700 out=180 cr=30 msgs=3, one model (Llama), platform vLLM
+  //   Running totals after D: in=670 out=180 cr=30 msgs=3, one model (Llama), platform vLLM
+  //   E (OTHER server, :8001): L 5000/900/400, stop 20, len 2 · Q 50/10 → in = 5000−400 = 4600. Validated right after B at :8000: the baseline is keyed by
+  //                  server URL, so this seeds only (an id-keyed baseline would book a phantom 4600−1470 = 3130 in / 550 out / 270 cr / 16 msgs)
+  //   F (E grew):    L 5200/950/420, stop 21, len 2 · Q 50/10           → in = 5200−420 = 4780; deltas L in=180 out=50 cr=20 msgs=1 · Q 0
   const LLAMA = 'meta-llama/Llama-3.1-8B-Instruct', QWEN = 'Qwen/Qwen3-8B';
   const vllmMetrics = (L, Q) => [
     '# HELP vllm:prompt_tokens_total Number of prefill tokens processed.',
@@ -325,6 +330,8 @@ export async function generate() {
   w('wave2/vllm-metrics-b.txt', vllmMetrics({ in: '1.6e+03', out: '350.0', cr: '130.0', stop: '5.0', len: '1.0' }, { in: '50.0', out: '10.0' }));   // exponent form, as real exposition prints large counters
   w('wave2/vllm-metrics-c.txt', vllmMetrics({ in: '120.0', out: '30.0', cr: '0.0', stop: '1.0', len: '0.0' }, { in: '5.0', out: '1.0' }));
   w('wave2/vllm-metrics-d.txt', vllmMetrics({ in: '220.0', out: '60.0', cr: '0.0', stop: '2.0', len: '0.0' }, { in: '5.0', out: '1.0' }));
+  w('wave2/vllm-metrics-e.txt', vllmMetrics({ in: '5000.0', out: '900.0', cr: '400.0', stop: '20.0', len: '2.0' }, { in: '50.0', out: '10.0' }));
+  w('wave2/vllm-metrics-f.txt', vllmMetrics({ in: '5200.0', out: '950.0', cr: '420.0', stop: '21.0', len: '2.0' }, { in: '50.0', out: '10.0' }));
 
   // T5c — llama-server /metrics (--metrics on): no model label, no request counter. Expected counters: in=4321 out=876 under the /props model_path basename 'Qwen3-8B-Q4_K_M'
   w('wave2/llamacpp-metrics.txt', [

@@ -1141,7 +1141,7 @@ const Budgets = {
  *                    · folder-log entries: srcIds must include the entry's own id (scanFiles stores rows under c.id)
  * local-server fields: baseUrl · validate 'globalFnName' (async (base) → {label, detail}) · corsHint ({base} = server URL) · optional patterns/parser for a usage-logger folder
  *                      · folderLabel (dual-driver cards only: noun for the folder button / folder status line, default 'usage-log' — e.g. 'Jan data', 'user_data')
- *   4b: poll 'globalFnName' (async (base) → { counters: { [model]: { in, out, cr?, msgs? } }, label? }) + pollEvery ms (default 60000) — metrics-poll driver (App.startPoll / _pollTick) diffs cumulative counters into today's rows, baseline in LS 'poll:<id>'
+ *   4b: poll 'globalFnName' (async (base) → { counters: { [model]: { in, out, cr?, msgs? } }, label? }) + pollEvery ms (default 60000) — metrics-poll driver (App.startPoll / _pollTick) diffs cumulative counters into today's rows, baseline in LS 'poll:<id>' = { base, counters, at } (keyed by server URL)
  *   4b: validate may also return { rows, meta?, billed? } — connectServer stores them under c.id (LocalAI /api/usage history); a validator error with e.answered = true is the server's own message (503 stats disabled), shown verbatim instead of the CORS guess
  * link-only fields (4b): kind 'link-only' · reason (one sentence shown on the hub card: why there is no data path) · quality 'none' · srcIds [] · links {usage, docs, get?}
  *                    — never "connected", no Connect/Sync/Disconnect; the hub card offers Details (modal) + the vendor usage link only
@@ -1322,7 +1322,7 @@ const CONNECTORS = [
     baseUrl: 'http://localhost:8000', validate: 'validateVllm', poll: 'pollVllm', pollEvery: 60000,
     corsHint: 'Something answered at {base} but this page could not read it — vLLM allows any origin by default (--allowed-origins ["*"]); if you narrowed it, add this page\'s origin (file:// pages send Origin: null, so "*" is the practical value), restart vllm serve, then validate again.',
     quality: 'exact',
-    qualityNote: 'Exact tokens while this page is open: vLLM\'s /metrics endpoint (on by default, any origin allowed by default) exposes cumulative per-model counters — vllm:prompt_tokens_total, vllm:generation_tokens_total, vllm:prompt_tokens_cached_total (cache reads), vllm:request_success_total — and this card polls it every 60 s, diffs each counter against the last snapshot and adds the difference to today\'s rows (current hour). vLLM keeps no usage history, so the dashboard is the history: counters are process-lifetime only — a server restart resets them (usage between the restart and the next poll is lost, never counted negative), and usage that accrued while this page was closed is picked up on the next poll and lands in the hour you reconnect (the last snapshot is kept in this browser). Polling starts on Validate & connect, Sync or Refresh (never on page load) and stops when the tab closes. If vLLM runs with --api-key, /metrics still answers without one; the /v1/models fallback (used only when no counters exist yet) may refuse, so a brand-new server shows "0 models" until its first request. vLLM rows are priced $0 — they run on your hardware (gated on the vLLM platform, not on model name).',
+    qualityNote: 'Exact tokens while this page is open: vLLM\'s /metrics endpoint (on by default, any origin allowed by default) exposes cumulative per-model counters — vllm:prompt_tokens_total, vllm:generation_tokens_total, vllm:prompt_tokens_cached_total (cache reads), vllm:request_success_total — and this card polls it every 60 s, diffs each counter against the last snapshot and adds the difference to today\'s rows (current hour). prompt_tokens_total includes the prefix-cache hits, so input is booked as prompt_tokens_total minus prompt_tokens_cached_total (uncached input) and the cached share as cache reads — never both. vLLM keeps no usage history, so the dashboard is the history: counters are process-lifetime only — a server restart resets them (usage between the restart and the next poll is lost, never counted negative), and while this page is closed or its tab hidden the counters keep growing on the server — nothing is dropped: the first tick after you return (or reconnect) books the whole closed or hidden period into that hour (the last snapshot is kept in this browser per server URL — changing the URL starts a fresh baseline, so another server\'s lifetime counters are never booked as usage). Polling starts on Validate & connect, Sync or Refresh (never on page load) and stops when the tab closes. If vLLM runs with --api-key, /metrics still answers without one; the /v1/models fallback (used only when no counters exist yet) may refuse, so a brand-new server shows "0 models" until its first request. vLLM rows are priced $0 — they run on your hardware (gated on the vLLM platform, not on model name).',
     paths: ['server: http://localhost:8000 (vllm serve --host/--port)', 'counters: GET /metrics (on by default) — vllm:prompt_tokens_total, vllm:generation_tokens_total, vllm:prompt_tokens_cached_total, vllm:request_success_total per model_name', 'no usage history or usable log file on the server (stats log lines are throughput only)'],
     links: { get: 'https://docs.vllm.ai/en/stable/getting_started/installation/', docs: 'https://docs.vllm.ai/en/stable/usage/metrics/' } },
   { id: 'llamacpp', platform: 'llama.cpp', name: 'llama.cpp (llama-server)', category: 'local', kind: 'local-server',
@@ -1330,7 +1330,7 @@ const CONNECTORS = [
     baseUrl: 'http://localhost:8080', validate: 'validateLlamaCpp', poll: 'pollLlamaCpp',
     corsHint: 'Something answered at {base} but this page could not read it — llama-server allows any origin by default (--cors-origins *), but --tools, --agent and --mcp-servers-* silently restrict CORS to localhost origins (a file:// page is origin null): restart with an explicit --cors-origins "*" (or this page\'s origin), then validate again. If nothing of yours is on this port, note that LocalAI also defaults to 8080.',
     quality: 'exact',
-    qualityNote: 'Exact tokens while this page is open: llama-server started with --metrics (LLAMA_ARG_ENDPOINT_METRICS=1) exposes cumulative llamacpp:prompt_tokens_total / llamacpp:tokens_predicted_total, and this card polls /metrics every 60 s and adds the differences to today\'s rows (current hour); without --metrics the card validates (GET /props, /health) but counts nothing and says so. /metrics carries no model label in single-model mode — the model name is read from GET /props (model_path basename; router mode\'s per-model label is used when present) — and no request counter, so message counts stay 0. Counters are process-lifetime only: a restart resets them (usage between the restart and the next poll is lost, never negative) and usage while this page was closed lands in the hour you reconnect; polling starts on Validate & connect, Sync or Refresh (never on page load) and stops when the tab closes. CORS is open by default, but --tools / --agent / --mcp-servers-* restrict it to localhost origins (file:// is blocked → pass --cors-origins "*"); an --api-key is not sent by this card — run it keyless on localhost. llama.cpp rows are priced $0 — they run on your hardware (gated on the llama.cpp platform, not on model name); LocalAI also defaults to port 8080.',
+    qualityNote: 'Exact tokens while this page is open: llama-server started with --metrics (LLAMA_ARG_ENDPOINT_METRICS=1) exposes cumulative llamacpp:prompt_tokens_total / llamacpp:tokens_predicted_total, and this card polls /metrics every 60 s and adds the differences to today\'s rows (current hour); without --metrics the card validates (GET /props, /health) but counts nothing and says so. /metrics carries no model label in single-model mode — the model name is read from GET /props (model_path basename; router mode\'s per-model label is used when present) — and no request counter, so message counts stay 0. Counters are process-lifetime only: a restart resets them (usage between the restart and the next poll is lost, never negative) and while this page is closed or its tab hidden the counters keep growing on the server — the first tick after you return (or reconnect) books the whole closed or hidden period into that hour (the snapshot is kept per server URL: changing the URL starts a fresh baseline); polling starts on Validate & connect, Sync or Refresh (never on page load) and stops when the tab closes. CORS is open by default, but --tools / --agent / --mcp-servers-* restrict it to localhost origins (file:// is blocked → pass --cors-origins "*"); an --api-key is not sent by this card — run it keyless on localhost. llama.cpp rows are priced $0 — they run on your hardware (gated on the llama.cpp platform, not on model name); LocalAI also defaults to port 8080.',
     paths: ['server: http://localhost:8080 (llama-server --host/--port)', 'counters: GET /metrics — only with --metrics (LLAMA_ARG_ENDPOINT_METRICS=1): llamacpp:prompt_tokens_total, llamacpp:tokens_predicted_total', 'model name: GET /props model_path · no usage history; --log-file is unstructured console text'],
     links: { get: 'https://github.com/ggml-org/llama.cpp/releases', docs: 'https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md' } },
   // ---- Wave 2 local runners (Task 6 of Plan 4b): validate-only server / estimated chat history ----
@@ -3190,7 +3190,7 @@ function parsePrometheus(text) {
   return out;
 }
 /** vLLM metrics-poll: GET base + '/metrics' (Prometheus, on by default). Cumulative process-lifetime counters per model_name label:
- *  vllm:prompt_tokens_total (in), vllm:generation_tokens_total (out), vllm:prompt_tokens_cached_total (cr), vllm:request_success_total
+ *  vllm:prompt_tokens_total − vllm:prompt_tokens_cached_total (in = uncached input; prompt_tokens_total includes the cache hits), vllm:generation_tokens_total (out), vllm:prompt_tokens_cached_total (cr), vllm:request_success_total
  *  (msgs, summed over finished_reason). An HTTP error is the server's own answer → e.answered (connectServer shows it, no CORS guess). */
 async function pollVllm(base) {
   const res = await fetch(base + '/metrics', { cache: 'no-store' });
@@ -3203,6 +3203,7 @@ async function pollVllm(base) {
     const s = counters[model] || (counters[model] = { in: 0, out: 0, cr: 0, msgs: 0 });
     s[f] += finTok(m.value);
   }
+  for (const s of Object.values(counters)) s.in = Math.max(0, s.in - s.cr);   // prompt_tokens_total counts EVERY prompt token, prefix-cache hits included → in = uncached input (dashboard convention), cr = the cached share
   const n = Object.keys(counters).length;
   return { counters, label: `${n} model${n === 1 ? '' : 's'}` };
 }
@@ -5201,7 +5202,7 @@ const App = {
       kids.push(el('div', { class: 'row' },
         el('input', { type: 'text', id: c.id + '-url', value: LS.get('url:' + c.id, null) || c.baseUrl, 'aria-label': c.name + ' server URL', spellcheck: 'false' }),
         el('button', { class: 'btn primary', id: c.id + '-validate', text: 'Validate & connect', onclick: () => this.connectServer(c) })));
-      if (c.poll) kids.push(el('div', { class: 'note', text: `Counts while this page is open: /metrics is polled every ${Math.round((c.pollEvery || 60000) / 1000)} s and the counter differences land in today's rows (current hour). Polling starts on Validate & connect, Sync or Refresh — never on page load — and stops when the tab closes; a server restart resets the counters (nothing goes negative).` }));
+      if (c.poll) kids.push(el('div', { class: 'note', text: `Counts while this page is open: /metrics is polled every ${Math.round((c.pollEvery || 60000) / 1000)} s and the counter differences land in today's rows (current hour). Polling starts on Validate & connect, Sync or Refresh — never on page load — and stops when the tab closes. While the tab is hidden no tick runs, but the counters keep growing on the server: the first tick after you return books the whole hidden period into that hour. A server restart resets the counters (nothing goes negative).` }));
       if (dual) kids.push(statusEl);
     }
     if (c.patterns) {
@@ -5362,6 +5363,7 @@ const App = {
       const up = e && e.answered ? false : await probeServer(base).catch(() => false);
       if (gen !== this._gen[slot]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }
       status.textContent = ''; status.dataset.gen = '';
+      if (c.poll) this.stopPoll(c);   // metrics-poll: the validate failed (not running / CORS / answered error) → stop the loop, else a stray tick re-creates the entry deleted below (off→ok auto-reveals a hidden card)
       if (e && e.answered) {
         const serverErr = String(e.message || e).slice(0, 80);
         Store.setConnector(c.id, { serverErr, err: serverErr, serverLabel: null, label: this._dualLabel(c.id, { serverLabel: null }) });   // attention, server half
@@ -5457,13 +5459,14 @@ const App = {
     if (this._pollTimers[id]) { clearInterval(this._pollTimers[id]); delete this._pollTimers[id]; }
     this._gen[id + ':poll'] = (this._gen[id + ':poll'] || 0) + 1;
   },
-  /** One poll. Reads the cumulative counters, diffs them against the LS baseline ('poll:<id>' = { counters, at }), merges the positive deltas
+  /** One poll. Reads the cumulative counters, diffs them against the LS baseline ('poll:<id>' = { base, counters, at }; a snapshot from another base URL counts as none), merges the positive deltas
    *  into TODAY's rows (this hour) under c.id, then stores the new baseline. A counter LOWER than its baseline = server restart → that field
    *  restarts from the current value (never negative; tokens between the restart and this tick are lost — the card says so). Skipped while the
-   *  tab is hidden, so a backgrounded page does not pile hours of usage onto the minute it wakes up; a failed fetch (server gone, metrics off)
+   *  tab is hidden (no fetch, no baseline write) — the server's counters keep growing meanwhile, so the first tick after the tab is visible again books the whole hidden period into that hour (the card says so); a failed fetch (server gone, metrics off)
    *  keeps the last good state and tries again next tick. Hub label: '<serverLabel> · counts while this page is open'. */
   async _pollTick(c) {
     if (document.hidden) return;
+    if (!Store.connectors[c.id]) return;   // entry deleted (disconnect / "not running" re-validate): a tick must never re-create it from nothing
     const fn = globalThis[c.poll];
     if (typeof fn !== 'function') return;
     const slot = c.id + ':poll';
@@ -5471,7 +5474,7 @@ const App = {
     const base = (LS.get('url:' + c.id, null) || c.baseUrl).replace(/\/+$/, '');
     let res;
     try { res = await fn(base); } catch { return; }
-    if (gen !== this._gen[slot]) return;   // stopped / disconnected while the fetch was in flight
+    if (gen !== this._gen[slot] || !Store.connectors[c.id]) return;   // stopped / disconnected (or the entry deleted) while the fetch was in flight
     const FIELDS = ['in', 'out', 'cw', 'cr', 'msgs'];
     const cur = {};
     for (const [model, cnt] of Object.entries((res && res.counters) || {})) { cur[model] = {}; for (const f of FIELDS) cur[model][f] = finTok(+(cnt && cnt[f]) || 0); }
@@ -5479,7 +5482,7 @@ const App = {
     const d = todayKey(), hour = new Date().getHours();
     const rows = ((Store.sources[c.id] || {}).rows || []).slice();
     let merged = false;
-    if (prev && prev.counters) {
+    if (prev && prev.counters && prev.base === base) {   // a snapshot taken at another server URL is NOT a baseline: seed only, or its lifetime counters would be booked as usage
       for (const [model, now] of Object.entries(cur)) {
         const was = prev.counters[model] || {};
         const delta = {}; let any = false;
@@ -5491,7 +5494,7 @@ const App = {
         merged = true;
       }
     }
-    LS.set(key, { counters: cur, at: Date.now() });
+    LS.set(key, { base, counters: cur, at: Date.now() });
     if (merged) { const meta = (Store.sources[c.id] || {}).meta || {}; Store.setSource(c.id, rows, { ...meta, polls: (meta.polls || 0) + 1, lastPoll: Date.now() }); }
     const st = Store.connectors[c.id] || {};
     Store.setConnector(c.id, { label: [st.serverLabel, 'counts while this page is open'].filter(Boolean).join(' · '), lastSync: Date.now() });

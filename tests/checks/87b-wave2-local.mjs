@@ -136,19 +136,84 @@ export async function run({ browser, ok }) {
         hub: !!document.querySelector('#accounts-hub .hub-group[data-group="local"] .acct[data-connector="vllm"]'),
         note: /while this page is open/i.test(c.qualityNote) && /restart/i.test(c.qualityNote) && /\$0/.test(c.qualityNote) && /--allowed-origins/.test(c.corsHint) };
     }, { A: vA, B: vB, C: vC, D: vD });
-    ok('vllm: validate parses /metrics ("2 models"), starts the poll, first tick seeds the baseline (in=1000, no rows); grown counters → today/this-hour row with exactly the deltas (in=600 out=150 cr=30 msgs=2; no Qwen row); platform vLLM, $0, not est',
+    ok('vllm: validate parses /metrics ("2 models"), starts the poll, first tick seeds the baseline (in=900 = 1000 prompt − 100 cached, no rows); grown counters → today/this-hour row with exactly the deltas (in=570 = 1470−900 uncached, out=150 cr=30 msgs=2; no Qwen row); platform vLLM, $0, not est',
       vl.calls[0] === 'http://localhost:8000/metrics' && vl.calls[1] === 'http://localhost:8000/metrics' && /Connected/.test(vl.status0) && /2 models/.test(vl.status0)
-      && vl.s0.n === 0 && vl.s0.baseIn === 1000 && vl.s0.timer && vl.s0.status === 'ok' && vl.s0.label === '2 models · counts while this page is open'
-      && vl.s1.in === 600 && vl.s1.out === 150 && vl.s1.cr === 30 && vl.s1.msgs === 2 && vl.s1.qwen === 0 && vl.s1.baseIn === 1600
+      && vl.s0.n === 0 && vl.s0.baseIn === 900 && vl.s0.timer && vl.s0.status === 'ok' && vl.s0.label === '2 models · counts while this page is open'
+      && vl.s1.in === 570 && vl.s1.out === 150 && vl.s1.cr === 30 && vl.s1.msgs === 2 && vl.s1.qwen === 0 && vl.s1.baseIn === 1470
       && vl.rowShape && vl.rowShape.platform === 'vLLM' && vl.rowShape.todayHour && !vl.rowShape.est && vl.rowShape.cost === 0, JSON.stringify({ calls: vl.calls, s0: vl.s0, status0: vl.status0, s1: vl.s1, rowShape: vl.rowShape }));
-    ok('vllm: counter reset (restart) → no negative rows, nothing added, baseline = new values (in=120); growth after the reset counts from there (totals in=700 out=180 cr=30 msgs=3); hidden tab → tick skipped (no fetch, baseline untouched)',
-      vl.s2.in === 600 && vl.s2.out === 150 && vl.s2.cr === 30 && vl.s2.msgs === 2 && vl.s2.baseIn === 120
-      && vl.s3.in === 700 && vl.s3.out === 180 && vl.s3.cr === 30 && vl.s3.msgs === 3 && vl.s3.baseIn === 220 && vl.s3.n >= 1 && vl.s3.n <= 2
+    ok('vllm: counter reset (restart) → no negative rows, nothing added, baseline = new values (in=120); growth after the reset counts from there (totals in=670 out=180 cr=30 msgs=3); hidden tab → tick skipped (no fetch, baseline untouched)',
+      vl.s2.in === 570 && vl.s2.out === 150 && vl.s2.cr === 30 && vl.s2.msgs === 2 && vl.s2.baseIn === 120
+      && vl.s3.in === 670 && vl.s3.out === 180 && vl.s3.cr === 30 && vl.s3.msgs === 3 && vl.s3.baseIn === 220 && vl.s3.n >= 1 && vl.s3.n <= 2
       && vl.hiddenSkip.fetched === 0 && vl.hiddenSkip.baseIn === 220 && vl.hiddenSkip.n === vl.s3.n, JSON.stringify({ s2: vl.s2, s3: vl.s3, hiddenSkip: vl.hiddenSkip }));
     ok('vllm: stopPoll clears the timer, startPoll restarts it (no double count); disconnect stops the poll + deletes LS poll:vllm (rows kept on Cancel); registry = local-server/local/exact, poll pollVllm every 60000 ms, card note + hub card in Local group, honest note + CORS hint',
-      vl.stopped && vl.restarted && vl.s4.in === 700 && vl.s4.msgs === 3 && !vl.afterDisc.timer && vl.afterDisc.base === null && !vl.afterDisc.has && vl.afterDisc.rows === vl.s3.n && /Not connected/.test(vl.afterDisc.text)
+      vl.stopped && vl.restarted && vl.s4.in === 670 && vl.s4.msgs === 3 && !vl.afterDisc.timer && vl.afterDisc.base === null && !vl.afterDisc.has && vl.afterDisc.rows === vl.s3.n && /Not connected/.test(vl.afterDisc.text)
       && vl.kind === 'local-server' && vl.cat === 'local' && vl.quality === 'exact' && vl.poll === 'pollVllm' && vl.every === 60000 && vl.base === 'http://localhost:8000'
       && JSON.stringify(vl.srcIds) === JSON.stringify(['vllm']) && vl.statusEl === 'vllm-status' && vl.card && vl.hub && vl.note, JSON.stringify({ stopped: vl.stopped, restarted: vl.restarted, s4: vl.s4, afterDisc: vl.afterDisc, card: vl.card, hub: vl.hub, note: vl.note }));
+
+    // ---- T5b fixes: a failed re-validate stops the loop (no resurrection of a deleted entry); baseline keyed by server URL (no phantom usage after a URL
+    //      change); in = prompt − cached (E/F arithmetic in gen.mjs); truthful hidden-tab copy (nothing is discarded: the first tick after you return books it) ----
+    const vE = read('wave2', 'vllm-metrics-e.txt'), vF = read('wave2', 'vllm-metrics-f.txt');
+    const vf = await page.evaluate(async ({ A, B, D, E, F }) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      LS.del('poll:vllm'); LS.del('url:vllm');
+      const c = connectorById('vllm'), lc = connectorById('llamacpp');
+      const origFetch = window.fetch;
+      let metrics = A, down = false;
+      window.fetch = async (url, init) => {
+        const u = String(url);
+        if (down) throw new TypeError('Failed to fetch');   // server gone: /metrics, /v1/models and the no-cors probe all fail
+        if (u.endsWith('/metrics')) return new Response(metrics, { status: 200, headers: { 'content-type': 'text/plain; version=0.0.4' } });
+        if (u.endsWith('/v1/models')) return new Response(JSON.stringify({ object: 'list', data: [{ id: 'meta-llama/Llama-3.1-8B-Instruct' }, { id: 'Qwen/Qwen3-8B' }] }), { status: 200 });
+        throw new TypeError('Failed to fetch');
+      };
+      const LLAMA = 'meta-llama/Llama-3.1-8B-Instruct';
+      const rowsOf = () => ((Store.sources.vllm || {}).rows || []);
+      const sum = (f) => rowsOf().reduce((a, r) => a + (r[f] || 0), 0);
+      const snap = (tag) => { const b = LS.get('poll:vllm', null) || {}; return { tag, n: rowsOf().length, in: sum('in'), out: sum('out'), cr: sum('cr'), msgs: sum('msgs'),
+        base: b.base, baseIn: ((b.counters || {})[LLAMA] || {}).in, has: !!Store.connectors.vllm, timer: !!App._pollTimers.vllm }; };
+      const urlEl = document.getElementById('vllm-url');
+      urlEl.value = 'http://localhost:8000';
+      // connect at :8000 (A seeds: base + counters in the baseline), grow to B → one row in=570 out=150 cr=30 msgs=2
+      await App.connectServer(c);
+      const s0 = snap('A@8000');
+      metrics = B; await App._pollTick(c);
+      const s1 = snap('B@8000');
+      // (1) the server goes away and the user re-validates → "Not running", the entry is deleted — and the poll loop must die with it
+      down = true;
+      await App.connectServer(c);
+      const afterFail = { ...snap('down'), text: document.getElementById('vllm-status').textContent };
+      // the server comes back but nobody re-validated: a stray tick (timer or in-flight) must NOT resurrect the deleted entry (off→ok would auto-reveal a hidden card)
+      down = false; metrics = D; await App._pollTick(c);
+      const afterTick = snap('tick-after-delete');
+      // (2) another vLLM at a new URL: its lifetime counters (E, far above B's snapshot) must not be diffed against the OLD server's baseline → seed only, no rows
+      urlEl.value = 'http://localhost:8001';
+      metrics = E; await App.connectServer(c);
+      const s2 = { ...snap('E@8001'), url: LS.get('url:vllm', null), text: document.getElementById('vllm-status').textContent };
+      // growth on the new server counts from ITS seed: F − E = in 180 out 50 cr 20 msgs 1 → totals in=750 out=200 cr=50 msgs=3
+      metrics = F; await App._pollTick(c);
+      const s3 = snap('F@8001');
+      // (4) copy: the card and both quality notes say the hidden period is booked by the first tick after you return — never that it is skipped or discarded
+      const cardText = document.getElementById('src-vllm').textContent, lcCard = (document.getElementById('src-llamacpp') || {}).textContent || '';
+      const truthful = (t) => /counters keep growing on the server/i.test(t) && /first tick after you return/i.test(t) && !/catch-up|discard/i.test(t);
+      const copy = { card: truthful(cardText), lcCard: truthful(lcCard), note: truthful(c.qualityNote), lcNote: truthful(lc.qualityNote),
+        noteUrl: /URL/.test(c.qualityNote) && /fresh baseline|new baseline/i.test(c.qualityNote), noteUncached: /prompt_tokens_cached_total/.test(c.qualityNote) && /uncached|minus the cached|− the cached/i.test(c.qualityNote) };
+      App.stopPoll(c);
+      window.fetch = origFetch;
+      urlEl.value = c.baseUrl; LS.del('url:vllm'); LS.del('poll:vllm');
+      Store.sources = {}; Store.connectors = {}; Store.persist();
+      return { s0, s1, afterFail, afterTick, s2, s3, copy };
+    }, { A: vA, B: vB, D: vD, E: vE, F: vF });
+    ok('vllm fix: baseline = { base, counters, at } (base = validated URL); a failed re-validate (server gone → "Not running", entry deleted) stops the poll timer, and a later tick with the server back does not re-create the deleted entry (no off→ok flip, rows untouched)',
+      vf.s0.base === 'http://localhost:8000' && vf.s0.baseIn === 900 && vf.s0.timer && vf.s0.has
+      && vf.s1.n === 1 && vf.s1.in === 570 && vf.s1.out === 150 && vf.s1.cr === 30 && vf.s1.msgs === 2 && vf.s1.baseIn === 1470
+      && /Not running/.test(vf.afterFail.text) && !vf.afterFail.has && !vf.afterFail.timer
+      && !vf.afterTick.has && !vf.afterTick.timer && vf.afterTick.in === 570 && vf.afterTick.n === 1, JSON.stringify({ s0: vf.s0, s1: vf.s1, afterFail: vf.afterFail, afterTick: vf.afterTick }));
+    ok('vllm fix: URL change (:8000 → :8001) — the new server\'s counters (E: in=4600 uncached) are NOT diffed against the old server\'s snapshot: first tick seeds only (rows still in=570), baseline base=:8001 in=4600; F then counts from that seed (totals in=750 out=200 cr=50 msgs=3)',
+      /Connected/.test(vf.s2.text) && vf.s2.url === 'http://localhost:8001' && vf.s2.has && vf.s2.timer && vf.s2.base === 'http://localhost:8001' && vf.s2.baseIn === 4600
+      && vf.s2.n === 1 && vf.s2.in === 570 && vf.s2.out === 150 && vf.s2.cr === 30 && vf.s2.msgs === 2
+      && vf.s3.in === 750 && vf.s3.out === 200 && vf.s3.cr === 50 && vf.s3.msgs === 3 && vf.s3.baseIn === 4780 && vf.s3.base === 'http://localhost:8001', JSON.stringify({ s2: vf.s2, s3: vf.s3 }));
+    ok('vllm/llamacpp copy: card note + both qualityNotes say the counters keep growing on the server while the tab is hidden and the first tick after you return books that period (no "catch-up"/"discard"); vLLM note says the baseline is per server URL and in = prompt − prompt_tokens_cached_total (uncached)',
+      vf.copy.card && vf.copy.lcCard && vf.copy.note && vf.copy.lcNote && vf.copy.noteUrl && vf.copy.noteUncached, JSON.stringify(vf.copy));
 
     // ---- T5c: llama.cpp — counters without a model label (model from /props), validate via /props, metrics off → honest detail + answered error ----
     const lcText = read('wave2', 'llamacpp-metrics.txt');
