@@ -64,7 +64,14 @@ export async function run({ browser, ok }) {
 export async function postRun({ ok }) {
   const fs = await import('node:fs');
   const path = await import('node:path');
-  const html = fs.readFileSync(path.join(import.meta.dirname, '..', '..', 'AI Usage Dashboard.html'));
+  const root = path.join(import.meta.dirname, '..', '..');
+  const html = fs.readFileSync(path.join(root, 'AI Usage Dashboard.html'));
   const bad = [...html].filter(b => b <= 8).length;
   ok('hygiene: no raw control bytes (<0x09) in the HTML file', bad === 0, 'found ' + bad);
+  ok('size: AI Usage Dashboard.html is ≤ 600 KB', html.length <= 600 * 1024, Math.round(html.length / 1024) + ' KB');
+  // every .mjs under tests/ (checks, lib, fixtures, tools — not node_modules / generated out / artifacts) and docs/tools/: separators stay visible escape text
+  const walk = (dir, out = []) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { if (e.name === 'node_modules' || e.name === 'out' || e.name === 'artifacts') continue; const p = path.join(dir, e.name); if (e.isDirectory()) walk(p, out); else if (p.endsWith('.mjs')) out.push(p); } return out; };
+  const files = walk(path.join(root, 'tests')).concat(fs.existsSync(path.join(root, 'docs', 'tools')) ? walk(path.join(root, 'docs', 'tools')) : []);
+  const dirty = files.filter(p => [...fs.readFileSync(p)].some(b => b <= 8)).map(p => path.relative(root, p));
+  ok('hygiene: no raw control bytes in tests/**/*.mjs and docs/tools/*.mjs', dirty.length === 0, dirty.join(', '));
 }

@@ -210,12 +210,13 @@ export async function run({ browser, ok }) {
       App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load(); App._hubQuery = '';
       App._render();
       const box = document.getElementById('hub-search');
-      const total = document.querySelectorAll('#accounts-hub .acct').length;   // every registry card (>12) → box shown
+      const total = document.querySelectorAll('#accounts-hub .acct').length;   // every registry card (17 in 4a, ~46 in 4b) → box shown
       const boxShownBefore = !box.hidden;
       box.value = 'e'; box.dispatchEvent(new Event('input', { bubbles: true }));
       const matched = [...document.querySelectorAll('#accounts-hub .acct')].map(c => c.dataset.connector);
-      // hide (total − 12) cards → exactly 12 un-hidden → box hides → query must be dropped (independent of registry size)
-      for (const id of CONNECTORS.map(c => c.id).slice(0, total - 12)) View.hideCard(id);
+      // hide cards (matching ones first) until exactly 12 are un-hidden → box hides → query must be dropped
+      const toHide = [...matched, ...CONNECTORS.map(c => c.id).filter(id => !matched.includes(id))].slice(0, total - 12);
+      for (const id of toHide) View.hideCard(id);
       App._render();
       const afterHide = { boxHidden: box.hidden, boxValue: box.value, q: App._hubQuery, n: document.querySelectorAll('#accounts-hub .acct').length,
         unhidden: CONNECTORS.filter(c => !View.isCardHidden(c.id)).length, nomatch: !!document.querySelector('#accounts-hub .hub-nomatch') };
@@ -328,6 +329,58 @@ export async function run({ browser, ok }) {
     ok('hub: the seven export-file cards (ChatGPT, Claude.ai, Grok, Microsoft Copilot, Perplexity, Meta AI, DeepSeek chat) are chat / estimated, copy is quality-first and export-based, each has links, paths, hint and a live status element',
       JSON.stringify(exp.kinds) === JSON.stringify([['chatgpt-app', 'ChatGPT', 'chat', 'estimated', 'chatgpt'], ['claudeai-app', 'Claude.ai', 'chat', 'estimated', 'claudeai'], ['grok', 'Grok', 'chat', 'estimated', 'grok-export'], ['mscopilot', 'Microsoft Copilot', 'chat', 'estimated', 'copilot-activity-csv'],
         ['perplexity', 'Perplexity', 'chat', 'estimated', 'perplexity-export'], ['meta-ai', 'Meta AI', 'chat', 'estimated', 'meta-ai-export'], ['deepseek-chat', 'DeepSeek chat', 'chat', 'estimated', 'deepseek-chat-export']]) && exp.copyOk, JSON.stringify(exp.kinds));
+    // ---- Plan 4b: the hub at ~46 cards ----
+    const big = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load(); App._hubQuery = '';
+      App._render();
+      const total = CONNECTORS.length;
+      const box = document.getElementById('hub-search');
+      const groups = [...document.querySelectorAll('#accounts-hub .hub-group')].map(g => g.dataset.group);
+      const counts = Object.fromEntries(groups.map(g => [g, document.querySelectorAll(`#accounts-hub .hub-group[data-group="${g}"] .acct`).length]));
+      // perf: average of 5 synchronous renderHub() calls with every card present
+      let t = 0; for (let i = 0; i < 5; i++) { const a = performance.now(); App.renderHub(); t += performance.now() - a; }
+      const avgMs = t / 5;
+      // hidden chip counts: hide 3 cards → "3 hidden — show"; the chip is a <button>, so Enter = click → all restored (App.render is rAF-batched)
+      const ids = CONNECTORS.slice(-3).map(c => c.id);
+      ids.forEach(id => View.hideCard(id)); App.renderHub();
+      const chip = document.querySelector('#hub-chips .hub-hidden-chip');
+      const chipText = chip ? chip.textContent : null;
+      const nAfterHide = document.querySelectorAll('#accounts-hub .acct').length;
+      chip.focus(); chip.click();
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const nAfterShow = document.querySelectorAll('#accounts-hub .acct').length;
+      const chipGone = !document.querySelector('#hub-chips .hub-hidden-chip');
+      // keyboard: every card is a focusable button (tabindex=0, role=button); Enter on a data card drills into its platform
+      const cards = [...document.querySelectorAll('#accounts-hub .acct')];
+      const focusable = cards.length === total && cards.every(c => c.tabIndex === 0 && c.getAttribute('role') === 'button');
+      const dataCard = CONNECTORS.find(c => c.platform && c.kind !== 'link-only' && c.kind !== 'export-file' && c.kind !== 'files');
+      const el2 = document.querySelector(`#accounts-hub .acct[data-connector="${dataCard.id}"]`);
+      el2.focus(); el2.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      const drilled = App._drill === dataCard.platform;
+      App._drill = null; App._render();
+      return { total, boxShown: !box.hidden, groups, counts, avgMs, chipText, nAfterHide, nAfterShow, chipGone, focusable, drilled };
+    });
+    ok('hub (4b): ~46 registry cards → search box visible; groups render in spec order and all five are non-empty',
+      big.total >= 46 && big.boxShown && JSON.stringify(big.groups) === JSON.stringify(['coding', 'chat', 'local', 'api', 'cloud']) && Object.values(big.counts).every(n => n > 0), JSON.stringify(big));
+    ok('hub (4b): renderHub() averages under 60 ms with every card present (5 runs)', big.avgMs < 60, big.avgMs.toFixed(1) + ' ms');
+    ok('hub (4b): hidden chip counts ("3 hidden — show"); Enter/click on the chip restores every card; all cards are keyboard-focusable buttons and Enter drills into a data card\'s platform',
+      big.chipText === '3 hidden — show' && big.nAfterHide === big.total - 3 && big.nAfterShow === big.total && big.chipGone && big.focusable && big.drilled, JSON.stringify(big));
+
+    // ---- Plan 4b: budgets editor lists Wave 2 platforms once data exists (registry-derived, once per platform) ----
+    const bud = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = []; Budgets.limits = {}; LS.del('budgets');
+      const fw = CONNECTORS.find(c => c.platform === 'Fireworks AI'), la = CONNECTORS.find(c => c.platform === 'LocalAI');
+      App.renderBudgets();
+      const before = [...document.querySelectorAll('#budget-editor .budget-row')].map(r => r.dataset.platform);
+      Store.setSource(fw.id, [{ d: dayKey(new Date()), platform: 'Fireworks AI', model: 'accounts/fireworks/models/llama-v3p1-70b-instruct', in: 1000, cw: 0, cr: 0, out: 100, msgs: 1 }], {});
+      Store.setSource(la.id, [{ d: dayKey(new Date()), platform: 'LocalAI', model: 'qwen3', in: 1000, cw: 0, cr: 0, out: 100, msgs: 1 }], {});
+      App.renderBudgets();
+      const after = [...document.querySelectorAll('#budget-editor .budget-row')].map(r => r.dataset.platform);
+      Store.sources = {}; Store.persist(); App.renderBudgets();
+      return { before, after, fwOnce: after.filter(p => p === 'Fireworks AI').length, laOnce: after.filter(p => p === 'LocalAI').length };
+    });
+    ok('budgets (4b): the editor lists a Wave 2 platform once data exists (Fireworks AI, LocalAI) — once per platform, and not before',
+      !bud.before.includes('Fireworks AI') && !bud.before.includes('LocalAI') && bud.fwOnce === 1 && bud.laOnce === 1, JSON.stringify(bud));
   } finally {
     await page.close();
   }

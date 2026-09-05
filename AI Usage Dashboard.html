@@ -937,7 +937,7 @@ const DEFAULT_PRICES = [
   { pat: 'o3-pro',                         label: 'o3-pro',                in: 20,   out: 80,  cw: 0, cr: 5 },
   { pat: 'o3-mini',                        label: 'o3-mini',               in: 1.1,  out: 4.4, cw: 0, cr: 0.55 },
   { pat: 'o1-pro',                         label: 'o1-pro',                in: 150,  out: 600, cw: 0, cr: 75 },
-  { pat: '^auto$|^gpt$|chatgpt',           label: 'ChatGPT (auto)',        in: 2,    out: 12,  cw: 0, cr: 0.2 },
+  { pat: '^auto$|^gpt$|chatgpt|^copilot$', label: 'ChatGPT / Copilot (auto)', in: 2,  out: 12,  cw: 0, cr: 0.2 },   // Microsoft Copilot activity rows use model 'copilot'; Copilot CLI rows without a model too
   // --- Google
   { pat: 'gemini-3[.-]?[67]-flash',        label: 'Gemini 3.6/3.7 Flash',  in: 0.75, out: 3.75, cw: 0, cr: 0.075 },
   { pat: 'gemini-3[.-]?5-flash-lite',      label: 'Gemini 3.5 Flash-Lite', in: 0.3,  out: 2.5,  cw: 0, cr: 0.03 },
@@ -949,6 +949,14 @@ const DEFAULT_PRICES = [
   { pat: 'gemini-2[.-]?5-flash-lite',      label: 'Gemini 2.5 Flash-Lite', in: 0.1,  out: 0.4,  cw: 0, cr: 0.01 },
   { pat: 'gemini-2[.-]?5-flash',           label: 'Gemini 2.5 Flash',      in: 0.3,  out: 2.5,  cw: 0, cr: 0.03 },
   { pat: 'gemini',                         label: 'Gemini (other)',        in: 1.25, out: 10,   cw: 0, cr: 0.125 },
+  // --- Wave 2 (Plan 4b): xAI / DeepSeek / Perplexity / Meta AI — August 2026 list prices from the vendors' pricing pages; every estimated row is labeled est.
+  //     first-match rule: the fast/mini and reasoner rows MUST precede their family rows ('^grok-4' would otherwise swallow grok-4-fast)
+  { pat: 'grok-3-mini|grok-4-fast',        label: 'Grok fast/mini',        in: 0.2,  out: 0.5,  cw: 0, cr: 0.05 },
+  { pat: '^grok-4|^grok$',                 label: 'Grok 4 (xAI list)',     in: 3,    out: 15,   cw: 0, cr: 0.75 },
+  { pat: 'deepseek-reasoner|deepseek-r1',  label: 'DeepSeek Reasoner',     in: 0.55, out: 2.19, cw: 0, cr: 0.14 },
+  { pat: 'deepseek',                       label: 'DeepSeek chat (V3 list)', in: 0.27, out: 1.10, cw: 0, cr: 0.07 },
+  { pat: '^sonar|^perplexity$',            label: 'Perplexity Sonar',      in: 1,    out: 1,    cw: 0, cr: 0 },
+  { pat: '^meta-ai$',                      label: 'Meta AI (consumer, no API price)', in: 0, out: 0, cw: 0, cr: 0 },
   // --- fallback
   { pat: '.*',                             label: 'Unknown model',         in: 3,    out: 15,  cw: 3.75, cr: 0.3 },
 ];

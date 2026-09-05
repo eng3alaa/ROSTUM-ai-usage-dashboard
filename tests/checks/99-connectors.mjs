@@ -119,6 +119,36 @@ export async function run({ browser, ok }) {
     });
     ok('link-only: refreshAll / syncConnector / disconnectConnector never fetch, never create connector state, never prompt; status stays off and the card says "No data path"',
       !lo.missing && lo.fetches === 0 && lo.confirms === 0 && lo.syncUndefined && lo.noState && lo.statuses.every(s => s === 'off') && lo.texts.every(t => /no data path/i.test(t)), JSON.stringify(lo));
+    // ---- Plan 4b: refreshAll covers key-driver kinds (connectKey → globalThis[c.fetch]) ----
+    const ra = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      const remembered = CONNECTORS.find(c => c.fetch && !c.sessionOnly && c.keyLS);   // a Wave 2 api-key / admin-key entry that can remember its key
+      const session = CONNECTORS.find(c => c.fetch && c.sessionOnly);                  // a cloud-token entry (never persists)
+      const calls = {}, orig = {};
+      for (const c of [remembered, session]) { orig[c.id] = globalThis[c.fetch]; window[c.fetch] = async () => { calls[c.id] = (calls[c.id] || 0) + 1; return { label: 'stub', detail: '' }; }; }
+      const setFields = (c, v) => (c.fields || []).forEach(f => { const e = document.getElementById(c.id + '-f-' + f.id); if (e) e.value = v; });
+      // (a) remembered key + the input still holds it → fetch called once
+      LS.set(remembered.keyLS, 'k-remembered'); const ki = document.getElementById(remembered.id + '-key'); ki.value = 'k-remembered'; setFields(remembered, 'x');
+      // (b) sessionOnly with an EMPTY input → never called (nothing remembered, nothing to re-fetch)
+      const si = document.getElementById(session.id + '-key'); si.value = ''; setFields(session, '');
+      await App.refreshAll();
+      const sessKey = session.keyLS || ('key:' + session.id);
+      const out = { remembered: remembered.id, session: session.id, a: calls[remembered.id] || 0, bEmpty: calls[session.id] || 0, sessionLS: LS.get(sessKey, null) };
+      // (c) sessionOnly with a value still in the input → re-fetched ("session-only" = while this page is open), still nothing persisted
+      si.value = 'tok-live'; setFields(session, 'x');
+      await App.refreshAll();
+      out.bLive = calls[session.id] || 0;
+      out.sessionLSAfter = LS.get(sessKey, null);
+      out.secretFieldLS = (session.fields || []).filter(f => f.secret).map(f => LS.get('field:' + session.id + ':' + f.id, null)).every(v => v === null);
+      // cleanup
+      for (const c of [remembered, session]) window[c.fetch] = orig[c.id];
+      LS.del(remembered.keyLS); ki.value = ''; si.value = ''; setFields(remembered, ''); setFields(session, '');
+      for (const c of [remembered, session]) (c.fields || []).forEach(f => LS.del('field:' + c.id + ':' + f.id));
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist();
+      return out;
+    });
+    ok('refreshAll (4b): remembered key → its fetch fn runs once; sessionOnly + empty input → not called; sessionOnly + live input → called; session key/secret fields never persisted',
+      ra.a === 1 && ra.bEmpty === 0 && ra.bLive === 1 && ra.sessionLS === null && ra.sessionLSAfter === null && ra.secretFieldLS, JSON.stringify(ra));
   } finally {
     await page.close();
   }
