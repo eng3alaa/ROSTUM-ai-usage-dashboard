@@ -3429,7 +3429,7 @@ async function cloudJSON(url, init = {}, auth = {}) {
  *  counts are not pulled → msgs 0. (2) when scope is given: Cost Management query → billed PreTaxCost per UsageDate (yyyymmdd) for
  *  ServiceName 'Cognitive Services' (all Cognitive Services in the scope — narrow the scope to the resource group that holds only
  *  Azure OpenAI if you also run Speech/Vision there). Resource ids and the scope are validated BEFORE any call — both are concatenated into
- *  the management.azure.com URL. Without a scope billed is [] (truthful empty). 401 → 'token expired — mint a new one (az account get-access-token)'. */
+ *  the management.azure.com URL. Without a scope billed is [] (truthful empty); a Cost Management failure AFTER the metrics landed (no Cost Management Reader, throttling) degrades to billed: null — connectKey marks the stored envelope stale, tokens still land, the status line says "cost unavailable" (the Bedrock contract, never an error state for the cost half alone). 401 → 'token expired — mint a new one (az account get-access-token)'. */
 async function fetchAzureOpenAI(token, fields, opts = {}) {
   const days = Math.min(Math.max(1, opts.days || 90), 90);   // Azure Monitor keeps 93 days of platform metrics
   const resources = String(fields.resources || '').split(/[\r\n,]+/).map(s => s.trim()).filter(Boolean);
@@ -3471,8 +3471,8 @@ async function fetchAzureOpenAI(token, fields, opts = {}) {
     agg.add(d, 'Azure OpenAI', model, { in: tin, out: tout, msgs: 0 });
   }
   const rows = agg.rows();
-  let billed = [];   // [] = truthful empty when no scope is configured → connectKey stores it (a previous scope's envelope must not stay "fresh" behind "no cost scope")
-  if (scope) {
+  let billed = [], costNote = '';   // [] = truthful empty when no scope is configured → connectKey stores it (a previous scope's envelope must not stay "fresh" behind "no cost scope") · null = the Cost Management query failed → connectKey marks the stored envelope stale, the metric rows above still land (never silently "fresh")
+  if (scope) try {   // the cost half only: a failure here degrades to billed: null (catch below) — the Monitor rows are already in `rows`
     const body = { type: 'ActualCost', timeframe: 'Custom', timePeriod: { from: dayKeyUTC(startMs) + 'T00:00:00Z', to: dayKeyUTC(endMs) + 'T23:59:59Z' },
       dataset: { granularity: 'Daily', aggregation: { totalCost: { name: 'PreTaxCost', function: 'Sum' } },
         filter: { dimensions: { name: 'ServiceName', operator: 'In', values: ['Cognitive Services'] } } } };
@@ -3493,10 +3493,10 @@ async function fetchAzureOpenAI(token, fields, opts = {}) {
       url = props.nextLink || null;
     }
     billed = [...byDay.entries()].map(([d, amount]) => ({ d, amount })).sort((a, b) => a.d < b.d ? -1 : 1);
-  }
+  } catch (e) { billed = null; costNote = ' · cost unavailable: ' + (e.message || String(e)).slice(0, 80); }   // tokens-only sync: reported in the status line, not an error state
   const nModels = new Set(rows.map(r => r.model)).size;
   return { label: `${resources.length} resource${resources.length === 1 ? '' : 's'}`,
-    detail: `${rows.length} usage rows · ${nModels} model${nModels === 1 ? '' : 's'} · last ${days} days` + (scope ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from Cost Management` : ' · no cost scope — add one for billed dollars'),
+    detail: `${rows.length} usage rows · ${nModels} model${nModels === 1 ? '' : 's'} · last ${days} days` + (scope ? (billed ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from Cost Management` : costNote) : ' · no cost scope — add one for billed dollars'),
     rows, billed, meta: { days, resources: resources.length } };
 }
 
@@ -3506,7 +3506,7 @@ async function fetchAzureOpenAI(token, fields, opts = {}) {
  *  exact tokens per publisher model. Monitoring anchors alignment windows to interval.endTime (= the sync time), so each point is the 24 h
  *  ending then, attributed to the UTC date of (window end − 1 s). Request counts are not pulled → msgs 0. (2) when billingTable is given:
  *  BigQuery jobs.query against the Cloud Billing export (service.description 'Vertex AI') → billed per usage day; there is no Cloud Billing
- *  REST endpoint for incurred cost, the export is the only path; without a table billed is [] (truthful empty). 401 → 'token expired — mint a new one (gcloud auth print-access-token)';
+ *  REST endpoint for incurred cost, the export is the only path; without a table billed is [] (truthful empty); a BigQuery failure AFTER the Monitoring rows landed (no bigquery.jobUser, a query timeout) degrades to billed: null — connectKey marks the stored envelope stale, tokens still land, the status line says "cost unavailable" (the Bedrock contract). 401 → 'token expired — mint a new one (gcloud auth print-access-token)';
  *  403 → token rejected (expired or missing roles). API keys are not accepted by either API. */
 async function fetchVertexAI(token, fields, opts = {}) {
   const days = Math.max(1, opts.days || 90);
@@ -3548,17 +3548,17 @@ async function fetchVertexAI(token, fields, opts = {}) {
     pageToken = (j && j.nextPageToken) || null;
   } while (pageToken && ++pages < 50);
   const rows = agg.rows();
-  let billed = [];   // [] = truthful empty when no billing table is configured → connectKey stores it (a previous table's envelope must not stay "fresh" behind "no billing table")
-  if (table) {
+  let billed = [], costNote = '';   // [] = truthful empty when no billing table is configured → connectKey stores it (a previous table's envelope must not stay "fresh" behind "no billing table") · null = the BigQuery query failed → connectKey marks the stored envelope stale, the Monitoring rows above still land (never silently "fresh")
+  if (table) try {   // the cost half only: a failure here degrades to billed: null (catch below) — the Monitoring rows are already in `rows`
     const body = { query: "SELECT DATE(usage_start_time) d, SUM(cost) c FROM `" + table + "` WHERE service.description = 'Vertex AI' AND usage_start_time >= TIMESTAMP('" + dayKeyUTC(startMs) + "') GROUP BY d ORDER BY d", useLegacySql: false, timeoutMs: 30000, maxResults: 1000 };
     const j = await cloudJSON(`https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(project)}/queries`, { method: 'POST', headers, body: JSON.stringify(body) }, auth);
     if (j && j.jobComplete === false) throw new Error('BigQuery did not finish within 30 s — sync again');
     billed = ((j && j.rows) || []).map(r => { const f = r.f || []; return { d: String((f[0] || {}).v || ''), amount: finAmt(parseFloat((f[1] || {}).v)) }; })
       .filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x.d)).sort((a, b) => a.d < b.d ? -1 : 1);
-  }
+  } catch (e) { billed = null; costNote = ' · cost unavailable: ' + (e.message || String(e)).slice(0, 80); }   // tokens-only sync: reported in the status line, not an error state
   const nModels = new Set(rows.map(r => r.model)).size;
   return { label: project,
-    detail: `${rows.length} usage rows · ${nModels} model${nModels === 1 ? '' : 's'} · last ${days} days` + (table ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from the billing export` : ' · no billing table — add the BigQuery export table for billed dollars'),
+    detail: `${rows.length} usage rows · ${nModels} model${nModels === 1 ? '' : 's'} · last ${days} days` + (table ? (billed ? ` · billed ${billed.length} day${billed.length === 1 ? '' : 's'} from the billing export` : costNote) : ' · no billing table — add the BigQuery export table for billed dollars'),
     rows, billed, meta: { days, project } };
 }
 
@@ -4774,10 +4774,15 @@ const App = {
   },
   /** A card whose entry exists while its status line still shows the initial "Not connected." (entry restored from storage on reload; DeepSeek
    *  connected by its usage ZIP alone — no connectKey / scan wrote the line in this page) is revealed as connected by renderHub, so derive the
-   *  line from the entry instead of contradicting the green dot. dataset.gen guard: an in-flight fetch / validation owns its line. */
+   *  line from the entry instead of contradicting the green dot. dataset.gen guard: an in-flight fetch / validation owns its line.
+   *  Never for the static Claude Code card ('local': restoreHandle owns its "Not connected. Tip: <code>…</code>" line), nor for a dual-driver
+   *  card's SERVER line while the entry has no serverLabel — a folder-only scan (or its reload) connects the folder half only, and
+   *  '<id>-scan-status' already says so; rewriting '<id>-status' would claim a server nobody validated. */
   _syncStatusLine(c) {
     const s = $(c.statusEl), st = Store.connectors[c.id];
     if (!s || !st || s.dataset.gen || !s.textContent.startsWith('Not connected.')) return;
+    if (c.id === 'local') return;                                 // static card: the Tip line (with its <code> path) is restoreHandle's, never derived from the entry
+    if (c.baseUrl && c.patterns && !st.serverLabel) return;       // dual-driver card, folder-only entry: '<id>-status' is the SERVER line — leave it "Not connected."
     s.textContent = '';
     if (st.err) { s.appendChild(el('span', { class: 'err', text: 'Needs attention: ' })); s.appendChild(document.createTextNode(st.err)); return; }
     const when = st.lastSync ? ' · synced ' + new Date(st.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';

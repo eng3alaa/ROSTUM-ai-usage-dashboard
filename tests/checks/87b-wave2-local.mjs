@@ -353,10 +353,15 @@ export async function run({ browser, ok }) {
       const exp = { 'llama3.2-3b-instruct': dayKey(new Date('2026-08-10T09:00:00.000Z')), 'qwen3-4b': dayKey(new Date(1786396200 * 1000)), jan: dayKey(new Date('2026-08-12T09:00:00.000Z')) };
       const daysOk = Object.entries(exp).every(([m, d]) => byModel[m] && byModel[m].d === d);
       // card copy before any scan (dual-driver card: server line + folder line)
-      const pickText = document.getElementById('jan-pick').textContent, scanDefault = document.getElementById('jan-scan-status').textContent;
+      const pickText = document.getElementById('jan-pick').textContent, scanDefault = document.getElementById('jan-scan-status').textContent, serverDefault = document.getElementById('jan-status').textContent;
       // through the card: scanFiles routes messages.jsonl by pattern, lands rows under 'jan'
       await App.scanFiles(c, mk());
       const src = Store.sources.jan;
+      // regression (0b45efc): renderHub → _syncStatusLine must NOT flip the SERVER line of a dual-driver card to "Connected (stored data)" on a
+      // folder-only entry (filesLabel, no serverLabel) — the folder half owns '<id>-scan-status'; scanFiles queues render() (rAF), so run it now
+      App._render();
+      const folderOnly = { server: document.getElementById('jan-status').textContent, scan: document.getElementById('jan-scan-status').textContent,
+        serverLabel: (Store.connectors.jan || {}).serverLabel || null, filesLabel: (Store.connectors.jan || {}).filesLabel || null, dot: document.querySelector('#accounts-hub .acct[data-connector="jan"] .dot').className };
       const scanned = { in: src ? src.rows.reduce((x, r) => x + r.in, 0) : 0, label: (Store.connectors.jan || {}).label, status: Store.connectorStatus(c), text: document.getElementById('jan-scan-status').textContent,
         cost: src ? src.rows.map(r => Pricing.cost(r.model, r)) : null };
       // server half: stubbed GET /v1/models
@@ -368,7 +373,7 @@ export async function run({ browser, ok }) {
       App.renderHub();
       const out = { ...t, files: res.meta.files, badLines: res.meta.badLines, rows: res.rows.length, models: [...new Set(res.rows.map(r => r.model))].sort(), platform: res.rows[0].platform,
         allEst: res.rows.every(r => r.est === 1), allHour: res.rows.every(r => r.hour != null), byModel: { llama: byModel['llama3.2-3b-instruct'], qwen: byModel['qwen3-4b'], jan: byModel.jan }, daysOk,
-        pickText, scanDefault, scanned, server, kind: c.kind, cat: c.category, quality: c.quality, hint: c.hint, badge: document.querySelector('#src-jan .badge').textContent,
+        pickText, scanDefault, serverDefault, folderOnly, scanned, server, kind: c.kind, cat: c.category, quality: c.quality, hint: c.hint, badge: document.querySelector('#src-jan .badge').textContent,
         card: !!document.getElementById('src-jan') && !!document.getElementById('jan-url') && !!document.getElementById('jan-validate') && !!document.getElementById('jan-pick') && !!document.getElementById('jan-scan-status'),
         hub: !!document.querySelector('#accounts-hub .hub-group[data-group="local"] .acct[data-connector="jan"]'),
         note: /^Estimated/.test(c.qualityNote) && /tokenCount/.test(c.qualityNote) && /messages\.jsonl/.test(c.qualityNote) && /est\./.test(c.qualityNote) };
@@ -383,6 +388,35 @@ export async function run({ browser, ok }) {
       && jn.pickText === 'Choose Jan data folder…' && jn.scanDefault === 'No Jan data folder chosen.'
       && jn.scanned.in === 18 && jn.scanned.label === '2 files' && jn.scanned.status === 'ok' && /Connected/.test(jn.scanned.text) && /3 messages/.test(jn.scanned.text) && /1 unreadable/.test(jn.scanned.text) && Array.isArray(jn.scanned.cost) && jn.scanned.cost.every(x => x === 0)
       && jn.server.label === '3 models · 2 files' && jn.server.status === 'ok' && /Connected/.test(jn.server.text) && /no usage history/i.test(jn.server.text), JSON.stringify(jn));
+    ok('regression (0b45efc): after a folder-only Jan scan (filesLabel "2 files", no serverLabel) a render leaves the SERVER line at "Not connected." while the folder line says Connected and the hub dot is green — _syncStatusLine must not mark the server half connected',
+      jn.serverDefault === 'Not connected.' && jn.folderOnly.filesLabel === '2 files' && jn.folderOnly.serverLabel === null && jn.folderOnly.server === 'Not connected.' && /Connected/.test(jn.folderOnly.scan) && /\bok\b/.test(jn.folderOnly.dot), JSON.stringify({ serverDefault: jn.serverDefault, folderOnly: jn.folderOnly }));
+    // regression (0b45efc) on a reload: a dual-driver entry restored with its folder half only must not mark the SERVER line connected; with a serverLabel
+    // the server line IS derived from the entry (the 0b45efc feature); the static Claude Code card's "Not connected. Tip: <code>…</code>" line (restoreHandle owns it) is never replaced
+    const sync = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const c = connectorById('jan');
+      const js = document.getElementById('jan-status'), ss = document.getElementById('jan-scan-status'), ls = document.getElementById('local-status');
+      js.textContent = App.initialStatusText(c); js.dataset.gen = ''; ss.textContent = App.initialStatusText(c, true);   // the lines as a fresh page renders them (the block above left the server line connected)
+      const codeOf = (n) => n.querySelector('code') ? n.querySelector('code').textContent : null;
+      const localBefore = { text: ls.textContent, code: codeOf(ls) };
+      const at = new Date(2026, 8, 6, 9, 5).getTime();   // local time → 'Sep 6, 9:05 AM' in every zone
+      Store.connectors.jan = { filesLabel: '2 files', label: '2 files', lastSync: at, err: null, scanErr: null };   // folder-only entry restored from storage (no scan / validate ran in this page)
+      Store.connectors.local = { label: '3 files', lastSync: at, err: null };                                       // Claude Code entry restored from storage
+      App._render();
+      const folderOnly = { server: js.textContent, serverOk: !!js.querySelector('.ok'), scan: ss.textContent, local: ls.textContent, localCode: codeOf(ls), localOk: !!ls.querySelector('.ok'),
+        dot: document.querySelector('#accounts-hub .acct[data-connector="jan"] .dot').className };
+      Store.connectors.jan = { serverLabel: '3 models', filesLabel: '2 files', label: '3 models · 2 files', lastSync: at, err: null };   // server half connected before the reload → derived from the entry
+      App._render();
+      const withServer = { server: js.textContent, ok: !!js.querySelector('.ok'), scan: ss.textContent };
+      js.textContent = App.initialStatusText(c); js.dataset.gen = '';
+      Store.connectors = {}; Store.persist(); App._render();
+      return { localBefore, folderOnly, withServer, after: { local: ls.textContent, localCode: codeOf(ls) } };
+    });
+    ok('regression (0b45efc) on reload: a restored folder-only Jan entry (filesLabel, no serverLabel) leaves the SERVER line "Not connected." after render (hub dot green — the folder half owns jan-scan-status); the same entry with a serverLabel derives "● Connected (stored data) · synced …"; the Claude Code card keeps its "Not connected. Tip: <code>%USERPROFILE%\\.claude</code>" line',
+      sync.folderOnly.server === 'Not connected.' && !sync.folderOnly.serverOk && sync.folderOnly.scan === 'No Jan data folder chosen.' && /\bok\b/.test(sync.folderOnly.dot)
+      && sync.withServer.server === '● Connected (stored data) · synced Sep 6, 9:05 AM' && sync.withServer.ok && sync.withServer.scan === 'No Jan data folder chosen.'
+      && sync.localBefore.text === 'Not connected. Tip: in the folder picker, type %USERPROFILE%\\.claude in the address bar.' && sync.localBefore.code === '%USERPROFILE%\\.claude'
+      && sync.folderOnly.local === sync.localBefore.text && sync.folderOnly.localCode === '%USERPROFILE%\\.claude' && !sync.folderOnly.localOk && sync.after.local === sync.localBefore.text && sync.after.localCode === '%USERPROFILE%\\.claude', JSON.stringify(sync));
 
     // ---- T6 (4b): text-generation-webui — logs folder-log (estimated) + API validate (CORS-blocked from file:// without --listen) ----
     const tgA = read('wave2', 'tgwebui', 'user_data', 'logs', 'chat', 'Assistant', '20260810-09-12-33.json'), tgBad = read('wave2', 'tgwebui', 'user_data', 'logs', 'chat', 'Assistant', 'bad.json'),

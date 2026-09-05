@@ -73,6 +73,13 @@ export async function run({ browser, ok }) {
         // nothing secret in storage: no key entry, and the token string appears in NO aiusage:* value (non-secret fields DO persist — resource ids / scope are not secrets)
         const lsKeys = Object.keys(localStorage).filter(k => k.startsWith('aiusage:'));
         const storage = { keyEntry: localStorage.getItem('aiusage:key:azure-openai'), tokenLeaked: lsKeys.some(k => String(localStorage.getItem(k)).includes('eyJ-test-token-azure')), scopeField: LS.get('field:azure-openai:scope', null) };
+        // Cost Management rejected (Monitoring Reader without Cost Management Reader: 403 on the cost POST, metrics fine) → billed: null — tokens still land,
+        // the previous 2-day envelope is kept and marked stale, the status line says "cost unavailable", NOT an error state (Bedrock's contract)
+        window.fetch = async (url, init = {}) => { const u = String(url); if (u.includes('/Microsoft.CostManagement/query')) return new Response(JSON.stringify({ error: { code: 'AuthorizationFailed', message: "The client does not have authorization to perform action 'Microsoft.CostManagement/query/action' over scope '/subscriptions/s1'" } }), { status: 403, headers: { 'content-type': 'application/json' } }); return stub(url, init); };
+        delete Store.sources['azure-openai'];   // so the 4 rows read back below prove THIS sync landed them (not the happy run's leftovers)
+        await App.connectKey(c);
+        const degraded = { err: (Store.connectors['azure-openai'] || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('azure-openai-status').textContent, rows: (Store.sources['azure-openai'] || { rows: [] }).rows.length,
+          billedStale: (Store.billed['azure-openai'] || {}).stale, billedKept: Store.billedRows('azure-openai').map(b => b.d + '|' + b.amount) };
         // expired token: 401 → the "mint a new one" message, attention state
         window.fetch = async () => new Response(JSON.stringify({ error: { code: 'ExpiredAuthenticationToken', message: 'The access token expiry UTC time is earlier than current UTC time.' } }), { status: 401, headers: { 'content-type': 'application/json' } });
         await App.connectKey(c);
@@ -107,7 +114,7 @@ export async function run({ browser, ok }) {
         const noScope = { billed: Store.billedRows('azure-openai').length, stale: (Store.billed['azure-openai'] || {}).stale, rows: (Store.sources['azure-openai'] || { rows: [] }).rows.length,
           err: (Store.connectors['azure-openai'] || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('azure-openai-status').textContent,
           costCalls: calls.filter(x => x.url.includes('/Microsoft.CostManagement/query')).length, scopeLS: LS.get('field:azure-openai:scope', null) };
-        out = { ui, happy, metricsCalls, costCalls, storage, expired, noRes, badScope, badRes, noScope };
+        out = { ui, happy, metricsCalls, costCalls, storage, expired, noRes, badScope, badRes, noScope, degraded };
       } finally {
         window.fetch = origFetch;
         keyEl.value = ''; resEl.value = ''; scopeEl.value = '';
@@ -162,6 +169,9 @@ export async function run({ browser, ok }) {
     ok('azure: cost scope removed → billed: [] (truthful empty) replaces the previous envelope (0 billed rows, stale:false, no Cost Management call), tokens still land (4 rows), status ok + "no cost scope", the scope LS entry is gone',
       !az.missing && az.noScope.billed === 0 && az.noScope.stale === false && az.noScope.costCalls === 0 && az.noScope.rows === 4 && az.noScope.err === null && az.noScope.status === 'ok'
       && /no cost scope/.test(az.noScope.statusText) && az.noScope.scopeLS === null, JSON.stringify(az.noScope));
+    ok('azure: Cost Management failure (403 on the cost POST, metrics fine) degrades to billed: null — tokens still land (4 rows), the previous 2-day envelope is kept and marked stale:true, status ok (no error state) + "cost unavailable: HTTP 403 …" (the Bedrock contract: undefined = no billed path · null = failed → stale · [] = truthful empty · array = fresh)',
+      !az.missing && az.degraded.rows === 4 && az.degraded.err === null && az.degraded.status === 'ok' && az.degraded.billedStale === true && az.degraded.billedKept.join(';') === '2026-08-10|12.34;2026-08-11|1.66'
+      && /● Connected\./.test(az.degraded.statusText) && /cost unavailable: HTTP 403/.test(az.degraded.statusText) && !/billed \d+ day/.test(az.degraded.statusText), JSON.stringify(az.degraded));
     // ---- T11: Google Vertex AI (Monitoring token_count, paginated + BigQuery billing export) ----
     const vxP1 = read('wave2', 'vertex', 'timeseries-1.json'), vxP2 = read('wave2', 'vertex', 'timeseries-2.json'), vxBq = read('wave2', 'vertex', 'bigquery.json');
     const vx = await page.evaluate(async (p1, p2, bqText) => {
@@ -196,6 +206,13 @@ export async function run({ browser, ok }) {
         const bq = calls.filter(x => x.url.includes('bigquery.googleapis.com')).map(x => ({ method: x.method, auth: x.headers.authorization, ct: x.headers['content-type'], body: JSON.parse(x.body) }));
         const lsKeys = Object.keys(localStorage).filter(k => k.startsWith('aiusage:'));
         const storage = { keyEntry: localStorage.getItem('aiusage:key:vertex'), tokenLeaked: lsKeys.some(k => String(localStorage.getItem(k)).includes('ya29.test-token-vertex')), project: LS.get('field:vertex:project', null) };
+        // BigQuery rejected (monitoring.viewer without bigquery.jobUser: 403 on the query POST, Monitoring fine) → billed: null — tokens still land,
+        // the previous 2-day envelope is kept and marked stale, the status line says "cost unavailable", NOT an error state (Bedrock's contract)
+        window.fetch = async (url) => { const u = String(url); if (u.includes('bigquery.googleapis.com')) return new Response(JSON.stringify({ error: { code: 403, message: 'Access Denied: Project proj-a: User does not have bigquery.jobs.create permission in project proj-a.', status: 'PERMISSION_DENIED' } }), { status: 403, headers: { 'content-type': 'application/json' } }); const p = new URL(u); return new Response(p.searchParams.get('pageToken') === 'p2' ? p2 : p1, { status: 200, headers: { 'content-type': 'application/json' } }); };
+        delete Store.sources.vertex;   // so the 4 rows read back below prove THIS sync landed them (not the happy run's leftovers)
+        await App.connectKey(c);
+        const degraded = { err: (Store.connectors.vertex || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('vertex-status').textContent, rows: (Store.sources.vertex || { rows: [] }).rows.length,
+          billedStale: (Store.billed.vertex || {}).stale, billedKept: Store.billedRows('vertex').map(b => b.d + '|' + b.amount) };
         // 401 → token error; 403 → token rejected (role/expiry) — both attention
         window.fetch = async () => new Response(JSON.stringify({ error: { code: 401, message: 'Request had invalid authentication credentials.', status: 'UNAUTHENTICATED' } }), { status: 401, headers: { 'content-type': 'application/json' } });
         await App.connectKey(c);
@@ -210,7 +227,7 @@ export async function run({ browser, ok }) {
         // billing table REMOVED after a run that billed 2 days → billed: [] (truthful empty) replaces that envelope; the table's LS entry goes away
         const noTable = { err: (Store.connectors.vertex || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('vertex-status').textContent, billed: Store.billedRows('vertex').length,
           stale: (Store.billed.vertex || {}).stale, tableLS: LS.get('field:vertex:billingTable', null), rows: (Store.sources.vertex || { rows: [] }).rows.length };
-        out = { ui, happy, mon, bq, storage, expired, denied, noTable };
+        out = { ui, happy, mon, bq, storage, expired, denied, noTable, degraded };
       } finally {
         window.fetch = origFetch;
         keyEl.value = ''; projEl.value = ''; tblEl.value = '';
@@ -241,6 +258,9 @@ export async function run({ browser, ok }) {
       && vx.expired.err === 'token expired — mint a new one (gcloud auth print-access-token)' && vx.expired.status === 'warn' && /token rejected \(403\)/.test(vx.denied.err || '') && vx.denied.status === 'warn'
       && vx.noTable.err === null && vx.noTable.status === 'ok' && /no billing table/.test(vx.noTable.statusText) && vx.noTable.rows === 4
       && vx.noTable.billed === 0 && vx.noTable.stale === false && vx.noTable.tableLS === null, JSON.stringify({ storage: vx.storage, expired: vx.expired, denied: vx.denied, noTable: vx.noTable }));
+    ok('vertex: BigQuery failure (403 on the query POST, Monitoring fine) degrades to billed: null — tokens still land (4 rows), the previous 2-day envelope is kept and marked stale:true, status ok (no error state) + "cost unavailable: token rejected (403) …" (the Bedrock contract)',
+      !vx.missing && vx.degraded.rows === 4 && vx.degraded.err === null && vx.degraded.status === 'ok' && vx.degraded.billedStale === true && vx.degraded.billedKept.join(';') === '2026-08-10|1.23;2026-08-11|2.5'
+      && /● Connected\./.test(vx.degraded.statusText) && /cost unavailable: token rejected \(403\)/.test(vx.degraded.statusText) && !/billed \d+ day/.test(vx.degraded.statusText), JSON.stringify(vx.degraded));
 
     // ---- T12a: sigv4Sign — page-side WebCrypto signature must equal the node:crypto reference (and the pinned constant) for a fixed input ----
     const vec = { method: 'POST', url: 'https://monitoring.us-east-1.amazonaws.com/', headers: { 'content-type': 'application/x-amz-json-1.0', 'x-amz-target': 'GraniteServiceVersion20100801.ListMetrics' },
