@@ -301,6 +301,43 @@ export async function run({ browser, ok }) {
     ok('imports-route: a Claude session in the same drop keeps the local-import path (in=110 msgs=2) while the Codex file is routed again; only the Claude file counts ("1 file(s) imported"); an unrecognized .jsonl → "format not recognized", no source, Imports not connected',
       routed.claude.in === 110 && routed.claude.msgs === 2 && routed.codexAgain.in === 200 && routed.codexAgain.msgs === 3 && routed.importsLabel === '1 file(s) imported' && /1 \.jsonl file/.test(routed.noteB) && /routed to OpenAI Codex CLI/.test(routed.noteB)
       && /mystery\.jsonl: format not recognized/.test(routed.unknownNote) && routed.unknownSources.length === 0 && routed.unknownImports === 'unset', JSON.stringify(routed));
+
+    // Task 4 (4a-4): Cursor usage-events CSV re-import merges by WINDOW. Each export is the date range picked on cursor.com/dashboard →
+    // Usage → Export CSV, so a re-import replaces ONLY the days the export covers ([min d, max d] of its parsed rows) and keeps every
+    // other stored day; billed likewise — an export WITHOUT a Cost column removes the billed days inside its window (a truthful empty for
+    // that window, not stale dollars behind replaced rows) and keeps the others. An export with zero parsed rows touches nothing.
+    // (Moved here from 60-merge-dedupe, which asserted the pre-v5 "one export = the full window" contract.)
+    const cw = await page.evaluate(async () => {
+      localStorage.removeItem('aiusage:data');
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set();
+      const head = 'Date,Kind,Model,Max Mode,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens,Total Tokens';
+      const july = head + ',Cost\n2026-07-05T09:00:00.000Z,Usage-based,gpt-5.4,No,100,500,0,80,680,1.25\n2026-07-20T10:00:00.000Z,Included,claude-4.5-sonnet,No,0,1000,0,200,1200,0.50\n';
+      const august = head + ',Cost\n2026-08-03T09:00:00.000Z,Usage-based,gpt-5.4,No,0,300,0,60,360,2.00\n2026-08-15T10:00:00.000Z,Included,claude-4.5-sonnet,No,0,700,0,140,840,0.75\n';
+      const julyAgain = head + '\n2026-07-05T09:00:00.000Z,Usage-based,gpt-5.4,No,0,50,0,8,58\n2026-07-20T10:00:00.000Z,Included,claude-4.5-sonnet,No,0,100,0,20,120\n';   // different numbers, NO Cost column
+      const none = head + ',Cost\nnot-a-date,Included,gpt-5.4,No,0,10,0,5,15,9.99\n';   // every row undated → zero parsed rows
+      const imp = async (text, name) => { await App.handleImportFiles([new File([text], name, { type: 'text/csv' })]); return document.getElementById('import-status').textContent; };
+      const snap = () => ({ rows: (((Store.sources['cursor-csv'] || {}).rows) || []).map(r => [r.d, r.model, r.in, r.out]).sort(), billed: Store.billedRows('cursor-csv').map(b => [b.d, b.amount]), stale: (Store.billed['cursor-csv'] || {}).stale });
+      const noteJuly = await imp(july, 'usage-events.csv'); const afterJuly = snap();
+      const noteAug = await imp(august, 'usage-events (1).csv'); const afterAug = snap();
+      const noteRe = await imp(julyAgain, 'usage-events (2).csv'); const afterRe = snap();
+      const noteNone = await imp(none, 'usage-events (3).csv'); const afterNone = snap();
+      Store.sources = {}; Store.billed = {}; Store.persist();
+      return { noteJuly, afterJuly, noteAug, afterAug, noteRe, afterRe, noteNone, afterNone };
+    });
+    const J = (v) => JSON.stringify(v);
+    ok('cursor-window: July export (07-05, 07-20, Cost) then August export (08-03, 08-15, Cost) → rows for all four days and billed for both months; both notes say "+ cost column" and "re-import replaces the days the export covers"',
+      J(cw.afterJuly.rows) === J([['2026-07-05', 'gpt-5.4', 500, 80], ['2026-07-20', 'claude-4.5-sonnet', 1000, 200]]) && J(cw.afterJuly.billed) === J([['2026-07-05', 1.25], ['2026-07-20', 0.5]])
+      && J(cw.afterAug.rows) === J([['2026-07-05', 'gpt-5.4', 500, 80], ['2026-07-20', 'claude-4.5-sonnet', 1000, 200], ['2026-08-03', 'gpt-5.4', 300, 60], ['2026-08-15', 'claude-4.5-sonnet', 700, 140]])
+      && J(cw.afterAug.billed) === J([['2026-07-05', 1.25], ['2026-07-20', 0.5], ['2026-08-03', 2], ['2026-08-15', 0.75]]) && cw.afterAug.stale === false
+      && /\+ cost column/.test(cw.noteJuly) && /replaces the days the export covers/.test(cw.noteJuly) && /\+ cost column/.test(cw.noteAug) && /replaces the days the export covers/.test(cw.noteAug),
+      J({ afterJuly: cw.afterJuly, afterAug: cw.afterAug, noteJuly: cw.noteJuly, noteAug: cw.noteAug }));
+    ok('cursor-window: re-importing July with different numbers and NO Cost column replaces only the July days (07-05 in=50 out=8, 07-20 in=100 out=20), keeps the August rows AND billed, removes the July billed days (fresh, not stale); note says "no cost column", "replaces the days the export covers" and that 2 billed days were removed',
+      J(cw.afterRe.rows) === J([['2026-07-05', 'gpt-5.4', 50, 8], ['2026-07-20', 'claude-4.5-sonnet', 100, 20], ['2026-08-03', 'gpt-5.4', 300, 60], ['2026-08-15', 'claude-4.5-sonnet', 700, 140]])
+      && J(cw.afterRe.billed) === J([['2026-08-03', 2], ['2026-08-15', 0.75]]) && cw.afterRe.stale === false
+      && /no cost column/.test(cw.noteRe) && /replaces the days the export covers/.test(cw.noteRe) && /2 billed days in this window removed/.test(cw.noteRe),
+      J({ afterRe: cw.afterRe, noteRe: cw.noteRe }));
+    ok('cursor-window: an export whose every row is undated (zero parsed rows) touches neither rows nor billed; note says "no rows"',
+      J(cw.afterNone) === J(cw.afterRe) && /no rows/.test(cw.noteNone) && !/replaces the days/.test(cw.noteNone), J({ afterNone: cw.afterNone, noteNone: cw.noteNone }));
   } finally {
     await page.close();
   }

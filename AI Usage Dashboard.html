@@ -660,7 +660,7 @@ progress { width: 160px; height: 8px; }
         Drop exported files here:
         <b>ChatGPT</b> data export (<code>conversations.json</code>; tokens estimated from text) · <b>Claude.ai</b> data export (<code>conversations.json</code>; estimated) ·
         <b>Gemini</b> Google Takeout (<code>My Activity/Gemini Apps/MyActivity.json</code> — pick JSON format in Takeout; estimated from text, one record per prompt) ·
-        <b>Cursor</b> usage-events CSV (cursor.com/dashboard → Usage → Export CSV; exact tokens, cost only if the column is present) ·
+        <b>Cursor</b> usage-events CSV (cursor.com/dashboard → Usage → Export CSV; exact tokens, cost only if the column is present; a re-import replaces the days the export covers, so drop each range as you export it) ·
         <b>DeepSeek API</b> monthly usage ZIP (platform.deepseek.com/usage → Export monthly data; amount-*.csv + cost-*.csv, exact tokens + billed amounts; months merge by day/model, so drop each month as it comes) ·
         <b>Grok</b> export (grok.com → Settings → Data → Export Data; one JSON; estimated) · <b>Microsoft Copilot</b> activity CSV (account.microsoft.com/privacy → Copilot activity history → Export; estimated) ·
         <b>Perplexity</b> data export (Settings → Account → Request data export; ZIP or its JSON threads; estimated) · <b>Meta AI</b> Download-your-information threads (message_*.json with Meta AI; estimated) ·
@@ -6008,12 +6008,27 @@ const App = {
           const headCells = (parseCSV(csvText.split(/\r?\n/, 1)[0])[0] || []).map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
           if (isCursorUsageCSV(headCells)) {
             const res = parseCursorUsageCSV(csvText);
-            Store.setSource('cursor-csv', res.rows, res.meta);   // re-import replaces (one export = the full window)
-            Store.setBilled('cursor-csv', res.billed);   // always — [] is a truthful empty: an export without a Cost column must not leave stale dollars behind replaced rows
+            // Each export is the date window picked on cursor.com/dashboard → Usage → Export CSV, so a re-import replaces ONLY the days the
+            // export covers — [min d, max d] of its parsed rows — and keeps every stored day outside that window (importing August never
+            // deletes July). Billed likewise: the window's billed days are replaced by the new Cost column, or REMOVED when the export has
+            // no Cost column (a truthful empty for that window — stale dollars must not survive behind replaced rows); days outside the window
+            // keep their amounts. An export with zero parsed rows (every date unreadable) touches nothing and says so.
             const how = res.meta.splitInput ? ` from the four additive columns${res.meta.hasTotal ? ', reconciled with Total Tokens' : ''}` : '';   // Input / Cache Read / Output only → plain "exact tokens"
-            notes.push(`${f.name}: Cursor usage-events CSV — ${res.meta.rows} events (exact tokens${how}${res.billed.length ? ' + cost column' : '; no cost column in this export'})`
-              + (res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric or negative)` : '')
-              + (res.meta.unreconciled ? ` — ${res.meta.unreconciled} row${res.meta.unreconciled === 1 ? '' : 's'} did not reconcile with Total Tokens (additive reading kept)` : ''));
+            const tail = (res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric, negative or undated)` : '')
+              + (res.meta.unreconciled ? ` — ${res.meta.unreconciled} row${res.meta.unreconciled === 1 ? '' : 's'} did not reconcile with Total Tokens (additive reading kept)` : '');
+            if (!res.rows.length) { notes.push(`${f.name}: Cursor usage-events CSV — no rows (nothing imported, nothing replaced)${tail}`); continue; }
+            let from = res.rows[0].d, to = from;
+            for (const r of res.rows) { if (r.d < from) from = r.d; if (r.d > to) to = r.d; }
+            const inWindow = (d) => d >= from && d <= to;
+            const prevRows = ((Store.sources['cursor-csv'] || {}).rows || []), keptRows = prevRows.filter(r => !inWindow(r.d));
+            const prevBilled = Store.billedRows('cursor-csv'), keptBilled = prevBilled.filter(b => !inWindow(b.d));
+            const all = keptRows.concat(res.rows);
+            Store.setSource('cursor-csv', all, { ...res.meta, rows: all.reduce((a, r) => a + (r.msgs || 0), 0) });   // meta.rows = events stored across every window; the rest describes this export
+            Store.setBilled('cursor-csv', keptBilled.concat(res.billed).sort((a, b2) => a.d < b2.d ? -1 : 1));   // always an array — [] is a truthful empty
+            const replaced = prevRows.reduce((a, r) => a + (inWindow(r.d) ? (r.msgs || 0) : 0), 0), dropped = prevBilled.length - keptBilled.length;
+            notes.push(`${f.name}: Cursor usage-events CSV — ${res.meta.rows} events, ${from === to ? from : from + ' → ' + to} (exact tokens${how}${res.billed.length ? ' + cost column' : '; no cost column in this export'}) — a re-import replaces the days the export covers`
+              + (replaced || dropped ? ` (${replaced} stored event${replaced === 1 ? '' : 's'} replaced` + (!res.billed.length && dropped ? `; ${dropped} billed day${dropped === 1 ? '' : 's'} in this window removed — no cost column` : '') + ')' : '')
+              + tail);
             imported++;
             continue;
           }
