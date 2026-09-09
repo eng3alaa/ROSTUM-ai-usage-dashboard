@@ -1734,7 +1734,7 @@ function makeProjAgg(platform) {
 /** files: [{path, file}] → aggregated usage */
 async function parseClaudeLogs(files, onProgress, seen = new Set()) {
   const agg = makeAgg();
-  const addedIds = [];
+  const addedIds = [], dupIds = [];   // dupIds: ids skipped because `seen` already held them (parseFolderCached keeps them on the cache entry)
   const projMap = new Map(); // project\0model -> bundle
   let msgs = 0, lines = 0, badLines = 0;
   const jsonl = files.filter(f => f.path.endsWith('.jsonl') && !/\/(todos|statsig)\//.test('/' + f.path));
@@ -1756,7 +1756,7 @@ async function parseClaudeLogs(files, onProgress, seen = new Set()) {
       const model = obj.message.model || 'unknown';
       if (model === '<synthetic>') continue;
       const id = (obj.message.id || '') + ':' + (obj.requestId || '');
-      if (id !== ':' && seen.has(id)) continue;
+      if (id !== ':' && seen.has(id)) { dupIds.push(id); continue; }
       if (id !== ':') { seen.add(id); addedIds.push(id); }
       let cw = u.cache_creation_input_tokens;
       if (cw == null && u.cache_creation && typeof u.cache_creation === 'object') {
@@ -1778,7 +1778,7 @@ async function parseClaudeLogs(files, onProgress, seen = new Set()) {
   }
   // keep project×model rows raw — cost is computed at render time with live prices
   const projects = [...projMap.values()];
-  return { rows: agg.rows(), projects, meta: { files: jsonl.length, msgs, lines, badLines, addedIds } };
+  return { rows: agg.rows(), projects, meta: { files: jsonl.length, msgs, lines, badLines, addedIds, dupIds } };
 }
 
 /** Generic folder walker: collects files whose relative path matches any RegExp in `patterns`
@@ -1800,10 +1800,15 @@ async function collectFilesFromHandle(dirHandle, patterns, path = '', out = [], 
  *  connector.patterns select the files the parser owns; connector.siblings are collected too and
  *  handed to the parser as `siblingFiles` — computed ONCE per scan, sibling files only, never parsed on their own; connector.exclude drops paths.
  *  connector.parser names a global `async function parseX(files, onProgress, seen, connector, siblingFiles)`
- *  returning { rows, projects, meta: { files, msgs, lines, badLines, addedIds? } } (parseClaudeLogs' shape).
+ *  returning { rows, projects, meta: { files, msgs, lines, badLines, addedIds?, dupIds? } } (parseClaudeLogs' shape).
  *  cache: Map (tests) or the IDB-backed ScanCache (app). Files are processed in sorted-path order with a
  *  `runningSeen` set spanning the whole scan, so cross-file duplicates stay deduped even though each file
  *  is parsed/cached separately (parsers that emit addedIds opt in; id-less parsers never collide).
+ *  Deduping parsers also report meta.dupIds: ids they SKIPPED because `seen` already held them (claimed by an earlier file).
+ *  Those are kept on the entry (dupOnly: true when the file added nothing of its own) and make it a MISS whenever one of
+ *  them is no longer claimed by a preceding file (the claimant vanished or now sorts later): a duplicate-only file (the same
+ *  session logged twice, a copy, a rotated log) would otherwise be cached as empty forever and hide its usage once the
+ *  original is gone. Entries written before dupIds existed carry none and behave as before (no SCAN_CACHE_VER bump).
  *  Pruning is scoped to THIS connector's signature prefix — one connector's scan never evicts another's. */
 async function parseFolderCached(connector, files, onProgress, cache) {
   const parser = globalThis[connector.parser];
@@ -1826,8 +1831,9 @@ async function parseFolderCached(connector, files, onProgress, cache) {
     const sig = prefix + f.path + '\u0001' + f.file.size + '\u0001' + f.file.lastModified + (sibSig.get(f.path.slice(0, f.path.lastIndexOf('/') + 1)) || '');
     seen.add(sig);
     let entry = cache ? await cache.get(sig) : null;
-    // an entry without `ids`, or whose ids collide with what's already been counted this scan, is a miss (re-parse)
-    const isMiss = !entry || !entry.ids || entry.ids.some(id => runningSeen.has(id));
+    // an entry without `ids`, or whose ids collide with what's already been counted this scan, is a miss (re-parse); so is one
+    // whose dupIds (skipped as duplicates when it was parsed) are no longer ALL claimed by an earlier file of this scan
+    const isMiss = !entry || !entry.ids || entry.ids.some(id => runningSeen.has(id)) || (Array.isArray(entry.dupIds) && entry.dupIds.some(id => !runningSeen.has(id)));
     if (isMiss) {
       let res;
       // one unreadable file (Chrome throws NotReadableError when an FSA file changed after getFile() — a CLI
@@ -1836,6 +1842,9 @@ async function parseFolderCached(connector, files, onProgress, cache) {
       try { res = await parser([f], null, runningSeen, connector, siblingFiles); }
       catch (e) { badFiles++; done++; if (onProgress) onProgress(done, main.length); continue; }
       entry = { rows: res.rows, projects: res.projects || [], msgs: res.meta.msgs || 0, ids: res.meta.addedIds || [], lines: res.meta.lines || 0, badLines: res.meta.badLines || 0 };
+      // ids this file skipped as duplicates of an EARLIER file (an in-file repeat is the file's own id, not another file's)
+      const own = new Set(entry.ids), dupIds = [...new Set(res.meta.dupIds || [])].filter(id => !own.has(id));
+      if (dupIds.length) { entry.dupIds = dupIds; if (!entry.ids.length) entry.dupOnly = true; }
       if (cache) await cache.set(sig, entry);
       parsedFiles++;
     } else {
@@ -1915,12 +1924,12 @@ async function parseUsageLoggerJsonl(files, onProgress, seen = new Set(), c) {
  *  by sid (the rollout filename, which embeds the session UUID): the same rollout can appear under both
  *  sessions/ and archived_sessions/, and re-parsing it from scratch would double every delta. */
 async function parseCodexRollouts(files, onProgress, seen = new Set()) {
-  const agg = makeAgg(); const proj = makeProjAgg('OpenAI Codex CLI'); const addedIds = []; let msgs = 0; const k = { lines: 0, badLines: 0 };
+  const agg = makeAgg(); const proj = makeProjAgg('OpenAI Codex CLI'); const addedIds = [], dupIds = []; let msgs = 0; const k = { lines: 0, badLines: 0 };
   const list = files.filter(f => /(^|\/)rollout-[^/]*\.jsonl$/i.test(f.path));
   for (let fi = 0; fi < list.length; fi++) {
     const { path, file } = list[fi];
     const sid = (path.split('/').pop() || '').replace(/\.jsonl$/i, '');
-    if (seen.has(sid)) { if (onProgress) onProgress(fi + 1, list.length); continue; }   // same rollout re-appearing under sessions/ vs archived_sessions/ — whole file already counted
+    if (seen.has(sid)) { dupIds.push(sid); if (onProgress) onProgress(fi + 1, list.length); continue; }   // same rollout re-appearing under sessions/ vs archived_sessions/ — whole file already counted
     seen.add(sid); addedIds.push(sid);
     let model = 'codex', prev = null, local = 0, cwd = null;   // cwd = session_meta / turn_context payload.cwd (latest wins) → Projects table (prettyProject, same as Claude Code)
     await eachJsonl(file, (o) => {
@@ -1943,7 +1952,7 @@ async function parseCodexRollouts(files, onProgress, seen = new Set()) {
     }, k);
     if (onProgress) onProgress(fi + 1, list.length);
   }
-  return { rows: agg.rows(), projects: proj.rows(), meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds } };
+  return { rows: agg.rows(), projects: proj.rows(), meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds, dupIds } };
 }
 
 /** Gemini CLI — ~/.gemini/tmp/<hash>/chats/session-*.json (whole-file JSON). messages[] of type 'gemini' carry
@@ -1951,7 +1960,7 @@ async function parseCodexRollouts(files, onProgress, seen = new Set()) {
  *  defensively, usageMetadata {promptTokenCount, candidatesTokenCount, cachedContentTokenCount, thoughtsTokenCount}.
  *  Dedupe by sessionId:messageId. */
 async function parseGeminiCliSessions(files, onProgress, seen = new Set()) {
-  const agg = makeAgg(); const proj = makeProjAgg('Gemini CLI'); const addedIds = []; let msgs = 0, lines = 0, badLines = 0;
+  const agg = makeAgg(); const proj = makeProjAgg('Gemini CLI'); const addedIds = [], dupIds = []; let msgs = 0, lines = 0, badLines = 0;
   const list = files.filter(f => /(^|\/)session-[^/]*\.json$/i.test(f.path));
   for (let fi = 0; fi < list.length; fi++) {
     const { path, file } = list[fi];
@@ -1970,7 +1979,7 @@ async function parseGeminiCliSessions(files, onProgress, seen = new Set()) {
       const um = m.usageMetadata;
       const t0 = m.tokens || (um ? { input: um.promptTokenCount, output: um.candidatesTokenCount, cached: um.cachedContentTokenCount, thoughts: um.thoughtsTokenCount, tool: um.toolUsePromptTokenCount } : null);
       if (!t0) continue;
-      if (m.id != null) { const id = sid + ':' + m.id; if (seen.has(id)) continue; seen.add(id); addedIds.push(id); }
+      if (m.id != null) { const id = sid + ':' + m.id; if (seen.has(id)) { dupIds.push(id); continue; } seen.add(id); addedIds.push(id); }
       const input = finTok(+t0.input || 0), cached = finTok(+t0.cached || 0), output = finTok(+t0.output || 0), thoughts = finTok(+t0.thoughts || 0), tool = finTok(+t0.tool || 0);   // tool = toolUsePromptTokenCount: billed (uncached) input for built-in tools, not part of promptTokenCount
       const ts = m.timestamp ? new Date(m.timestamp) : null, okTs = ts && !isNaN(ts);
       const model = String(m.model || obj.model || 'gemini');
@@ -1981,7 +1990,7 @@ async function parseGeminiCliSessions(files, onProgress, seen = new Set()) {
     }
     if (onProgress) onProgress(fi + 1, list.length);
   }
-  return { rows: agg.rows(), projects: proj.rows(), meta: { files: list.length, msgs, lines, badLines, addedIds } };
+  return { rows: agg.rows(), projects: proj.rows(), meta: { files: list.length, msgs, lines, badLines, addedIds, dupIds } };
 }
 
 /** GitHub Copilot CLI — ~/.copilot/session-state/<sid>/events.jsonl. Per-request `assistant.usage` events
@@ -1992,7 +2001,7 @@ async function parseGeminiCliSessions(files, onProgress, seen = new Set()) {
  *  already-seen duplicates (same session under two paths) still counts as "had usage" and skips the shutdown
  *  fallback, instead of re-adding the session's totals a second time. */
 async function parseCopilotCliEvents(files, onProgress, seen = new Set()) {
-  const agg = makeAgg(); const proj = makeProjAgg('GitHub Copilot'); const addedIds = []; let msgs = 0; const k = { lines: 0, badLines: 0 };
+  const agg = makeAgg(); const proj = makeProjAgg('GitHub Copilot'); const addedIds = [], dupIds = []; let msgs = 0; const k = { lines: 0, badLines: 0 };
   const list = files.filter(f => /(^|\/)events\.jsonl$/i.test(f.path));
   const num = (o, a, b) => finTok(+(o[a] ?? o[b] ?? 0) || 0);
   for (let fi = 0; fi < list.length; fi++) {
@@ -2005,7 +2014,7 @@ async function parseCopilotCliEvents(files, onProgress, seen = new Set()) {
       if (type === 'session.start') { const ctx = (d.context && typeof d.context === 'object') ? d.context : d; const w = ctx.cwd || ctx.workingDirectory || ctx.gitRoot || ctx.repository; if (w) cwd = String(w); return; }
       if (type === 'assistant.usage') {
         sawUsage++;
-        if (o.id != null) { const id = sid + ':' + o.id; if (seen.has(id)) return; seen.add(id); addedIds.push(id); }
+        if (o.id != null) { const id = sid + ':' + o.id; if (seen.has(id)) { dupIds.push(id); return; } seen.add(id); addedIds.push(id); }
         const ts = o.timestamp ? new Date(o.timestamp) : null, okTs = ts && !isNaN(ts);
         const model = String(d.model || 'copilot');
         const t = { in: num(d, 'inputTokens', 'input_tokens'), out: num(d, 'outputTokens', 'output_tokens'), cr: num(d, 'cacheReadTokens', 'cache_read_tokens'), cw: num(d, 'cacheWriteTokens', 'cache_write_tokens'), msgs: 1 };
@@ -2028,7 +2037,7 @@ async function parseCopilotCliEvents(files, onProgress, seen = new Set()) {
     }
     if (onProgress) onProgress(fi + 1, list.length);
   }
-  return { rows: agg.rows(), projects: proj.rows(), meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds } };
+  return { rows: agg.rows(), projects: proj.rows(), meta: { files: list.length, msgs, lines: k.lines, badLines: k.badLines, addedIds, dupIds } };
 }
 
 /** Continue.dev — ~/.continue/dev_data/<ver>/tokensGenerated.jsonl: one event per model response
@@ -2069,7 +2078,7 @@ async function parseContinueDevData(files, onProgress) {
 const _clineMetaIndex = new WeakMap();   // siblingFiles array → Map(dir → task_metadata.json File)
 async function parseClineTasks(files, onProgress, seen = new Set(), c, siblingFiles) {
   const platform = (c && c.platform) || 'Cline';
-  const agg = makeAgg(); const addedIds = []; let msgs = 0, lines = 0, badLines = 0, extCost = 0;
+  const agg = makeAgg(); const addedIds = [], dupIds = []; let msgs = 0, lines = 0, badLines = 0, extCost = 0;
   const list = files.filter(f => /(^|\/)ui_messages\.json$/i.test(f.path));
   const src = Array.isArray(siblingFiles) ? siblingFiles : files;
   let metaByDir = _clineMetaIndex.get(src);
@@ -2098,7 +2107,7 @@ async function parseClineTasks(files, onProgress, seen = new Set(), c, siblingFi
       if (!m || m.say !== 'api_req_started' || typeof m.text !== 'string') continue;
       let info; try { info = JSON.parse(m.text); } catch { continue; }
       if (!info || (info.tokensIn == null && info.tokensOut == null)) continue;   // request still in flight when the file was written
-      if (m.ts != null) { const id = taskId + ':' + m.ts; if (seen.has(id)) continue; seen.add(id); addedIds.push(id); }
+      if (m.ts != null) { const id = taskId + ':' + m.ts; if (seen.has(id)) { dupIds.push(id); continue; } seen.add(id); addedIds.push(id); }
       const ts = m.ts != null ? new Date(+m.ts) : null, okTs = ts && !isNaN(ts);
       const u = usageAt(okTs ? +m.ts : null), model = u ? u.model : 'unknown';
       const cw = finTok(+info.cacheWrites || 0), cr = finTok(+info.cacheReads || 0);
@@ -2113,7 +2122,7 @@ async function parseClineTasks(files, onProgress, seen = new Set(), c, siblingFi
     }
     if (onProgress) onProgress(fi + 1, list.length);
   }
-  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines, addedIds, extCost } };
+  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines, addedIds, dupIds, extCost } };
 }
 
 /** Aider — .aider.chat.history.md. Lines: '# aider chat started at YYYY-MM-DD HH:MM:SS' (session day),
@@ -2423,7 +2432,7 @@ function readSqliteTable(buffer, tableName) {
  *  An unreadable file (WITHOUT ROWID / not SQLite) THROWS — parseFolderCached counts it as one unreadable file and moves on.
  *  The -wal sidecar is not read: close the Ollama app first so the WAL is checkpointed into db.sqlite. */
 async function parseOllamaDb(files, onProgress, seen = new Set(), c, siblingFiles) {
-  const agg = makeAgg(); const addedIds = []; let msgs = 0, lines = 0;
+  const agg = makeAgg(); const addedIds = [], dupIds = []; let msgs = 0, lines = 0;
   const list = files.filter(f => /(^|\/)db\.sqlite$/i.test(f.path));
   const when = (v, fallback) => {
     if (typeof v === 'string' && /^\d{9,13}(\.\d+)?$/.test(v.trim())) v = +v;
@@ -2450,7 +2459,7 @@ async function parseOllamaDb(files, onProgress, seen = new Set(), c, siblingFile
       if (role === 'user') { lastUser.set(chat, text); continue; }
       if (role !== 'assistant') continue;
       const id = 'ollama-db:' + String(get(r, 'id') ?? (fi + ':' + lines));
-      if (seen.has(id)) continue;
+      if (seen.has(id)) { dupIds.push(id); continue; }
       seen.add(id); addedIds.push(id);
       const ts = when(get(r, 'created_at'), file.lastModified);
       agg.add(dayKey(ts), (c && c.platform) || 'Ollama', String(get(r, 'model_name') || 'ollama'),
@@ -2460,7 +2469,7 @@ async function parseOllamaDb(files, onProgress, seen = new Set(), c, siblingFile
     }
     if (onProgress) onProgress(fi + 1, list.length);
   }
-  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines: 0, addedIds } };
+  return { rows: agg.rows(), projects: [], meta: { files: list.length, msgs, lines, badLines: 0, addedIds, dupIds } };
 }
 /** Ollama folder dispatcher (registry parser): usage-logger JSONL (exact, parseUsageLoggerJsonl) + desktop db.sqlite (estimated,
  *  parseOllamaDb) through one card; results concatenated. parseFolderCached hands in one file at a time, so each call sees one kind. */
@@ -2469,7 +2478,7 @@ async function parseOllamaFiles(files, onProgress, seen = new Set(), c, siblingF
   const b = await parseOllamaDb(files.filter(f => /(^|\/)db\.sqlite$/i.test(f.path)), null, seen, c, siblingFiles);
   if (onProgress) onProgress(files.length, files.length);
   return { rows: a.rows.concat(b.rows), projects: [], meta: { files: a.meta.files + b.meta.files, msgs: a.meta.msgs + b.meta.msgs, lines: a.meta.lines + b.meta.lines,
-    badLines: a.meta.badLines + b.meta.badLines, addedIds: (a.meta.addedIds || []).concat(b.meta.addedIds || []) } };
+    badLines: a.meta.badLines + b.meta.badLines, addedIds: (a.meta.addedIds || []).concat(b.meta.addedIds || []), dupIds: (a.meta.dupIds || []).concat(b.meta.dupIds || []) } };
 }
 
 /** ScanCache key prefix — bump whenever a parser's OUTPUT changes for unchanged bytes (cached per-file entries

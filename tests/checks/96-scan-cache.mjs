@@ -133,6 +133,54 @@ export async function run({ browser, ok }) {
     ok('scan-cache: cline sibling task_metadata.json change invalidates the cached ui_messages rows (miss → new model); unchanged pair still hits',
       sib.p1 === 1 && sib.c2 === 1 && sib.p2 === 0 && sib.p3 === 1 && sib.c4 === 1 && sib.m1 === 'claude-sonnet-4.5' && sib.m3 === 'claude-opus-4.1-changed' && sib.m4 === 'claude-opus-4.1-changed' && sib.files === 1,
       JSON.stringify(sib));
+
+    // v5 Task 2 — duplicate-only files. B's ids are ALL claimed by A (the same session logged twice: a copy, a rotated log).
+    // B must be cached as { dupOnly, dupIds } — NOT as a plain empty entry — so that when A later disappears the survivor
+    // B is a MISS (re-parsed) and its usage appears. sess-aaa also carries an IN-FILE duplicate line (m1:r1 twice): a
+    // file's own ids are never its dupIds, so A stays a normal entry and a plain hit on the next scan.
+    const dupOnly = await page.evaluate(async (text) => {
+      const mk = (name) => ({ path: 'projects/-D--proj3/' + name, file: new File([text], name, { lastModified: 1754000003000 }) });
+      const sumOf = (rows) => rows.reduce((t, r) => ({ in: t.in + (r.in || 0), out: t.out + (r.out || 0), msgs: t.msgs + (r.msgs || 0) }), { in: 0, out: 0, msgs: 0 });
+      const entryOf = (cache, name) => cache.get([...cache.keys()].find(k => k.includes(name))) || {};
+      const cache = new Map();
+      const r1 = await parseClaudeLogsCached([mk('sess-a.jsonl'), mk('sess-b.jsonl')], null, cache);
+      const a = entryOf(cache, 'sess-a.jsonl'), b = entryOf(cache, 'sess-b.jsonl');
+      const r1b = await parseClaudeLogsCached([mk('sess-a.jsonl'), mk('sess-b.jsonl')], null, cache);   // unchanged pair → two hits, same totals
+      const r2 = await parseClaudeLogsCached([mk('sess-b.jsonl')], null, cache);                        // A gone → B is the survivor: MISS, rows present
+      const r3 = await parseClaudeLogsCached([mk('sess-b.jsonl')], null, cache);                        // and a hit again, rows kept
+      return { p1: r1.meta.parsedFiles, t1: sumOf(r1.rows),
+        bDupOnly: b.dupOnly === true, bRows: (b.rows || []).length, bIds: (b.ids || []).length, bDupIds: Array.isArray(b.dupIds) ? b.dupIds.slice().sort() : null,
+        aDupOnly: !!a.dupOnly, aIds: (a.ids || []).length, aDupIds: Array.isArray(a.dupIds) ? a.dupIds.length : 0,
+        p1b: r1b.meta.parsedFiles, c1b: r1b.meta.cachedFiles, t1b: sumOf(r1b.rows),
+        p2: r2.meta.parsedFiles, c2: r2.meta.cachedFiles, t2: sumOf(r2.rows), p3: r3.meta.parsedFiles, c3: r3.meta.cachedFiles, t3: sumOf(r3.rows) };
+    }, sessText);
+    const sameTotals = (x, y) => x.in === y.in && x.out === y.out && x.msgs === y.msgs;
+    ok('scan-cache: a duplicate-only file is cached as { dupOnly, dupIds } with rows [] / ids []; its twin (in-file duplicate, own ids) stays a normal entry; the pair counts once and both hit on the next scan',
+      dupOnly.p1 === 2 && dupOnly.t1.in === 110 && dupOnly.t1.out === 220 && dupOnly.t1.msgs === 2 &&
+      dupOnly.bDupOnly && dupOnly.bRows === 0 && dupOnly.bIds === 0 && JSON.stringify(dupOnly.bDupIds) === JSON.stringify(['m1:r1', 'm2:r2']) &&
+      !dupOnly.aDupOnly && dupOnly.aIds === 2 && dupOnly.aDupIds === 0 &&
+      dupOnly.p1b === 0 && dupOnly.c1b === 2 && sameTotals(dupOnly.t1b, dupOnly.t1), JSON.stringify(dupOnly));
+    ok('scan-cache: when the file that claimed the ids is gone, the dupOnly survivor is a MISS (parsedFiles=1, rows present = the earlier totals) and a hit with rows afterwards',
+      dupOnly.p2 === 1 && dupOnly.c2 === 0 && sameTotals(dupOnly.t2, dupOnly.t1) && dupOnly.p3 === 0 && dupOnly.c3 === 1 && sameTotals(dupOnly.t3, dupOnly.t1), JSON.stringify(dupOnly));
+
+    // Same rule for a PARTIALLY duplicated file (no dupOnly flag): B = { mX (claimed by A), mY (own) } → ids [mY:rY], dupIds [mX:rX];
+    // A gone → B is a miss and mX's usage reappears under B; afterwards B hits with both rows.
+    const partial = await page.evaluate(async () => {
+      const line = (ts, rid, mid, tin, tout) => JSON.stringify({ type: 'assistant', timestamp: ts, cwd: 'D:\proj4', requestId: rid, message: { id: mid, model: 'claude-sonnet-5', usage: { input_tokens: tin, output_tokens: tout } } });
+      const mkA = () => ({ path: 'projects/-D--proj4/sess-a.jsonl', file: new File([line('2026-08-12T09:00:00.000Z', 'rX', 'mX', 100, 200)], 'sess-a.jsonl', { lastModified: 1754000001000 }) });
+      const mkB = () => ({ path: 'projects/-D--proj4/sess-b.jsonl', file: new File([[line('2026-08-12T09:00:05.000Z', 'rX', 'mX', 100, 200), line('2026-08-12T09:05:00.000Z', 'rY', 'mY', 10, 20)].join('\n')], 'sess-b.jsonl', { lastModified: 1754000002000 }) });
+      const sumOf = (rows) => rows.reduce((t, r) => ({ in: t.in + (r.in || 0), out: t.out + (r.out || 0), msgs: t.msgs + (r.msgs || 0) }), { in: 0, out: 0, msgs: 0 });
+      const cache = new Map();
+      const r1 = await parseClaudeLogsCached([mkA(), mkB()], null, cache);
+      const b = cache.get([...cache.keys()].find(k => k.includes('sess-b.jsonl'))) || {};
+      const r2 = await parseClaudeLogsCached([mkB()], null, cache);
+      const r3 = await parseClaudeLogsCached([mkB()], null, cache);
+      return { t1: sumOf(r1.rows), bIds: b.ids, bDupIds: b.dupIds, bDupOnly: !!b.dupOnly, bRows: (b.rows || []).length,
+        p2: r2.meta.parsedFiles, c2: r2.meta.cachedFiles, t2: sumOf(r2.rows), p3: r3.meta.parsedFiles, c3: r3.meta.cachedFiles, t3: sumOf(r3.rows) };
+    });
+    ok('scan-cache: a partially duplicated file records its skipped ids (ids [mY:rY], dupIds [mX:rX], not dupOnly, own rows kept) and is re-parsed once its claimant is gone',
+      partial.t1.in === 110 && partial.t1.out === 220 && partial.t1.msgs === 2 && JSON.stringify(partial.bIds) === JSON.stringify(['mY:rY']) && JSON.stringify(partial.bDupIds) === JSON.stringify(['mX:rX']) &&
+      !partial.bDupOnly && partial.bRows === 1 && partial.p2 === 1 && partial.c2 === 0 && sameTotals(partial.t2, partial.t1) && partial.p3 === 0 && partial.c3 === 1 && sameTotals(partial.t3, partial.t1), JSON.stringify(partial));
   } finally {
     await page.close();
   }
