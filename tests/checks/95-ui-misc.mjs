@@ -77,6 +77,47 @@ export async function run({ browser, ok }) {
       /No data path/.test(cleared.replicate) && cleared.groq === 'Not connected.' && cleared.groqGen === '' && cleared.jan === 'Not connected.' && cleared.janScan === 'No Jan data folder chosen.'
       && cleared.anthropic === 'Not connected.' && /No export imported yet/.test(cleared.grok) && cleared.conns === 0, JSON.stringify(cleared));
 
+    // v5 T9 (4b-9): initialStatusText owns EVERY card's initial line, the static ones included — after clear-data the Claude Code card shows
+    // its tip line WITH the <code> path (not the generic "Not connected."), a restored local entry (no IDB handle) keeps it after a render,
+    // and Disconnect resets it through the same contract; a key card still reads "Not connected." after clear-data and derives
+    // "● Connected (stored data)" from a restored entry (the 0b45efc behaviour — no id special case in _syncStatusLine any more)
+    const TIP = 'Not connected. Tip: in the folder picker, type %USERPROFILE%\\.claude in the address bar.', CODE = '%USERPROFILE%\\.claude';
+    const initial = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      App._render();
+      const ls = document.getElementById('local-status'), gs = document.getElementById('groq-status'), rb = document.getElementById('rescan-local');
+      const codeOf = (n) => n.querySelector('code') ? n.querySelector('code').textContent : null;
+      const at = new Date(2026, 8, 6, 9, 5).getTime();
+      Store.setConnector('local', { label: '3 log files', lastSync: at, err: null });
+      Store.setConnector('groq', { label: 'API key · last 4: abcd', lastSync: at, err: null });
+      ls.textContent = ''; ls.appendChild(el('span', { class: 'ok', text: '● Connected. ' })); ls.appendChild(document.createTextNode('3 log files · 12 messages · scanned 9:05 AM'));   // the line a scan wrote
+      rb.hidden = false;
+      const origConfirm = window.confirm; window.confirm = () => true;
+      try { document.getElementById('clear-data').click(); } finally { window.confirm = origConfirm; }
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const cleared = { local: ls.textContent, localCode: codeOf(ls), localOk: !!ls.querySelector('.ok'), rescanHidden: rb.hidden, groq: gs.textContent, conns: Object.keys(Store.connectors).length };
+      // a local entry restored from storage without an IDB handle (classic folder chooser, reload): the tip stays under the green dot — restoreHandle owns the line only when a handle exists
+      Store.connectors.local = { label: '3 log files', lastSync: at, err: null };
+      Store.connectors.groq = { label: 'API key · last 4: abcd', lastSync: at, err: null };
+      App._render();
+      const restored = { local: ls.textContent, localCode: codeOf(ls), localOk: !!ls.querySelector('.ok'), status: Store.connectorStatus(connectorById('local')), groq: gs.textContent, groqOk: !!gs.querySelector('.ok') };
+      // Disconnect (keep data) resets the static card's line through the same contract and hides Re-scan
+      ls.textContent = 'Showing saved data (12 messages). Click Re-scan to refresh from disk.'; rb.hidden = false;
+      window.confirm = () => false;
+      try { App.disconnectConnector('local'); } finally { window.confirm = origConfirm; }
+      const disconnected = { local: ls.textContent, localCode: codeOf(ls), rescanHidden: rb.hidden, entry: !!Store.connectors.local };
+      const init = App.initialStatusText(connectorById('local'));
+      const contract = { nodes: typeof init !== 'string', text: typeof init === 'string' ? init : init.textContent, groq: App.initialStatusText(connectorById('groq')), anthropic: App.initialStatusText(connectorById('anthropic')) };
+      Store.connectors = {}; Store.persist(); App._render();
+      return { cleared, restored, disconnected, contract };
+    });
+    ok('initial status (v5 T9): after clear-data the Claude Code card shows its tip line WITH the <code>%USERPROFILE%\\.claude</code> path — initialStatusText owns the static cards too, not the generic "Not connected."; Re-scan hidden; groq reads "Not connected."',
+      initial.cleared.local === TIP && initial.cleared.localCode === CODE && !initial.cleared.localOk && initial.cleared.rescanHidden && initial.cleared.groq === 'Not connected.' && initial.cleared.conns === 0, JSON.stringify(initial.cleared));
+    ok('initial status (v5 T9): a restored local entry (no IDB handle) keeps the tip after a render while the card counts as connected — _syncStatusLine derives only a line that still equals initialStatusText(c) and is the plain "Not connected." (groq → "● Connected (stored data) · synced …"), no id special case',
+      initial.restored.local === TIP && initial.restored.localCode === CODE && !initial.restored.localOk && initial.restored.status !== 'off' && /^● Connected \(stored data\) · synced /.test(initial.restored.groq) && initial.restored.groqOk, JSON.stringify(initial.restored));
+    ok('initial status (v5 T9): Disconnect (keep data) resets the Claude Code line to the same tip (with <code>) and hides Re-scan; initialStatusText("local") is a node-factory result whose text is the tip, the other static cards get the plain string',
+      initial.disconnected.local === TIP && initial.disconnected.localCode === CODE && initial.disconnected.rescanHidden && !initial.disconnected.entry && initial.contract.nodes && initial.contract.text === TIP && initial.contract.groq === 'Not connected.' && initial.contract.anthropic === 'Not connected.', JSON.stringify({ disconnected: initial.disconnected, contract: initial.contract }));
+
     // copy: the Projects table lists Claude Code sessions AND Codex / Gemini CLI / Copilot CLI / Junie folder-log projects — title and hint must say so
     const proj = await page.evaluate(() => {
       Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {};

@@ -4872,26 +4872,51 @@ const App = {
     if (!id) return;
     this._focusAfterRender(() => document.querySelector(`#accounts-hub .acct[data-connector="${id}"] .acct-manage`) || document.querySelector(`#accounts-hub .acct[data-connector="${id}"]`));
   },
-  /** Initial text of a card's status line — shared by ensureSourceCard, disconnectConnector and Clear stored data so a reset never blanks
-   *  a line: link-only cards keep their permanent "no data path" sentence, export-file cards wait for an export, the Imports drop zone starts
-   *  empty, dual-driver folder lines (scan = true) name the folder they wait for, every other card reads "Not connected.". */
+  /** Initial text of a card's status line — the single source of truth for EVERY card, the static ones included: shared by ensureSourceCard,
+   *  _setInitialStatus (disconnectConnector, Clear stored data) and _syncStatusLine, so a reset never blanks a line: link-only cards keep their
+   *  permanent "no data path" sentence, export-file cards wait for an export, the Imports drop zone starts empty, dual-driver folder lines
+   *  (scan = true) name the folder they wait for, the static Claude Code card gets its tip line as a node-factory result (a fresh
+   *  DocumentFragment: text + <code>%USERPROFILE%\.claude</code> + text — the path keeps its <code>), every other card reads "Not connected.". */
   initialStatusText(c, scan) {
     if (scan) return 'No ' + (c.folderLabel || 'usage-log') + ' folder chosen.';
     if (c.kind === 'link-only') return 'No data path — nothing to connect here; use the links below.';
     if (c.kind === 'export-file') return 'No export imported yet.';
     if (c.kind === 'files') return '';
+    if (c.id === 'local') {
+      const f = document.createDocumentFragment();
+      f.appendChild(document.createTextNode('Not connected. Tip: in the folder picker, type '));
+      f.appendChild(el('code', { text: '%USERPROFILE%\\.claude' }));
+      f.appendChild(document.createTextNode(' in the address bar.'));
+      return f;
+    }
     return 'Not connected.';
   },
-  /** A card whose entry exists while its status line still shows the initial "Not connected." (entry restored from storage on reload; DeepSeek
+  /** Reset a card's status line to its initial text — a string → textContent, a node-factory result (the Claude Code tip) → the nodes appended
+   *  to the cleared element — and release any in-flight placeholder (dataset.gen): the one write path disconnectConnector, Clear stored data
+   *  and ensureSourceCard (node = the element being built) share. scan = true targets a dual-driver card's '<id>-scan-status' folder line
+   *  (it carries no gen: the folder driver never holds one). Returns the element (null when the card has no such line). */
+  _setInitialStatus(c, scan, node) {
+    const s = node || (scan ? $(c.id + '-scan-status') : $(c.statusEl));
+    if (!s) return null;
+    const t = this.initialStatusText(c, scan);
+    s.textContent = '';
+    if (typeof t === 'string') s.textContent = t; else s.appendChild(t);
+    if (!scan) s.dataset.gen = '';
+    return s;
+  },
+  /** A card whose entry exists while its status line still reads its initial text (entry restored from storage on reload; DeepSeek
    *  connected by its usage ZIP alone — no connectKey / scan wrote the line in this page) is revealed as connected by renderHub, so derive the
    *  line from the entry instead of contradicting the green dot. dataset.gen guard: an in-flight fetch / validation owns its line.
-   *  Never for the static Claude Code card ('local': restoreHandle owns its "Not connected. Tip: <code>…</code>" line), nor for a dual-driver
-   *  card's SERVER line while the entry has no serverLabel — a folder-only scan (or its reload) connects the folder half only, and
-   *  '<id>-scan-status' already says so; rewriting '<id>-status' would claim a server nobody validated. */
+   *  "Still initial" = textContent equality with initialStatusText(c) (a node-factory result compares by its fragment's text), and only the
+   *  plain "Not connected." placeholder is ever derived — a card whose own initial line says more keeps it (the Claude Code tip with its
+   *  <code> path stays until restoreHandle / a scan writes the line; the Imports log starts empty and is no connection state). Never for a
+   *  dual-driver card's SERVER line while the entry has no serverLabel — a folder-only scan (or its reload) connects the folder half only,
+   *  and '<id>-scan-status' already says so; rewriting '<id>-status' would claim a server nobody validated. */
   _syncStatusLine(c) {
     const s = $(c.statusEl), st = Store.connectors[c.id];
-    if (!s || !st || s.dataset.gen || !s.textContent.startsWith('Not connected.')) return;
-    if (c.id === 'local') return;                                 // static card: the Tip line (with its <code> path) is restoreHandle's, never derived from the entry
+    if (!s || !st || s.dataset.gen) return;
+    const init = this.initialStatusText(c), initText = typeof init === 'string' ? init : init.textContent;
+    if (s.textContent !== initText || initText !== 'Not connected.') return;   // a driver already wrote the line, or the card's own initial line says more than the placeholder
     if (c.baseUrl && c.patterns && !st.serverLabel) return;       // dual-driver card, folder-only entry: '<id>-status' is the SERVER line — leave it "Not connected."
     s.textContent = '';
     if (st.err) { s.appendChild(el('span', { class: 'err', text: 'Needs attention: ' })); s.appendChild(document.createTextNode(st.err)); return; }
@@ -4929,15 +4954,16 @@ const App = {
     delete Store.connectors[id];
     // an in-flight scan / fetch / server validation for this connector must NOT commit after the disconnect and resurrect it
     this._gen[id] = (this._gen[id] || 0) + 1; this._gen[id + ':server'] = (this._gen[id + ':server'] || 0) + 1;
-    if (id === 'local') { IDB.del('claudeDir'); this.dirHandle = null; }
-    // 'Not connected.' must survive an in-flight fetch/validation that bails on the gen bump: those clear the status only while
-    // status.dataset.gen is still theirs, so reset it here (the scan-status line carries no gen)
-    if (c.keyLS) { const s = $(c.statusEl); if (s) { s.textContent = this.initialStatusText(c); s.dataset.gen = ''; } }
+    if (id === 'local') { IDB.del('claudeDir'); this.dirHandle = null; $('rescan-local').hidden = true; }
+    // every status line back to its initial text — the plain "Not connected." or the Claude Code tip with its <code> path — and it must survive
+    // an in-flight fetch/validation that bails on the gen bump: those clear the status only while status.dataset.gen is still theirs, so
+    // _setInitialStatus resets it here (the scan-status line carries no gen)
+    this._setInitialStatus(c);
     if (c.kind === 'folder-log' || c.kind === 'local-server') {
       if (c.poll) { this.stopPoll(c); LS.del('poll:' + id); }   // metrics-poll: stop the loop and forget the counter baseline (a reconnect starts from the current counters)
       delete this._dirHandles[id]; IDB.del('dir:' + id);   // unconditional: a handle may be persisted in IDB without being restored into memory (denied permission, early disconnect)
-      const rs = $(id + '-rescan'); if (rs) rs.hidden = true; const s = $(c.statusEl); if (s) { s.textContent = this.initialStatusText(c); s.dataset.gen = ''; }
-      const ss = $(id + '-scan-status'); if (ss) ss.textContent = this.initialStatusText(c, true);   // dual-driver cards: reset the folder line too (same noun as ensureSourceCard)
+      const rs = $(id + '-rescan'); if (rs) rs.hidden = true;
+      this._setInitialStatus(c, true);   // dual-driver cards: reset the folder line too (same noun as ensureSourceCard)
     }
     if (confirm(`Also delete ${c.name}'s stored usage data? OK = delete, Cancel = keep the data.`)) {
       for (const sid of c.srcIds) delete Store.sources[sid];
@@ -5419,7 +5445,7 @@ const App = {
     // URL row) and '<id>-scan-status' for the folder scan — the drivers run concurrently (syncConnector / refreshAll) and must never
     // blank or overwrite each other's line. Single-driver cards keep the one '<id>-status' at the bottom.
     const dual = !!(c.baseUrl && c.patterns);
-    const statusEl = el('div', { class: 'status', id: c.id + '-status', text: this.initialStatusText(c) });
+    const statusEl = this._setInitialStatus(c, false, el('div', { class: 'status', id: c.id + '-status' }));   // through the initial-status contract (string or node-factory result)
     if (c.kind === 'export-file') {
       kids.push(el('div', { class: 'row' }, el('button', { class: 'btn primary', id: c.id + '-import', text: 'Import file…', onclick: () => this.openImportsFor(c) })));
       kids.push(el('div', { class: 'note', text: 'Looking for: ' + (c.hint || 'your data export') + '. Files are read in your browser only; the rows land under Imports and show on this card.' }));
@@ -5442,7 +5468,7 @@ const App = {
       const link = el('a', { href: '#', text: 'use the classic folder chooser' });
       link.addEventListener('click', (e) => { e.preventDefault(); fb.click(); });
       kids.push(el('div', { class: 'note' }, 'Files are read in your browser only. Looking for: ' + (c.hint || 'log files') + '. If the folder picker does not open, ', link, ' instead.'));
-      if (dual) kids.push(el('div', { class: 'status', id: c.id + '-scan-status', text: this.initialStatusText(c, true) }));
+      if (dual) kids.push(this._setInitialStatus(c, true, el('div', { class: 'status', id: c.id + '-scan-status' })));
     }
     if (!dual) kids.push(statusEl);
     const L = c.links || {}, ln = [];
@@ -6386,10 +6412,7 @@ const App = {
         for (const id of Object.keys(this._pollTimers)) this.stopPoll(id);   // a running /metrics poll would otherwise re-create the source it just cleared (baselines in LS 'poll:*' are kept: they are counters, not usage)
         for (const id of Object.keys(this._dirHandles)) IDB.del('dir:' + id); this._dirHandles = {}; document.querySelectorAll('.src.generic .rescan').forEach(b => { b.hidden = true; });
         $('rescan-local').hidden = true;
-        for (const c of CONNECTORS) {   // every status line back to its initial text — never blank: link-only keeps "No data path", key / folder cards "Not connected." (the gen bump above released any in-flight placeholder)
-          const s = document.getElementById(c.statusEl); if (s) { s.textContent = this.initialStatusText(c); s.dataset.gen = ''; }
-          const ss = $(c.id + '-scan-status'); if (ss) ss.textContent = this.initialStatusText(c, true);
-        }
+        for (const c of CONNECTORS) { this._setInitialStatus(c); this._setInitialStatus(c, true); }   // every status line back to its initial text — never blank: link-only keeps "No data path", key / folder cards "Not connected.", the Claude Code card its tip with the <code> path, dual-driver folder lines their noun (the gen bump above released any in-flight placeholder)
         this.render();
       }
     });
