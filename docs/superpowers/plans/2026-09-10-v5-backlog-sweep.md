@@ -29,3 +29,7 @@
 Still open after this plan (need real-world samples or are by design; recorded in the spec): 4a-7 (Cline no-metadata heuristic), 4a-8 (Codex custom provider names), 4a-9 (hour histogram beyond 90 days — label is honest), 4a-10, 4a-11, 4b-1 (legacy cross-sid buckets), 4b-2 (vLLM counter name), 4b-3 (DeepSeek timezone-less ISO), 4b-5 (fields persist only after success — deliberate), 4b-6, 4b-7.
 
 Conventions: identical to the v4b plan header (strict TDD with RED evidence, ONLY=<token> dev loop, full suite gate, hygiene 0 control bytes / ≤ 600 KB, explicit `git add`, one commit per task, anchors not line numbers, Node-script edits for CRLF/LF-mixed files, textContent-only DOM writes).
+
+## Status
+
+All 9 tasks done on v5-backlog (commits 35a1215 T1, fab1b9e T2, 6ffe83f T3, 862739f T4, ca1f796 T5, f6767bb T6, 50088ab T7, ab8f6c2 T8, c40c1bb T9); suite 355/355; size 483 KB, 0 control bytes; integration review + merge decision are run by the controller.
