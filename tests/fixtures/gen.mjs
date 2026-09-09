@@ -91,6 +91,25 @@ export async function generate() {
     jl({ timestamp: '2026-08-10T21:10:05.000Z', type: 'event_msg', payload: { type: 'token_count', info: null, rate_limits: { primary: { used_percent: 12 } } } }),   // rate-limit-only snapshot → skipped, not malformed
   ].join('\n') + '\n');
 
+  // T7c (v5 T3) — the SAME session resumed in a later rollout file: total_token_usage starts at the earlier file's final cumulative
+  //   (5000/1000/400 here, well above rollout-…-abc's 400/200/130), so delta-of-cumulative would book a giant first delta (4200/1100/450);
+  //   last_token_usage is this turn only and is what the parser books. Per event (in/cached/out; reasoning ⊂ out, never added on top):
+  //   #1 total 5300/1100/450 · last 300/100/50            → in 300−100 = 200 · cr 100 · out 50
+  //   #2 total 5500/1100/480 · last 200/0/30              → in 200 · cr 0 · out 30
+  //   #3 identical to #2 (rate-limit refresh re-emits it) → skipped (cumulative unchanged)
+  //   #4 total 5900/1300/540 · last_token_usage: null     → fallback diff vs #2's total: in 400−200 = 200 · cr 200 · out 60
+  //   #5 total 6000/1300/550 · last 100/0/10              → in 100 · cr 0 · out 10
+  //   Expected: in = 200+200+200+100 = 700 · cr = 100+0+200+0 = 300 · out = 50+30+60+10 = 150 · msgs=4 · lines=7 · badLines=0
+  w('codex/sessions/2026/08/11/rollout-2026-08-11T08-00-00-abc-resumed.jsonl', [
+    jl({ timestamp: '2026-08-11T08:00:00.000Z', type: 'session_meta', payload: { id: 'abc', cwd: 'D:\\proj1', cli_version: '0.40.0', originator: 'codex_cli_rs' } }),
+    jl({ timestamp: '2026-08-11T08:00:01.000Z', type: 'turn_context', payload: { cwd: 'D:\\proj1', model: 'gpt-5.4-codex', approval_policy: 'on-request' } }),
+    jl({ timestamp: '2026-08-11T08:01:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: tk(5300, 1100, 450, 100), last_token_usage: tk(300, 100, 50, 10), model_context_window: 400000 } } }),
+    jl({ timestamp: '2026-08-11T08:05:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: tk(5500, 1100, 480, 110), last_token_usage: tk(200, 0, 30, 10), model_context_window: 400000 } } }),
+    jl({ timestamp: '2026-08-11T08:05:01.000Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: tk(5500, 1100, 480, 110), last_token_usage: tk(200, 0, 30, 10), model_context_window: 400000 }, rate_limits: { primary: { used_percent: 14 } } } }),   // re-emitted snapshot → skipped
+    jl({ timestamp: '2026-08-11T09:10:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: tk(5900, 1300, 540, 130), last_token_usage: null, model_context_window: 400000 } } }),   // no per-turn usage → cumulative delta
+    jl({ timestamp: '2026-08-11T09:20:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: tk(6000, 1300, 550, 135), last_token_usage: tk(100, 0, 10, 5), model_context_window: 400000 } } }),
+  ].join('\n') + '\n');
+
   // T8 — Gemini CLI session. Expected: in = (1000-200)+(2000-1500)+(500-0) = 1800 · cr = 200+1500 = 1700 · out = (300+50)+(100+0)+(20+0) = 470 · msgs=3 (g2 dup by id skipped; g3 has no tokens) · files=2 badLines=1
   const gmsg = (id, ts, model, t) => ({ id, timestamp: ts, type: 'gemini', content: 'reply ' + id, model, tokens: t });
   w('gemini/tmp/abc123/chats/session-2026-08-10T09-00-aaaa.json', JSON.stringify({

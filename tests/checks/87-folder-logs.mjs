@@ -100,10 +100,31 @@ export async function run({ browser, ok }) {
         sid: res.rows[0] && res.rows[0].sid, card: !!document.getElementById('src-codex'), cat: c && c.category, kind: c && c.kind, quality: c && c.quality,
         hub: !!document.querySelector('#accounts-hub .hub-group[data-group="coding"] .acct[data-connector="codex"]') };
     }, codexText);
-    ok('codex: delta-of-cumulative token_count → in=200 cr=200 out=130 msgs=3; duplicate snapshot + info:null skipped; 1 bad line; hours + sid kept',
+    ok('codex: token_count → per-turn last_token_usage (equals the cumulative deltas here) → in=200 cr=200 out=130 msgs=3; re-emitted snapshot + info:null skipped; 1 bad line; hours + sid kept',
       cx.in === 200 && cx.cr === 200 && cx.out === 130 && cx.msgs === 3 && cx.badLines === 1 && cx.lines === 8 && cx.models.length === 1 && cx.models[0] === 'gpt-5.4-codex'
       && cx.platforms.length === 1 && cx.platforms[0] === 'OpenAI Codex CLI' && JSON.stringify(cx.hours) === JSON.stringify(cx.expHours) && cx.sid === 'rollout-2026-08-10T09-00-00-abc', JSON.stringify(cx));
     ok('codex: registry entry is a folder-log coding tool with an exact-quality generic card in the Coding group', cx.card && cx.cat === 'coding' && cx.kind === 'folder-log' && cx.quality === 'exact' && cx.hub, JSON.stringify(cx));
+
+    // ---- T7c (v5 T3): a resumed session prefers last_token_usage (per turn) over delta-of-cumulative ----
+    // rollout-…-abc-resumed.jsonl: total_token_usage starts at 5000/1000/400 + the turn (≥ the first file's final 400/200/130), so the OLD
+    // delta-of-cumulative would book #1 as in 5300−1100 = 4200 · cr 1100 · out 450. Expected instead (see gen.mjs T7c):
+    //   #1 last 300/100/50 → in 200 · cr 100 · out 50 · #2 last 200/0/30 → in 200 · cr 0 · out 30 · #3 = #2 re-emitted → skipped
+    //   #4 last:null → cumulative diff 5900/1300/540 − 5500/1100/480 → in 400−200 = 200 · cr 200 · out 60 · #5 last 100/0/10 → in 100 · cr 0 · out 10
+    //   ⇒ in 700 · cr 300 · out 150 · msgs 4; the first file (last == cumulative delta on every event) stays 200/200/130/3; lines 8+7 = 15, badLines 1.
+    const codexResumedText = read('codex', 'sessions', '2026', '08', '11', 'rollout-2026-08-11T08-00-00-abc-resumed.jsonl');
+    const cxR = await page.evaluate(async (a, b) => {
+      const res = await parseCodexRollouts([
+        { path: 'sessions/2026/08/10/rollout-2026-08-10T09-00-00-abc.jsonl', file: new File([a], 'rollout-2026-08-10T09-00-00-abc.jsonl') },
+        { path: 'sessions/2026/08/11/rollout-2026-08-11T08-00-00-abc-resumed.jsonl', file: new File([b], 'rollout-2026-08-11T08-00-00-abc-resumed.jsonl') },
+      ], null, new Set(), connectorById('codex'));
+      const t = (rows) => rows.reduce((s, r) => ({ in: s.in + r.in, cr: s.cr + r.cr, out: s.out + r.out, msgs: s.msgs + r.msgs }), { in: 0, cr: 0, out: 0, msgs: 0 });
+      return { first: t(res.rows.filter(r => r.sid === 'rollout-2026-08-10T09-00-00-abc')), resumed: t(res.rows.filter(r => r.sid === 'rollout-2026-08-11T08-00-00-abc-resumed')),
+        lines: res.meta.lines, badLines: res.meta.badLines, files: res.meta.files, sids: [...new Set(res.rows.map(r => r.sid))].sort() };
+    }, codexText, codexResumedText);
+    ok('codex (v5 T3): resumed rollout books per-turn last_token_usage — in=(300−100)+(200−0)+[last:null → cumulative 400−200]+(100−0)=700 cr=100+0+200+0=300 out=50+30+60+10=150 msgs=4 (re-emitted snapshot skipped, reasoning never added on top); first file unchanged 200/200/130/3; lines 15 badLines 1',
+      cxR.resumed.in === 700 && cxR.resumed.cr === 300 && cxR.resumed.out === 150 && cxR.resumed.msgs === 4
+      && cxR.first.in === 200 && cxR.first.cr === 200 && cxR.first.out === 130 && cxR.first.msgs === 3
+      && cxR.lines === 15 && cxR.badLines === 1 && cxR.files === 2 && cxR.sids.length === 2, JSON.stringify(cxR));
 
     // ---- T7 follow-up: the same rollout filename (contains the session UUID) appearing under both sessions/ and archived_sessions/ must count once ----
     const cxDupe = await page.evaluate(async (text) => {
