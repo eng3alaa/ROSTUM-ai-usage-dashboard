@@ -3933,6 +3933,52 @@ async function readZipEntries(file) {
 }
 
 /* ---------- import router (drop zone) ---------- */
+/** Content sniff for ONE parsed .jsonl line dropped on Imports: which registered log format wrote it. Decisive shapes only — anything
+ *  else is 'unknown' so sniffJsonlFile can look at the next line (Junie files open with AgentStartedEvent, Claude Code logs with a
+ *  file-history-snapshot, …). Kinds other than 'claude' (the local-import path) map to a folder-log connector through JSONL_ROUTE. The
+ *  file name is a last-resort hint (rollout-*.jsonl → Codex, tokensGenerated.jsonl → Continue) for a line with no signature of its own. */
+function sniffJsonlKind(o, fileName) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return 'unknown';
+  const type = typeof o.type === 'string' ? o.type : '';
+  if (/^(session_meta|turn_context|response_item|event_msg)$/.test(type) && o.payload && typeof o.payload === 'object') return 'codex';   // rollout envelope { timestamp, type, payload }
+  if (/^(session\.(start|shutdown)|assistant\.(usage|message|turn_start|turn_end)|user\.message)$/.test(type) || (/^[a-z]+\.[a-z_]+$/.test(type) && o.data && typeof o.data === 'object')) return 'copilot-cli';   // chronicle events: dotted type + data{}
+  if (o.promptTokens != null || o.generatedTokens != null || o.eventName === 'tokensGenerated') return 'continue';
+  const ev = o.event && typeof o.event === 'object' ? o.event : null;
+  const evType = String((ev && (ev.type || ev.eventType)) || o.eventType || '');
+  if (/LlmResponse/i.test(evType) || /LlmResponse/i.test(type) || (ev && /Event$/.test(evType))) return 'junie';   // Matterhorn { timestamp, event: { type: '…Event' } }
+  if (type === 'assistant' || type === 'user' || type === 'summary' || (o.message && typeof o.message === 'object' && o.message.usage) || 'parentUuid' in o || (o.sessionId && o.uuid)) return 'claude';
+  const hasTs = o.ts != null || o.timestamp != null;
+  if (o.prompt_eval_count != null || o.eval_count != null || (hasTs && ['in', 'out', 'input_tokens', 'output_tokens', 'prompt_tokens', 'completion_tokens'].some(k => typeof o[k] === 'number'))) return 'ollama';   // usage-logger line (docs/tools/ollama-usage-logger.mjs, or anything scripted to that shape) — top-level counts only, which is all parseUsageLoggerJsonl reads
+  const name = String(fileName || '');
+  if (/(^|\/)rollout-[^/]*\.jsonl$/i.test(name)) return 'codex';
+  if (/(^|\/)tokensGenerated\.jsonl$/i.test(name)) return 'continue';
+  return 'unknown';
+}
+/** File-level sniff: the first decisive kind among the first 50 non-blank lines, streamed through readLines (a long first line — Claude Code
+ *  snapshots run to tens of KB — is never cut mid-JSON); 'unknown' when no line carries a signature. */
+async function sniffJsonlFile(file, name) {
+  let n = 0;
+  for await (const line of readLines(file)) {
+    if (!line.trim()) continue;
+    if (++n > 50) break;
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    const kind = sniffJsonlKind(o, name);
+    if (kind !== 'unknown') return kind;
+  }
+  return 'unknown';
+}
+/** Dropzone route per sniffed kind: the connector whose parser owns the format, and the path handed to that parser for a dropped file — the
+ *  on-disk name when it already matches the connector's patterns, else a synthetic name the parser's own filename filter accepts (a renamed
+ *  rollout / events file still parses; the parser's sid stays derived from the name). parseFolderCached filters by connector.patterns and
+ *  every parser by its own filename test, so the sniff decides and the path is made to agree. */
+const JSONL_ROUTE = {
+  codex: { id: 'codex', canon: (n) => 'rollout-' + n },
+  'copilot-cli': { id: 'copilot-cli', canon: (n) => n.replace(/\.jsonl$/i, '') + '/events.jsonl' },
+  continue: { id: 'continue', canon: (n) => n.replace(/\.jsonl$/i, '') + '/tokensGenerated.jsonl' },
+  junie: { id: 'junie', canon: (n) => n.replace(/\.jsonl$/i, '') + '-events.jsonl' },
+  ollama: { id: 'ollama', canon: (n) => 'usage-' + n },
+};
+const jsonlRoutePath = (c, kind, name) => (c.patterns || []).some(re => re.test(name)) ? name : JSONL_ROUTE[kind].canon(name);
 function sniffJSON(obj, fileName) {
   // Wave 2 chat-export shapes (checked after the provider reports and the ChatGPT / Claude.ai / Takeout arrays)
   const dsTime = (o) => !!o && (o.inserted_at != null || o.created_at != null || o.create_time != null);
@@ -5991,19 +6037,41 @@ const App = {
       }
     }
     if (jsonlFiles.length) {
-      try {
-        const res = await parseClaudeLogs(jsonlFiles, null);
-        if (res.meta.msgs === 0) {
-          // a non-Claude .jsonl (Codex rollout, Copilot CLI events, Continue, Junie, usage-logger) parses to 0 messages without
-          // throwing — do NOT replace prior local-import rows with an empty set and do NOT count it as an import
-          notes.push(`No Claude Code messages found in ${jsonlFiles.length} .jsonl file${jsonlFiles.length === 1 ? '' : 's'} — Codex / Copilot CLI / Continue / Junie logs connect through their own card in the accounts hub (pick the folder)`);
-        } else {
-          if (res.projects.length && !Store.sources.local) Store.projects = res.projects;   // folder scan wins; assign BEFORE persist
-          Store.setSource('local-import', res.rows, res.meta);
-          notes.push(`${jsonlFiles.length} .jsonl files: ${fmtInt(res.meta.msgs)} messages imported`);
-          imported++;
-        }
-      } catch (e) { notes.push(`.jsonl import failed — ${e.message || e}`); }
+      // Every .jsonl is sniffed by CONTENT (sniffJsonlFile): a Codex rollout / Copilot CLI events / Continue / Junie / usage-logger file is
+      // routed to its registered folder-log parser under THAT connector's srcId through scanFiles — the very path a folder pick takes — so
+      // rows, filesLabel / label / lastSync, the src card and the hub card land exactly as after a folder scan (a drop IS a scan of just
+      // those files: like a re-scan it replaces that connector's rows; scanFiles writes its status to the connector's own card, so the note
+      // here points there). Only Claude-shaped files take the local-import path below; an unrecognized .jsonl gets an honest note and
+      // touches no source. Routed files never count toward this card's "N file(s) imported" — their rows live under the other connector.
+      const groups = new Map();   // kind → [{ path, file }]
+      for (const jf of jsonlFiles) { const kind = await sniffJsonlFile(jf.file, jf.path); if (!groups.has(kind)) groups.set(kind, []); groups.get(kind).push(jf); }
+      for (const [kind, list] of groups) {
+        if (kind === 'claude') continue;
+        const c = JSONL_ROUTE[kind] ? connectorById(JSONL_ROUTE[kind].id) : null;
+        if (!c) { for (const jf of list) notes.push(`${jf.path}: format not recognized`); continue; }
+        const n = list.length, what = `${n} file${n === 1 ? '' : 's'} routed to ${c.name}`;
+        try {
+          await this.scanFiles(c, list.map(jf => ({ path: jsonlRoutePath(c, kind, jf.path), file: jf.file })));
+          const err = (Store.connectors[c.id] || {}).scanErr;
+          notes.push(`${what} (see its card)` + (err ? ` — scan failed: ${err}` : ''));
+        } catch (e) { notes.push(`${what} — failed: ${e.message || e}`); }
+      }
+      const claudeFiles = groups.get('claude') || [];
+      if (claudeFiles.length) {
+        try {
+          const res = await parseClaudeLogs(claudeFiles, null);
+          if (res.meta.msgs === 0) {
+            // Claude-shaped lines but no assistant usage (a summary-only / progress-only session) — do NOT replace prior local-import rows
+            // with an empty set and do NOT count it as an import
+            notes.push(`No Claude Code messages found in ${claudeFiles.length} .jsonl file${claudeFiles.length === 1 ? '' : 's'} — Claude Code-shaped lines, but no assistant usage`);
+          } else {
+            if (res.projects.length && !Store.sources.local) Store.projects = res.projects;   // folder scan wins; assign BEFORE persist
+            Store.setSource('local-import', res.rows, res.meta);
+            notes.push(`${claudeFiles.length} .jsonl file${claudeFiles.length === 1 ? '' : 's'}: ${fmtInt(res.meta.msgs)} messages imported`);
+            imported++;
+          }
+        } catch (e) { notes.push(`.jsonl import failed — ${e.message || e}`); }
+      }
     }
     clear(status);
     for (const n of notes) status.appendChild(el('div', { text: n }));

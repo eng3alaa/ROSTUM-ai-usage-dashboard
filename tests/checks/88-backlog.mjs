@@ -226,22 +226,81 @@ export async function run({ browser, ok }) {
     const hint = await page.evaluate(() => document.querySelector('#pricing-title .hint').textContent);
     ok('pricing-norm: price editor hint says patterns match the normalized id', /normali[sz]ed/i.test(hint) && /date/i.test(hint), hint);
 
-    // Dropping a non-Claude .jsonl (Codex rollout / Copilot CLI events / Continue / Junie / usage-logger) on the Imports
-    // dropzone routes to parseClaudeLogs, which finds 0 messages without throwing. That batch must NOT wipe prior
-    // local-import rows with an empty set, must NOT mark the Imports card connected, and the note must point at the
-    // tool's own hub card (sniff-routing of foreign .jsonl is backlog).
+    // v5 T1: the Imports dropzone sniffs every .jsonl by CONTENT — a non-Claude file (Codex rollout / Copilot CLI events /
+    // Continue / Junie / usage-logger) is routed to its registered folder-log parser under THAT connector's srcId through the
+    // same landing path a folder scan uses (rows, filesLabel / label / lastSync, src card revealed, hub reads connected);
+    // Claude-shaped files keep the local-import path; an unrecognized .jsonl gets an honest note and touches no source.
+    // Routed files never count toward the Imports card's own "N file(s) imported" label — their rows live under the other connector.
+    const sniff = await page.evaluate(() => ({
+      codex: sniffJsonlKind({ timestamp: 't', type: 'session_meta', payload: { id: 'x' } }, 'x.jsonl'),
+      codex2: sniffJsonlKind({ timestamp: 't', type: 'event_msg', payload: { type: 'token_count' } }, 'x.jsonl'),
+      copilot: sniffJsonlKind({ id: 'e1', type: 'session.start', data: {} }, 'events.jsonl'),
+      copilot2: sniffJsonlKind({ id: 'e2', type: 'assistant.usage', data: { model: 'm' } }, 'x.jsonl'),
+      cont: sniffJsonlKind({ eventName: 'tokensGenerated', model: 'm', promptTokens: 1, generatedTokens: 2 }, 'x.jsonl'),
+      junie: sniffJsonlKind({ timestamp: 't', event: { type: 'LlmResponseEvent', inputTokens: 1 } }, 'x.jsonl'),
+      junie2: sniffJsonlKind({ timestamp: 't', event: { type: 'AgentStartedEvent' } }, 'x.jsonl'),
+      logger: sniffJsonlKind({ ts: 't', model: 'm', prompt_eval_count: 1, eval_count: 2 }, 'x.jsonl'),
+      logger2: sniffJsonlKind({ ts: 't', platform: 'Ollama', model: 'm', in: 1, out: 2, msgs: 1 }, 'x.jsonl'),
+      claude: sniffJsonlKind({ type: 'assistant', message: { usage: { input_tokens: 1 } } }, 'x.jsonl'),
+      claude2: sniffJsonlKind({ type: 'user', message: { role: 'user' } }, 'x.jsonl'),
+      claude3: sniffJsonlKind({ type: 'summary', summary: 's' }, 'x.jsonl'),
+      claude4: sniffJsonlKind({ parentUuid: null, type: 'progress', uuid: 'u' }, 'x.jsonl'),
+      unknown: sniffJsonlKind({ hello: 1 }, 'x.jsonl'),
+      nul: sniffJsonlKind(null, 'x.jsonl'),
+    }));
+    ok('imports-sniff: sniffJsonlKind classifies Codex / Copilot CLI / Continue / Junie (nested event; non-LLM event too) / usage-logger (native + Ollama counters) / Claude (assistant, user, summary, envelope) / unknown',
+      sniff.codex === 'codex' && sniff.codex2 === 'codex' && sniff.copilot === 'copilot-cli' && sniff.copilot2 === 'copilot-cli' && sniff.cont === 'continue' && sniff.junie === 'junie' && sniff.junie2 === 'junie'
+      && sniff.logger === 'ollama' && sniff.logger2 === 'ollama' && sniff.claude === 'claude' && sniff.claude2 === 'claude' && sniff.claude3 === 'claude' && sniff.claude4 === 'claude'
+      && sniff.unknown === 'unknown' && sniff.nul === 'unknown', JSON.stringify(sniff));
     const codexText = fs.readFileSync(path.join(OUT, 'codex', 'sessions', '2026', '08', '10', 'rollout-2026-08-10T09-00-00-abc.jsonl'), 'utf8');
-    const foreign = await page.evaluate(async (text) => {
-      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set();
+    const cpA = fs.readFileSync(path.join(OUT, 'copilot', 'session-state', 'sess-1', 'events.jsonl'), 'utf8');
+    const cpB = fs.readFileSync(path.join(OUT, 'copilot', 'session-state', 'sess-2', 'events.jsonl'), 'utf8');
+    const logText = fs.readFileSync(path.join(OUT, 'usage-log', 'ollama-usage.jsonl'), 'utf8');
+    const claudeText = fs.readFileSync(path.join(OUT, 'claude-logs', 'projects', '-D--proj1', 'sess-aaa.jsonl'), 'utf8');
+    const routed = await page.evaluate(async (codex, a, b, log, claude) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set();
+      const sum = (rows) => rows.reduce((t, r) => ({ in: t.in + (r.in || 0), cw: t.cw + (r.cw || 0), cr: t.cr + (r.cr || 0), out: t.out + (r.out || 0), msgs: t.msgs + (r.msgs || 0) }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
+      const rows = (id) => ((Store.sources[id] || {}).rows || []);
+      const out = {};
+      // (a) four foreign .jsonl — one Codex rollout, two Copilot CLI events files that share their on-disk name, one usage-logger file — and no Claude file: prior local-import rows stay
       Store.setSource('local-import', [{ d: todayKey(), platform: 'Claude Code/Desktop', model: 'claude-sonnet-5', in: 100, cw: 0, cr: 0, out: 50, msgs: 1, sid: 'prior-sess' }], {});
-      await App.handleImportFiles([new File([text], 'rollout-2026-08-10T09-00-00-abc.jsonl')]);
-      const src = Store.sources['local-import'];
-      const out = { rows: src ? src.rows.length : null, in: src && src.rows[0] ? src.rows[0].in : null, imports: Store.connectors.imports === undefined ? 'unset' : 'set', note: document.getElementById('import-status').textContent };
-      Store.sources = {}; Store.connectors = {}; Store.persist();
+      await App.handleImportFiles([new File([codex], 'rollout-2026-08-10T09-00-00-abc.jsonl'), new File([a], 'events.jsonl'), new File([b], 'events.jsonl'), new File([log], 'ollama-usage.jsonl')]);
+      out.codex = sum(rows('codex')); out.copilot = sum(rows('copilot-cli')); out.ollama = sum(rows('ollama'));
+      out.codexModels = [...new Set(rows('codex').map(r => r.model))]; out.copilotPlatforms = [...new Set(rows('copilot-cli').map(r => r.platform))];
+      out.prior = { rows: rows('local-import').length, in: (rows('local-import')[0] || {}).in };
+      out.imports = Store.connectors.imports === undefined ? 'unset' : 'set';
+      out.labels = { codex: (Store.connectors.codex || {}).filesLabel, copilot: (Store.connectors['copilot-cli'] || {}).filesLabel, ollama: (Store.connectors.ollama || {}).filesLabel };
+      out.status = { codex: Store.connectorStatus(connectorById('codex')), copilot: Store.connectorStatus(connectorById('copilot-cli')), ollama: Store.connectorStatus(connectorById('ollama')) };
+      App._render();
+      const hubCodex = document.querySelector('#accounts-hub .acct[data-connector="codex"]');
+      out.hubDot = hubCodex ? !!hubCodex.querySelector('.dot.ok') : null; out.hubAria = hubCodex ? hubCodex.getAttribute('aria-label') : null;
+      out.cardShown = document.getElementById('src-codex').hidden === false;
+      out.cardStatus = document.getElementById('codex-status').textContent;
+      out.note = document.getElementById('import-status').textContent;
+      out.projects = (Store.projectsBy.codex || []).length;
+      // (b) a Claude session dropped together with a Codex rollout: the Claude file lands under local-import (today's path — replaces the prior rows), the Codex file is routed; only the Claude file counts as an Imports-card import
+      await App.handleImportFiles([new File([claude], 'sess-aaa.jsonl'), new File([codex], 'rollout-2026-08-10T09-00-00-abc.jsonl')]);
+      out.claude = sum(rows('local-import')); out.codexAgain = sum(rows('codex'));
+      out.importsLabel = (Store.connectors.imports || {}).label; out.noteB = document.getElementById('import-status').textContent;
+      // (c) an unrecognized .jsonl: honest note, no source created, Imports card not connected
+      Store.sources = {}; Store.connectors = {};
+      await App.handleImportFiles([new File(['{"hello":1}\n{"world":2}\n'], 'mystery.jsonl')]);
+      out.unknownNote = document.getElementById('import-status').textContent; out.unknownSources = Object.keys(Store.sources); out.unknownImports = Store.connectors.imports === undefined ? 'unset' : 'set';
+      Store.sources = {}; Store.connectors = {}; Store.projectsBy = {}; Store.persist(); App._render();
       return out;
-    }, codexText);
-    ok('imports: a Codex-shaped .jsonl on the dropzone leaves prior local-import rows intact (1 row, in=100), does not connect the Imports card, note says no Claude Code messages + points at the hub',
-      foreign.rows === 1 && foreign.in === 100 && foreign.imports === 'unset' && /No Claude Code messages found in 1 \.jsonl file/.test(foreign.note) && /accounts hub/.test(foreign.note) && /Codex/.test(foreign.note), JSON.stringify(foreign));
+    }, codexText, cpA, cpB, logText, claudeText);
+    ok('imports-route: Codex rollout + two Copilot CLI events files + a usage-logger file dropped on Imports land under codex / copilot-cli / ollama with the folder-scan totals (codex in=200 cr=200 out=130 msgs=3 gpt-5.4-codex; copilot-cli in=2150 cw=100 cr=900 out=500 msgs=5; ollama in=1060 out=370 msgs=3), prior local-import rows intact, Imports card untouched',
+      routed.codex.in === 200 && routed.codex.cr === 200 && routed.codex.out === 130 && routed.codex.msgs === 3 && routed.codexModels.length === 1 && routed.codexModels[0] === 'gpt-5.4-codex'
+      && routed.copilot.in === 2150 && routed.copilot.cw === 100 && routed.copilot.cr === 900 && routed.copilot.out === 500 && routed.copilot.msgs === 5 && routed.copilotPlatforms.length === 1 && routed.copilotPlatforms[0] === 'GitHub Copilot'
+      && routed.ollama.in === 1060 && routed.ollama.out === 370 && routed.ollama.msgs === 3
+      && routed.prior.rows === 1 && routed.prior.in === 100 && routed.imports === 'unset', JSON.stringify(routed));
+    ok('imports-route: routed connectors read connected — filesLabel "1 file" / "2 files" / "1 file", status ok, hub dot ok + aria "connected", src card revealed with its Connected line, Codex project rows stored — and the Imports note names each tool ("N file(s) routed to <name> (see its card)")',
+      routed.labels.codex === '1 file' && routed.labels.copilot === '2 files' && routed.labels.ollama === '1 file' && routed.status.codex === 'ok' && routed.status.copilot === 'ok' && routed.status.ollama === 'ok'
+      && routed.hubDot === true && /: connected$/.test(routed.hubAria) && routed.cardShown && /Connected/.test(routed.cardStatus) && routed.projects === 1
+      && /1 file routed to OpenAI Codex CLI \(see its card\)/.test(routed.note) && /2 files routed to GitHub Copilot CLI \(logs\) \(see its card\)/.test(routed.note) && /1 file routed to Ollama \(see its card\)/.test(routed.note), JSON.stringify(routed));
+    ok('imports-route: a Claude session in the same drop keeps the local-import path (in=110 msgs=2) while the Codex file is routed again; only the Claude file counts ("1 file(s) imported"); an unrecognized .jsonl → "format not recognized", no source, Imports not connected',
+      routed.claude.in === 110 && routed.claude.msgs === 2 && routed.codexAgain.in === 200 && routed.codexAgain.msgs === 3 && routed.importsLabel === '1 file(s) imported' && /1 \.jsonl file/.test(routed.noteB) && /routed to OpenAI Codex CLI/.test(routed.noteB)
+      && /mystery\.jsonl: format not recognized/.test(routed.unknownNote) && routed.unknownSources.length === 0 && routed.unknownImports === 'unset', JSON.stringify(routed));
   } finally {
     await page.close();
   }
