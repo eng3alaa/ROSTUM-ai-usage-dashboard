@@ -4457,6 +4457,14 @@ const App = {
     this._renderQueued = true;
     requestAnimationFrame(() => { this._renderQueued = false; this._render(); });
   },
+  /** Run `pick` once the current rAF-batched render has committed (two frames: render() queues one, the re-query happens the next)
+   *  and focus the element it returns — keeps keyboard focus off <body> when a hub re-render replaces the node that had it (✕ hide,
+   *  group toggle, hidden chip, modal close). Never throws: a missing / detached / display:none pick just leaves focus where it is. */
+  _focusAfterRender(pick) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      try { const n = pick(); if (n && n.isConnected && typeof n.focus === 'function') n.focus(); } catch (e) { /* the target is gone — nothing to focus */ }
+    }));
+  },
 
   _render() {
     const win = this.window();
@@ -4711,7 +4719,8 @@ const App = {
         c.quality ? el('span', { class: 'badge q-' + c.quality, text: QUALITY_LABEL[c.quality] || c.quality, title: c.qualityNote || '' }) : null,
         el('span', { class: 'dot ' + status }),
         el('button', { class: 'acct-hide', type: 'button', text: '✕', title: 'Hide this card', 'aria-label': 'Hide ' + c.name,
-          onclick: (e) => { e.stopPropagation(); View.hideCard(c.id); this.render(); }, onkeydown: (e) => e.stopPropagation() })),
+          onclick: (e) => { e.stopPropagation(); const next = this._hubNeighbour(e.currentTarget.closest('.acct')); View.hideCard(c.id); this.render();
+            this._focusAfterRender(() => (next && document.querySelector(`#accounts-hub .acct[data-connector="${next}"]`)) || document.querySelector('#hub-chips .hub-hidden-chip')); }, onkeydown: (e) => e.stopPropagation() })),
       el('div', { class: 'acct-label', text: linkOnly ? (c.reason || 'No data path') : st.err ? ('⚠ ' + st.err) : (st.label || (c.kind === 'export-file' ? (status === 'off' ? 'No export imported yet' : 'from your data export') : status === 'off' ? 'Not connected' : '')) }),
       el('div', { class: 'acct-sync', text: st.lastSync ? ('Synced ' + new Date(st.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))
         : expAt ? ('Imported ' + new Date(expAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : '' }),
@@ -4735,6 +4744,14 @@ const App = {
     card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !(e.target && e.target.closest && e.target.closest('button,a,input'))) (linkOnly ? this.openConnectorModal(c.id) : this.drillDown(c)); });   // Enter on Manage/Sync/Disconnect is the button's own click, not a drill-down
     return card;
   },
+  /** id of the card keyboard focus moves to when `card` leaves the hub: the next visible card in DOM order, else the previous one, else
+   *  null (→ the "N hidden — show" chip). Cards inside a collapsed group are skipped — display:none cannot take focus. */
+  _hubNeighbour(card) {
+    const vis = [...document.querySelectorAll('#accounts-hub .acct')].filter(c => !c.closest('.sec-collapsed'));
+    const i = vis.indexOf(card);
+    const n = i < 0 ? null : (vis[i + 1] || vis[i - 1] || null);
+    return n ? n.dataset.connector : null;
+  },
   renderHub() {
     const hub = $('accounts-hub');
     clear(hub);
@@ -4753,7 +4770,8 @@ const App = {
     const q = box.hidden ? '' : (this._hubQuery || '').trim().toLowerCase();
     const chips = clear($('hub-chips'));
     if (hiddenN) chips.appendChild(el('button', { class: 'chip hub-hidden-chip', type: 'button', text: `${hiddenN} hidden — show`, title: 'Show hidden account cards',
-      onclick: () => { View.showAllCards(); this.render(); } }));
+      onclick: () => { const was = new Set(View.prefs.hiddenCards); View.showAllCards(); this.render();
+        this._focusAfterRender(() => [...document.querySelectorAll('#accounts-hub .acct')].find(c => was.has(c.dataset.connector)) || null); } }));
     const rank = { ok: 0, warn: 1, off: 2 };
     for (const g of HUB_GROUPS) {
       const members = visible.filter(c => (c.category || 'api') === g.id && (!q || c.name.toLowerCase().includes(q)));
@@ -4767,7 +4785,7 @@ const App = {
       hub.appendChild(el('section', { class: 'hub-group', 'data-group': g.id, 'aria-label': g.label },
         el('div', { class: 'hub-group-head' },
           el('button', { class: 'collapse-btn', type: 'button', text: collapsed ? '▸' : '▾', 'aria-expanded': String(!collapsed), title: (collapsed ? 'Expand ' : 'Collapse ') + g.label,
-            onclick: () => { View.toggleCollapse('hub:' + g.id); this.renderHub(); } }),
+            onclick: () => { View.toggleCollapse('hub:' + g.id); this.renderHub(); this._focusAfterRender(() => document.querySelector(`#accounts-hub .hub-group[data-group="${g.id}"] .collapse-btn`)); } }),
           el('h3', { text: g.label }),
           el('span', { class: 'hint', text: `${nConn} of ${members.length} connected` })),
         body));
@@ -4799,12 +4817,14 @@ const App = {
   /** Export-file cards: their data comes through the Imports card — open it (modal), say which export is expected, focus the drop zone. */
   openImportsFor(c) {
     this.openConnectorModal('imports');
+    if (c) this._modalOpener = c.id;   // the export-file card launched it — focus goes back there on close, not to the Imports card
     const st = $('import-status');
     if (st && c) { clear(st); st.appendChild(el('div', { text: `Drop your ${c.platform || c.name} export here — ${c.hint || 'see the card for how to get it'}.` })); }
     const dz = $('dropzone'); if (dz) dz.focus();
   },
   openConnectorModal(id) {
     const c = connectorById(id);
+    this._modalOpener = id;   // keyboard focus returns to this card's Manage button on close (re-queried — a render while open replaces the hub's nodes)
     const dlg = $('connector-modal');
     $('modal-title').textContent = c.name;
     $('modal-mark').textContent = c.mark;
@@ -4829,6 +4849,14 @@ const App = {
       const connected = cc && cc.kind === 'export-file' ? Store.connectorStatus(cc) !== 'off' : !!Store.connectors[cid];   // export-file cards have no entry — data presence decides
       if ((/^src-(gemini|copilot|openrouter)$/.test(src.id) || src.classList.contains('generic')) && !connected) src.hidden = true;
     }
+  },
+  /** After the dialog closes: keyboard focus returns to the Manage / Connect / Details button of the card that opened it — re-queried by
+   *  data-connector, because a render while the modal was open (connectKey, sync, resize) replaced the hub's nodes and the browser's own
+   *  focus restore then lands on <body>; the card itself when its button is gone; nothing when the card is gone too (hidden / filtered). */
+  _focusModalOpener() {
+    const id = this._modalOpener;
+    if (!id) return;
+    this._focusAfterRender(() => document.querySelector(`#accounts-hub .acct[data-connector="${id}"] .acct-manage`) || document.querySelector(`#accounts-hub .acct[data-connector="${id}"]`));
   },
   /** Initial text of a card's status line — shared by ensureSourceCard, disconnectConnector and Clear stored data so a reset never blanks
    *  a line: link-only cards keep their permanent "no data path" sentence, export-file cards wait for an export, the Imports drop zone starts
@@ -6322,7 +6350,7 @@ const App = {
     dz.addEventListener('drop', (e) => { if (e.dataTransfer.files.length) this.handleImportFiles([...e.dataTransfer.files]); });
 
     $('connector-modal').querySelector('.modal-close').addEventListener('click', () => this.closeConnectorModal());
-    $('connector-modal').addEventListener('close', () => this._restoreModalCard());
+    $('connector-modal').addEventListener('close', () => { this._restoreModalCard(); this._focusModalOpener(); });
 
     $('clear-data').addEventListener('click', () => {
       if (confirm('Clear all stored usage data from this browser? (Price edits and keys are kept.)')) {

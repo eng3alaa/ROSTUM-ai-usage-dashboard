@@ -424,6 +424,76 @@ export async function run({ browser, ok }) {
     });
     ok('budgets (4b): the editor lists a Wave 2 platform once data exists (Fireworks AI, LocalAI) — once per platform, and not before',
       !bud.before.includes('Fireworks AI') && !bud.before.includes('LocalAI') && bud.fwOnce === 1 && bud.laOnce === 1, JSON.stringify(bud));
+    // v5 T6: keyboard focus survives hub re-renders (today it lands on <body>): ✕ hide → the next visible card in DOM order (the previous
+    // one when the hidden card was last; the "N hidden — show" chip when none is left); a group collapse toggle → that group's toggle
+    // again (re-queried after the re-render); the hidden chip → the first restored card in DOM order; modal close → the Manage button
+    // of the card that opened it, re-queried by data-connector after a render while the modal was open replaced the hub's nodes.
+    const focus = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load(); App._hubQuery = ''; document.getElementById('hub-search').value = '';
+      App._render();
+      const settle = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const cards = () => [...document.querySelectorAll('#accounts-hub .acct')];
+      const active = () => { const a = document.activeElement; const g = a && a.closest && a.closest('.hub-group'); return { tag: a ? a.tagName : null, cls: a ? String(a.className) : null, id: a && a.dataset ? a.dataset.connector : undefined, card: a && a.closest ? ((a.closest('.acct') || {}).dataset || {}).connector : undefined, group: g ? g.dataset.group : undefined, expanded: a ? a.getAttribute('aria-expanded') : null }; };
+      const all = cards().map(c => c.dataset.connector);
+      // (a) ✕ on the first card → the card that followed it (now first); on the last card → the previous one; on the only card → the chip
+      let btn = cards()[0].querySelector('.acct-hide'); btn.focus(); btn.click(); await settle();
+      const hideFirst = { expect: all[1], got: active() };
+      const prev = cards()[cards().length - 2].dataset.connector;
+      btn = cards()[cards().length - 1].querySelector('.acct-hide'); btn.focus(); btn.click(); await settle();
+      const hideLast = { expect: prev, got: active() };
+      for (const id of cards().slice(1).map(c => c.dataset.connector)) View.hideCard(id);
+      App._render();
+      const nOnly = cards().length;
+      btn = cards()[0].querySelector('.acct-hide'); btn.focus(); btn.click(); await settle();
+      const hideOnly = { nBefore: nOnly, n: cards().length, chipText: (document.querySelector('#hub-chips .hub-hidden-chip') || {}).textContent, got: active() };
+      // (c) hidden chip → the first restored card in DOM order (two cards hidden out of order; neither is the first card)
+      View.showAllCards(); App._render();
+      View.hideCard(all[4]); View.hideCard(all[2]); App._render();
+      let chip = document.querySelector('#hub-chips .hub-hidden-chip'); chip.focus(); chip.click(); await settle();
+      const restore = { expect: all[2], n: cards().length, got: active() };
+      // (b) group collapse toggle → the same group's (re-rendered) toggle, collapsed then expanded again
+      let tg = document.querySelector('#accounts-hub .hub-group[data-group="chat"] .collapse-btn'); tg.focus(); tg.click(); await settle();
+      const collapse = { got: active(), fresh: document.activeElement !== tg, collapsed: View.isCollapsed('hub:chat') };
+      tg = document.querySelector('#accounts-hub .hub-group[data-group="chat"] .collapse-btn'); tg.focus(); tg.click(); await settle();
+      const expand = { got: active(), fresh: document.activeElement !== tg, collapsed: View.isCollapsed('hub:chat') };
+      // (d) modal close → the opener card's Manage button, re-queried after a render while the modal was open replaced the hub nodes
+      const dlg = document.getElementById('connector-modal');
+      let m = document.querySelector('#accounts-hub .acct[data-connector="anthropic"] .acct-manage'); m.focus(); m.click();
+      App._render();   // e.g. a connectKey / sync while the dialog is open — the button that opened it is detached now
+      let closed = new Promise(r => dlg.addEventListener('close', r, { once: true })); dlg.close(); await closed; await settle();
+      const modal = { open: dlg.open, got: active(), fresh: document.activeElement !== m, text: (document.activeElement && document.activeElement.textContent || '').slice(0, 40) };
+      // (d') an export-file card's "Import file…" opens the Imports modal — close returns to THAT card's Manage button, not to the Imports card
+      let ib = document.querySelector('#accounts-hub .acct[data-connector="grok"] .acct-import-btn'); ib.focus(); ib.click();
+      const importsOpen = { open: dlg.open, hostsImports: !!dlg.querySelector('#src-import') };
+      App._render();
+      closed = new Promise(r => dlg.addEventListener('close', r, { once: true })); dlg.close(); await closed; await settle();
+      const importClose = { got: active() };
+      // (d'') the opener card was hidden while the modal was open → nothing to focus, nothing thrown (focus stays on <body>)
+      let err = null;
+      try {
+        m = document.querySelector('#accounts-hub .acct[data-connector="anthropic"] .acct-manage'); m.focus(); m.click();
+        View.hideCard('anthropic'); App._render();
+        closed = new Promise(r => dlg.addEventListener('close', r, { once: true })); dlg.close(); await closed; await settle();
+      } catch (e) { err = String(e); }
+      const gone = { err, got: active() };
+      View.showAllCards(); App._render();
+      return { all: all.length, hideFirst, hideLast, hideOnly, restore, collapse, expand, modal, importsOpen, importClose, gone };
+    });
+    const isCard = (g, id) => g.tag === 'DIV' && /\bacct\b/.test(g.cls) && g.id === id;
+    ok('focus (v5 T6): ✕ hide moves keyboard focus to the next visible card (previous when it was the last card; the hidden chip when none is left)',
+      focus.all > 5 && isCard(focus.hideFirst.got, focus.hideFirst.expect) && isCard(focus.hideLast.got, focus.hideLast.expect)
+      && focus.hideOnly.nBefore === 1 && focus.hideOnly.n === 0 && /hub-hidden-chip/.test(focus.hideOnly.got.cls || '') && /hidden — show/.test(focus.hideOnly.chipText || ''),
+      JSON.stringify({ hideFirst: focus.hideFirst, hideLast: focus.hideLast, hideOnly: focus.hideOnly }));
+    ok('focus (v5 T6): the hidden chip restore focuses the first restored card in DOM order; a group collapse / expand toggle keeps focus on that group\'s (re-rendered) toggle',
+      focus.restore.n === focus.all && isCard(focus.restore.got, focus.restore.expect)
+      && /collapse-btn/.test(focus.collapse.got.cls || '') && focus.collapse.got.group === 'chat' && focus.collapse.got.expanded === 'false' && focus.collapse.fresh && focus.collapse.collapsed
+      && /collapse-btn/.test(focus.expand.got.cls || '') && focus.expand.got.group === 'chat' && focus.expand.got.expanded === 'true' && focus.expand.fresh && !focus.expand.collapsed,
+      JSON.stringify({ restore: focus.restore, collapse: focus.collapse, expand: focus.expand }));
+    ok('focus (v5 T6): modal close returns focus to the opener card\'s Manage button (re-queried after a render while open); Import file… → Imports modal → close returns to the export-file card; a hidden opener throws nothing',
+      !focus.modal.open && /acct-manage/.test(focus.modal.got.cls || '') && focus.modal.got.card === 'anthropic' && focus.modal.fresh && focus.modal.text === 'Connect'
+      && focus.importsOpen.open && focus.importsOpen.hostsImports && /acct-manage/.test(focus.importClose.got.cls || '') && focus.importClose.got.card === 'grok'
+      && focus.gone.err === null && focus.gone.got.tag === 'BODY',
+      JSON.stringify({ modal: focus.modal, importsOpen: focus.importsOpen, importClose: focus.importClose, gone: focus.gone }));
   } finally {
     await page.close();
   }
