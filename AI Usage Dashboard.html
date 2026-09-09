@@ -4947,8 +4947,8 @@ const App = {
 
   /* ---------- platform chips ---------- */
   /** platforms with data split by palette slot: 'slotted' keep their own color; 'folded' (no free slot, ColorMap -1) draw as
-   *  ONE gray 'Other' in the chips, the share bar and its legend/table — the rule seriesFor already applies to the daily
-   *  series. A real 'Other' platform (generic CSV rows) joins the fold when one exists, so no view shows two entries named Other. */
+   *  ONE gray 'Other' in the chips, the share bar and its legend/table, and the daily stacked series (seriesFor, 'By platform').
+   *  A real 'Other' platform (generic CSV rows) joins the fold when one exists, so no view shows two entries named Other. */
   foldPlatforms(platforms, candidates) {
     const slotted = [], folded = [];
     for (const p of platforms) (ColorMap.slotFor('platform', p, candidates) === -1 ? folded : slotted).push(p);
@@ -5066,10 +5066,11 @@ const App = {
   /* ---------- daily stacked chart ---------- */
   seriesFor(rows, days, groupKind) {
     // deterministic candidate order for color slots: canonical for platforms, by all-time total for models
-    let names, candidates;
+    let names, candidates, foldSet = null;
     if (groupKind === 'platform') {
       candidates = Store.platforms();
       names = candidates.filter(p => rows.some(r => r.platform === p));
+      foldSet = new Set(this.foldPlatforms(candidates, candidates).folded);   // the SAME fold as renderChips / renderShare — a real 'Other' platform joins it, never collides with it
     } else {
       const totals = new Map();
       for (const r of Store.allRows()) totals.set(r.model, (totals.get(r.model) || 0) + this.metricOf(r));
@@ -5082,8 +5083,8 @@ const App = {
     const idx = new Map(days.map((d, i) => [d, i]));
     const byName = new Map();
     for (const name of names) {
-      const slot = ColorMap.slotFor(groupKind, name, candidates);
-      const s = { name, color: ColorMap.colorOf(groupKind, name, candidates), values: days.map(() => 0), fold: slot === -1 };
+      const fold = foldSet ? foldSet.has(name) : ColorMap.slotFor(groupKind, name, candidates) === -1;
+      const s = { name, color: ColorMap.colorOf(groupKind, name, candidates), values: days.map(() => 0), fold };
       byName.set(name, s);
       if (!s.fold) series.push(s);
     }

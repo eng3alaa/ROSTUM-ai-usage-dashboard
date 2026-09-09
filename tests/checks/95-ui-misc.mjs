@@ -138,6 +138,62 @@ export async function run({ browser, ok }) {
     ok('palette overflow: 14 platforms → share bar has 13 wedges with exactly one Other (29.4% = P13 + P14); chips, share legend and share table fold the same two into one Other',
       fold.wedges === 13 && fold.others.length === 1 && /29\.4%/.test(fold.others[0]) && fold.chips.length === 13 && fold.chips.filter(c => c === 'Other').length === 1 && !fold.chips.includes('P13')
       && fold.legend.length === 13 && fold.legend.filter(c => c === 'Other').length === 1 && fold.tableRows.length === 13 && fold.tableRows.filter(c => c === 'Other').length === 1, JSON.stringify(fold));
+
+    // daily chart fold (v5 Task 7): seriesFor ('By platform') must fold the SAME overflow set as renderShare / renderChips through
+    // App.foldPlatforms — ONE 'Other' series whose per-day totals are the folded sum; a real platform literally named 'Other' JOINS
+    // the fold instead of colliding with it (two 'Other' series before the fix); the Other chip hides/shows that series in the daily
+    // chart too. P01..P13 + 'Other': 100 tokens each except P13 = 200 and Other = 300 → 1,700. Store.platforms() lists 'Other' first
+    // (PLATFORM_ORDER), so the 12 slots hold Other + P01..P11 and P12 (100) + P13 (200) overflow; 'Other' (300) joins → fold = 600.
+    const dfold = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      App.hiddenShare = new Set(); App.hiddenDaily = new Set(); App.filters.metric = 'tokens'; App.filters.group = 'platform';
+      ColorMap.maps = { platform: {}, model: {} }; ColorMap.save();
+      const names = Array.from({ length: 13 }, (_, i) => 'P' + String(i + 1).padStart(2, '0')).concat(['Other']);
+      const tok = (p) => p === 'P13' ? 200 : p === 'Other' ? 300 : 100;
+      Store.setSource('csv', names.map(p => ({ d: todayKey(), platform: p, model: 'm', in: tok(p), cw: 0, cr: 0, out: 0, msgs: 1 })), {});
+      App._render();
+      const sorted = (a) => [...a].sort();
+      const snap = () => {
+        const win = App.window();
+        const series = App.seriesFor(App.rowsIn(win), dayRange(win.from, win.to), 'platform');
+        const sn = series.map(s => s.name);
+        return {
+          names: sn, others: sn.filter(n => n === 'Other').length,
+          otherTotal: series.filter(s => s.name === 'Other').reduce((a, s) => a + s.values.reduce((x, y) => x + y, 0), 0),
+          legend: [...document.querySelectorAll('#daily-legend .item')].map(i => i.textContent),
+          thead: [...document.querySelectorAll('#daily-table thead th')].map(th => th.textContent),
+          chips: [...document.querySelectorAll('#platform-chips .chip')].map(c => c.textContent),
+          shareRows: [...document.querySelectorAll('#share-table tbody tr')].map(tr => tr.firstChild.textContent),
+          hidden: sorted(App.filters.hiddenPlatforms)
+        };
+      };
+      const before = snap();
+      const helper = App.foldPlatforms(Store.platforms(), Store.platforms());
+      const foldedSum = helper.folded.reduce((a, p) => a + tok(p), 0);
+      // tooltip twin: hover today's band (the last one) on the hit layer
+      const svg = document.querySelector('#daily-chart svg');
+      const r = svg.getBoundingClientRect();
+      svg.querySelector('.hitlayer').dispatchEvent(new PointerEvent('pointermove', { clientX: r.right - 2, clientY: r.top + r.height / 2, bubbles: true }));
+      const tip = [...document.querySelectorAll('#tooltip .tt-row:not(.tt-total) .tt-name')].map(n => n.textContent);
+      Tooltip.hide();
+      const chip = () => [...document.querySelectorAll('#platform-chips .chip')].find(c => c.textContent === 'Other');
+      chip().click(); App._render();
+      const off = snap();
+      chip().click(); App._render();
+      const on = snap();
+      return { before, helperFolded: sorted(helper.folded), helperSlotted: sorted(helper.slotted), foldedSum, tip, off, on };
+    });
+    const noOther = (a) => JSON.stringify([...a].filter(n => n !== 'Other').sort());
+    const once = (a) => a.filter(n => n === 'Other').length === 1;
+    ok('daily fold: 14 platforms incl. a real "Other" → seriesFor (By platform) yields ≤ 13 series with exactly one Other = P12 100 + P13 200 + Other 300 = 600 (the App.foldPlatforms sum); daily legend, table header and tooltip list Other once',
+      dfold.before.names.length <= 13 && dfold.before.others === 1 && dfold.before.otherTotal === 600 && dfold.foldedSum === 600
+      && once(dfold.before.legend) && once(dfold.before.thead) && once(dfold.tip) && dfold.tip.length === dfold.before.names.length, JSON.stringify(dfold.before) + ' tip=' + JSON.stringify(dfold.tip));
+    ok('daily fold: the daily chart, the share table and the chips fold the same platforms (App.foldPlatforms folds P12, P13 and the real Other; the slotted sets are equal)',
+      JSON.stringify(dfold.helperFolded) === '["Other","P12","P13"]' && noOther(dfold.before.names) === JSON.stringify(dfold.helperSlotted)
+      && noOther(dfold.before.chips) === JSON.stringify(dfold.helperSlotted) && noOther(dfold.before.shareRows) === JSON.stringify(dfold.helperSlotted), JSON.stringify({ folded: dfold.helperFolded, slotted: dfold.helperSlotted, names: dfold.before.names, chips: dfold.before.chips, shareRows: dfold.before.shareRows }));
+    ok('daily fold: clicking the Other chip hides the folded group (P12, P13, Other) → no Other series / legend item / column in the daily chart; the second click restores ONE Other series totalling 600',
+      JSON.stringify(dfold.off.hidden) === '["Other","P12","P13"]' && dfold.off.others === 0 && !dfold.off.legend.includes('Other') && !dfold.off.thead.includes('Other') && dfold.off.names.length === 11
+      && dfold.on.hidden.length === 0 && dfold.on.others === 1 && dfold.on.otherTotal === 600 && once(dfold.on.legend) && once(dfold.on.thead), JSON.stringify({ off: dfold.off, on: dfold.on }));
   } finally {
     await page.close();
   }
