@@ -2736,29 +2736,43 @@ function parsePerplexityExport(input, fileName) {
   return { rows: agg.rows(), meta: { msgs, skipped, threads: list.length, sid } };
 }
 
-/** Parses a large chat export off the main thread via a Blob-sourced Worker, so a big
- *  ChatGPT/Claude.ai export doesn't freeze the tab. Rebuilds the parse functions' source
- *  inside the worker (Workers don't share scope with the page) — every free identifier
- *  those functions touch (Date.now, dayKey, addDays, estTok, textOfChatGPTMessage, makeAgg)
- *  must be included here too, or the worker throws a ReferenceError. Resolves {rows, meta}
- *  (the same shape parseChatGPTExport/parseClaudeAiExport return); rejects on worker error. */
-function parseInWorker(kind, text, assumedModel) {
+/** Parses a large chat export off the main thread via a Blob-sourced Worker, so a big export doesn't freeze the tab. Rebuilds the parse
+ *  functions' source inside the worker (Workers don't share scope with the page) from their .toString(): every free identifier those
+ *  functions touch (dayKey, addDays, estTok, RE_DATEONLY, makeAgg, textOfChatGPTMessage, exportTimestamp, exportText, dsChatTime, parseCSV,
+ *  sniffJSON …) must be listed in `fns` too, or the worker throws a ReferenceError — surfaced below as a rejection, never a hang.
+ *  kind: 'chatgpt' (an array or {conversations}) · 'claudeai' (+ assumedModel) · 'grok' · 'deepseek-chat' · 'meta-ai' · 'perplexity' (+ fileName,
+ *  the sid) → JSON text, parsed in the worker; 'copilot-csv' → the raw activity CSV text (+ fileName). Resolves {rows, meta} exactly as the inline
+ *  parser returns it. kind 'sniff' → the worker parses the JSON, runs sniffJSON(obj, fileName) — the same exact gates as inline, e.g. DeepSeek
+ *  chat's file-name / source mark — and, when that names a chat export, parses it in the same trip: resolves {kind, res} with res = {rows, meta},
+ *  or null for any other shape (provider report, Takeout, empty, unknown — the caller parses those inline). Chosen over a 64 KB head sniff on the
+ *  main thread (sniffJSON's gates cannot be applied to a truncated document) and over re-parsing the whole text on the main thread just to sniff
+ *  (that parse is the freeze). Rejects with the worker's message (malformed JSON, an unknown kind, a parser's own throw, a ReferenceError). */
+function parseInWorker(kind, text, assumedModel, fileName) {
   return new Promise((resolve, reject) => {
-    const fns = { estTok, textOfChatGPTMessage, parseChatGPTExport, parseClaudeAiExport, makeAgg, dayKey, addDays };
+    const fns = { dayKey, addDays, estTok, RE_DATEONLY, makeAgg, textOfChatGPTMessage, parseChatGPTExport, parseClaudeAiExport, exportTimestamp, exportText, dsChatTime,
+      parseGrokExport, parseDeepSeekChatExport, parseMetaAiExport, parsePerplexityExport, parseCSV, parseCopilotActivityCSV, sniffJSON };
     const src = Object.entries(fns).map(([name, f]) => {
       const body = f.toString();
-      // `function name(...) {...}` declarations stringify ready to paste; the const-bound
-      // arrows (dayKey, addDays, estTok) stringify as bare expressions and need their
-      // binding restored, or the worker throws "<name> is not defined" when called.
+      // `function name(...) {...}` declarations stringify ready to paste; const-bound arrows (dayKey, addDays, estTok, dsChatTime) and the
+      // RE_DATEONLY regex stringify as bare expressions and need their binding restored, or the worker throws "<name> is not defined" when called.
       return body.trim().startsWith('function') ? body : `const ${name} = ${body};`;
     }).join('\n')
-      + '\nself.onmessage = (e) => { const { kind, text, assumedModel } = e.data; const obj = JSON.parse(text); const res = kind === "chatgpt" ? parseChatGPTExport(obj) : parseClaudeAiExport(obj, assumedModel); self.postMessage(res); };';
+      + '\nconst PARSERS = { chatgpt: (o) => parseChatGPTExport(Array.isArray(o) ? o : o.conversations), claudeai: (o, a) => parseClaudeAiExport(o, a), grok: (o) => parseGrokExport(o),'
+      + ' "deepseek-chat": (o) => parseDeepSeekChatExport(o), "meta-ai": (o, a, n) => parseMetaAiExport(o, n), perplexity: (o, a, n) => parsePerplexityExport(o, n) };'
+      + '\nconst SNIFFED = { "chatgpt-export": "chatgpt", "chatgpt-export-wrapped": "chatgpt", "claudeai-export": "claudeai", "grok-export": "grok", "deepseek-chat-export": "deepseek-chat", "meta-ai-export": "meta-ai", "perplexity-export": "perplexity" };'
+      + '\nself.onmessage = (e) => { const { kind, text, assumedModel, fileName } = e.data; try {'
+      + ' if (kind === "copilot-csv") { self.postMessage(parseCopilotActivityCSV(text, fileName)); return; }'
+      + ' const obj = JSON.parse(text);'
+      + ' if (kind === "sniff") { const k = sniffJSON(obj, fileName); self.postMessage({ kind: k, res: Object.hasOwn(SNIFFED, k) ? PARSERS[SNIFFED[k]](obj, assumedModel, fileName) : null }); return; }'
+      + ' if (!Object.hasOwn(PARSERS, kind)) throw new Error("unknown parse kind: " + kind);'
+      + ' self.postMessage(PARSERS[kind](obj, assumedModel, fileName));'
+      + ' } catch (err) { self.postMessage({ error: String((err && err.message) || err) }); } };';
     const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
     const worker = new Worker(url);
     const cleanup = () => { URL.revokeObjectURL(url); worker.terminate(); };
-    worker.onmessage = (e) => { cleanup(); resolve(e.data); };
-    worker.onerror = (e) => { cleanup(); reject((e && e.error) || new Error((e && e.message) || 'worker parse failed')); };
-    worker.postMessage({ kind, text, assumedModel });
+    worker.onmessage = (e) => { cleanup(); if (e.data && e.data.error) reject(new Error(e.data.error)); else resolve(e.data); };
+    worker.onerror = (e) => { cleanup(); reject((e && e.error) || new Error((e && e.message) || 'worker parse failed')); };   // a script-level failure (a helper missing from `fns`, a syntax error in the rebuilt source) never reaches onmessage
+    worker.postMessage({ kind, text, assumedModel, fileName });
   });
 }
 
@@ -5753,6 +5767,7 @@ const App = {
   },
 
   _gen: { local: 0, anthropic: 0, openai: 0, gemini: 0, copilot: 0, openrouter: 0 },
+  _workerThreshold: 8 * 1024 * 1024,   // bytes — an Imports file above this parses in parseInWorker (JSON via 'sniff' in _readJsonFor, Copilot activity CSV via 'copilot-csv'); checks set 0 to force the worker path
 
   async fetchAnthropic() {
     const gen = ++this._gen.anthropic;
@@ -5893,23 +5908,32 @@ const App = {
     }
   },
 
+  /** One JSON document's text → { obj, pre } for _importJson. Small files (≤ App._workerThreshold) parse here. Big ones go to parseInWorker('sniff'):
+   *  the worker parses, sniffs and — for a chat export — parses the export too, so only { kind, res } crosses back and the main thread never parses
+   *  the document; any other shape (provider report, Takeout, empty, unknown) comes back kind-only and is parsed here as before (rare at that size).
+   *  Throws like JSON.parse for malformed text from either path. */
+  async _readJsonFor(text, f) {
+    if (f.size > App._workerThreshold) {
+      const pre = await parseInWorker('sniff', text, $('assumed-claude-model').value, f.name);
+      if (pre.res) return { obj: null, pre };
+    }
+    return { obj: JSON.parse(text), pre: null };
+  },
+
   /** One parsed JSON document → its import branch. `f` = { name, size } (a File, or a ZIP-entry wrapper — name then reads
    *  "archive.zip/entry.json"). Pushes its own note. Returns the number of imports (0 = recognized but nothing landed, e.g. an
    *  all-empty report) or null when the shape is not recognized (the caller words that: loose file vs. ZIP entry). */
-  async _importJson(obj, f, notes) {
-    const kind = sniffJSON(obj, f.name);
+  async _importJson(obj, f, notes, pre) {
+    const kind = pre ? pre.kind : sniffJSON(obj, f.name);   // pre = { kind, res } from parseInWorker('sniff') via _readJsonFor: the document was parsed + sniffed in the worker (obj is null then) and the branch lands res
     let imported = 0;
     if (kind === 'chatgpt-export' || kind === 'chatgpt-export-wrapped') {
-      const conv = kind === 'chatgpt-export' ? obj : obj.conversations;
-      // big exports parse off the main thread so the tab doesn't freeze; small ones stay
-      // inline — worker startup (Blob + postMessage round trip) isn't worth it for them.
-      const res = f.size > 8 * 1024 * 1024 ? await parseInWorker('chatgpt', JSON.stringify(conv)) : parseChatGPTExport(conv);
+      // big exports (> App._workerThreshold) arrive pre-parsed from the worker (_readJsonFor) so the tab doesn't freeze; small ones parse inline — worker startup isn't worth it for them
+      const res = pre ? pre.res : parseChatGPTExport(kind === 'chatgpt-export' ? obj : obj.conversations);
       Store.setSource('chatgpt', res.rows, res.meta);
       notes.push(`${f.name}: ChatGPT export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens)`);
       imported++;
     } else if (kind === 'claudeai-export') {
-      const assumedModel = $('assumed-claude-model').value;
-      const res = f.size > 8 * 1024 * 1024 ? await parseInWorker('claudeai', JSON.stringify(obj), assumedModel) : parseClaudeAiExport(obj, assumedModel);
+      const res = pre ? pre.res : parseClaudeAiExport(obj, $('assumed-claude-model').value);
       Store.setSource('claudeai', res.rows, res.meta);
       notes.push(`${f.name}: Claude.ai export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens)`);
       imported++;
@@ -5919,17 +5943,17 @@ const App = {
       notes.push(`${f.name}: Gemini Takeout — ${fmtInt(res.meta.msgs)} prompts (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} non-Gemini/undated record(s) skipped` : ''})`);
       imported++;
     } else if (kind === 'grok-export') {
-      const res = parseGrokExport(obj);
+      const res = pre ? pre.res : parseGrokExport(obj);
       Store.setSource('grok-export', res.rows, res.meta);   // one export = the whole history → re-import replaces
       notes.push(`${f.name}: Grok export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens; input = the preceding prompt only${res.meta.skipped ? `; ${res.meta.skipped} undated repl${res.meta.skipped === 1 ? 'y' : 'ies'} skipped` : ''})`);
       imported++;
     } else if (kind === 'deepseek-chat-export') {
-      const res = parseDeepSeekChatExport(obj);
+      const res = pre ? pre.res : parseDeepSeekChatExport(obj);
       Store.setSource('deepseek-chat-export', res.rows, res.meta);   // one archive = the whole history → re-import replaces
       notes.push(`${f.name}: DeepSeek chat export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} undated repl${res.meta.skipped === 1 ? 'y' : 'ies'} skipped` : ''})`);
       imported++;
     } else if (kind === 'meta-ai-export') {
-      const res = parseMetaAiExport(obj, f.name);
+      const res = pre ? pre.res : parseMetaAiExport(obj, f.name);
       // Download-your-information splits threads into message_N.json files: rows carry the thread as sid, so a file replaces only its own thread
       const keep = ((Store.sources['meta-ai-export'] || {}).rows || []).filter(r => r.sid !== res.meta.sid && !(Array.isArray(r.sids) && r.sids.includes(res.meta.sid)));
       const all = keep.concat(res.rows);
@@ -5937,7 +5961,7 @@ const App = {
       notes.push(`${f.name}: Meta AI thread — ${fmtInt(res.meta.msgs)} replies (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} undated skipped` : ''}; threads merge, the same thread re-imported replaces itself)`);
       imported++;
     } else if (kind === 'perplexity-export') {
-      const res = parsePerplexityExport(obj, f.name);
+      const res = pre ? pre.res : parsePerplexityExport(obj, f.name);
       const keep = ((Store.sources['perplexity-export'] || {}).rows || []).filter(r => r.sid !== res.meta.sid && !(Array.isArray(r.sids) && r.sids.includes(res.meta.sid)));
       const all = keep.concat(res.rows);
       Store.setSource('perplexity-export', all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), files: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size }, { perSid: true });   // compaction keeps one bucket per file (scalar sid) so the filter above stays exact
@@ -6024,8 +6048,9 @@ const App = {
           for (const e of entries) {
             if (!/\.json$/i.test(e.name) || e.size > 200 * 1024 * 1024) continue;
             if (/(^|\/)shared_conversations\.json$/i.test(e.name)) continue;   // ChatGPT's shared-links file has conversations.json's shape and would replace it
-            let obj; try { obj = JSON.parse(await e.text()); } catch (err) { notes.push(`${f.name}/${e.name}: failed — ${err.message || err}`); continue; }
-            const r = await this._importJson(obj, { name: f.name + '/' + e.name, size: e.size }, notes);
+            const ef = { name: f.name + '/' + e.name, size: e.size };
+            let doc; try { doc = await this._readJsonFor(await e.text(), ef); } catch (err) { notes.push(`${f.name}/${e.name}: failed — ${err.message || err}`); continue; }
+            const r = await this._importJson(doc.obj, ef, notes, doc.pre);
             if (r === null) continue;
             handled++; imported += r;
           }
@@ -6072,7 +6097,7 @@ const App = {
             continue;
           }
           if (isCopilotActivityCSV(headCells)) {
-            const res = parseCopilotActivityCSV(csvText, f.name);
+            const res = f.size > App._workerThreshold ? await parseInWorker('copilot-csv', csvText, null, f.name) : parseCopilotActivityCSV(csvText, f.name);   // a big activity export parses in the worker (same result)
             const keep = ((Store.sources['copilot-activity-csv'] || {}).rows || []).filter(r => r.sid !== res.meta.sid && !(Array.isArray(r.sids) && r.sids.includes(res.meta.sid)));   // one export per surface → files merge by name
             const all = keep.concat(res.rows);
             Store.setSource('copilot-activity-csv', all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), files: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size, apps: res.meta.apps }, { perSid: true });   // compaction keeps one bucket per file (scalar sid) so the filter above stays exact
@@ -6096,7 +6121,8 @@ const App = {
           imported++;
           continue;
         }
-        const r = await this._importJson(JSON.parse(await f.text()), f, notes);
+        const doc = await this._readJsonFor(await f.text(), f);
+        const r = await this._importJson(doc.obj, f, notes, doc.pre);
         if (r === null) notes.push(`${f.name}: format not recognized`); else imported += r;
       } catch (e) {
         notes.push(`${f.name}: failed — ${e.message || e}`);

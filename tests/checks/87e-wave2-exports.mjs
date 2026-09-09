@@ -254,6 +254,62 @@ export async function run({ browser, ok }) {
     ok('perplexity / ms copilot + compaction: re-importing 120-day-old file A keeps file B — Perplexity in=16 out=23 msgs=3, 2 files, B row in=1 out=1 msgs=1; Copilot activity in=16 out=23 msgs=3, 2 files, B row in=1 out=1 msgs=1',
       ps.px.t.in === 16 && ps.px.t.out === 23 && ps.px.t.msgs === 3 && ps.px.files === 2 && JSON.stringify(ps.px.b) === JSON.stringify([['threads-b.json', 1, 1, 1, null, 1, null]])
       && ps.cp.t.in === 16 && ps.cp.t.out === 23 && ps.cp.t.msgs === 3 && ps.cp.files === 2 && JSON.stringify(ps.cp.b) === JSON.stringify([['copilot-edge.csv', 1, 1, 1, null, 1, null]]), JSON.stringify({ px: ps.px, cp: ps.cp }));
+    // ---- v5 T8: big chat exports parse off the main thread — parseInWorker kinds grok / deepseek-chat / meta-ai / perplexity / copilot-csv (+ 'sniff'); App._workerThreshold routes Imports ----
+    const wk = await page.evaluate(async (grokTxt, dscTxt, metaTxt, pxTxt, cpCsv, pxZipB64) => {
+      const J = JSON.stringify;
+      const timed = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('hang: the worker never answered')), 8000))]);
+      const settle = async (p) => { try { return { ok: true, v: await timed(p) }; } catch (e) { return { ok: false, err: String((e && e.message) || e) }; } };
+      // parity: each kind in the worker equals the inline parser on the same fixture (rows, meta, est flags, sid)
+      const parity = {};
+      for (const [kind, inline, args] of [
+        ['grok', () => parseGrokExport(JSON.parse(grokTxt)), [grokTxt]],
+        ['deepseek-chat', () => parseDeepSeekChatExport(JSON.parse(dscTxt)), [dscTxt]],
+        ['meta-ai', () => parseMetaAiExport(JSON.parse(metaTxt), 'message_1.json'), [metaTxt, null, 'message_1.json']],
+        ['perplexity', () => parsePerplexityExport(JSON.parse(pxTxt), 'threads.json'), [pxTxt, null, 'threads.json']],
+        ['copilot-csv', () => parseCopilotActivityCSV(cpCsv, 'copilot-activity.csv'), [cpCsv, null, 'copilot-activity.csv']],
+      ]) {
+        const r = await settle(parseInWorker(kind, ...args));
+        parity[kind] = r.ok ? (J(r.v) === J(inline()) && r.v.rows.length > 0 ? 'same' : 'differs: ' + J(r.v).slice(0, 200)) : 'rejected: ' + r.err;
+      }
+      // errors surface as rejections carrying the worker's message (never a hang): unknown kind, malformed JSON, a CSV the parser refuses
+      const errs = { badKind: await settle(parseInWorker('nope', '{}')), badJson: await settle(parseInWorker('grok', '{not json')), badCsv: await settle(parseInWorker('copilot-csv', 'a,b\n1,2\n', null, 'x.csv')) };
+      // 'sniff': the worker parses the JSON, runs sniffJSON (file-name / source-mark gate for DeepSeek chat) and parses a chat export in the same trip; other shapes come back kind-only
+      const report = J({ data: [{ starting_at: '2026-08-01T00:00:00Z', results: [{ model: 'm', input_tokens: 10, output_tokens: 5 }] }] });
+      const sniff = { ds: await settle(parseInWorker('sniff', dscTxt, null, 'deepseek-conversations.json')), dsUnnamed: await settle(parseInWorker('sniff', dscTxt, null, 'conversations.json')), report: await settle(parseInWorker('sniff', report, null, 'usage.json')) };
+      const sniffOk = { ds: sniff.ds.ok && sniff.ds.v.kind === 'deepseek-chat-export' && J(sniff.ds.v.res) === J(parseDeepSeekChatExport(JSON.parse(dscTxt))), dsUnnamed: sniff.dsUnnamed.ok && sniff.dsUnnamed.v.kind === 'unknown' && sniff.dsUnnamed.v.res === null, report: sniff.report.ok && sniff.report.v.kind === 'anthropic-usage' && sniff.report.v.res === null };
+      // routing: threshold 0 → every Imports file goes through the worker (Worker constructions counted), landing rows/meta identical to the inline run (default threshold → no worker)
+      const files = () => [new File([grokTxt], 'grok-export.json', { type: 'application/json' }), new File([dscTxt], 'deepseek-conversations.json', { type: 'application/json' }),
+        new File([metaTxt], 'message_1.json', { type: 'application/json' }), new File([pxTxt], 'threads.json', { type: 'application/json' }), new File([cpCsv], 'copilot-activity.csv', { type: 'text/csv' }),
+        new File([Uint8Array.from(atob(pxZipB64), ch => ch.charCodeAt(0))], 'perplexity-export.zip', { type: 'application/zip' }), new File([report], 'usage.json', { type: 'application/json' })];
+      const ids = ['grok-export', 'deepseek-chat-export', 'meta-ai-export', 'perplexity-export', 'copilot-activity-csv', 'anthropic'];
+      const snap = () => ids.map(id => Store.sources[id] ? { rows: Store.sources[id].rows, meta: { ...Store.sources[id].meta, updated: undefined } } : null);   // setSource stamps meta.updated = Date.now() — not part of the parse result
+      const reset = () => { Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; };
+      const RealWorker = window.Worker; let workers = 0; window.Worker = function (u, o) { workers++; return new RealWorker(u, o); };
+      const defaultThreshold = App._workerThreshold;
+      let viaWorker = null, inline = null, workersVia = -1, workersInline = -1, note = '', reimport = null;
+      try {
+        reset(); App._workerThreshold = 0;
+        await App.handleImportFiles(files());
+        note = document.getElementById('import-status').textContent; viaWorker = snap();
+        await App.handleImportFiles([new File([metaTxt], 'message_1.json', { type: 'application/json' })]);   // the same thread again → replaces only itself (perSid filter runs on the main thread after the worker)
+        reimport = { msgs: Store.sources['meta-ai-export'].rows.reduce((a, r) => a + r.msgs, 0), threads: Store.sources['meta-ai-export'].meta.threads };
+        workersVia = workers; workers = 0;
+        App._workerThreshold = defaultThreshold; reset();
+        await App.handleImportFiles(files());
+        inline = snap(); workersInline = workers;
+      } finally { App._workerThreshold = defaultThreshold; window.Worker = RealWorker; }
+      Store.sources = {}; Store.connectors = {}; Store.billed = {}; Store.persist(); App._render();
+      return { parity, errs, sniffOk, defaultThreshold, workersVia, workersInline, same: J(viaWorker) === J(inline), rows: ids.map((id, i) => [id, viaWorker && viaWorker[i] ? viaWorker[i].rows.length : null]), note, reimport };
+    }, grokTxt, dscTxt, metaTxt, pxTxt, cpCsv, b64('wave2', 'perplexity', 'perplexity-export.zip'));
+    ok('worker parity: parseInWorker grok / deepseek-chat / meta-ai / perplexity / copilot-csv equal the inline parsers on the fixtures (rows + meta + sid)',
+      Object.values(wk.parity).every(v => v === 'same') && Object.keys(wk.parity).length === 5, JSON.stringify(wk.parity));
+    ok('worker errors reject with the message (no hang): unknown kind, malformed JSON, a refused CSV',
+      !wk.errs.badKind.ok && /unknown parse kind: nope/.test(wk.errs.badKind.err) && !wk.errs.badJson.ok && /JSON|token/i.test(wk.errs.badJson.err) && !wk.errs.badCsv.ok && /Not a Copilot activity CSV/.test(wk.errs.badCsv.err), JSON.stringify(wk.errs));
+    ok("worker 'sniff': parses + sniffs + parses a chat export in one trip ({kind, res}); the DeepSeek name gate holds in the worker (conversations.json → unknown, res null); a provider report comes back kind-only",
+      wk.sniffOk.ds && wk.sniffOk.dsUnnamed && wk.sniffOk.report, JSON.stringify(wk.sniffOk));
+    ok('App._workerThreshold defaults to 8 MB; at 0 every Imports file (5 loose + 2 ZIP entries incl. the skipped account.json + report sniff + re-import = 9 worker runs) parses in the worker with rows/meta identical to the inline run (0 workers); the re-imported Meta AI thread still replaces only itself',
+      wk.defaultThreshold === 8 * 1024 * 1024 && wk.workersVia === 9 && wk.workersInline === 0 && wk.same && JSON.stringify(wk.rows.map(r => r[1] != null && r[1] > 0)) === JSON.stringify([true, true, true, true, true, true])
+      && wk.reimport && wk.reimport.msgs === 3 && wk.reimport.threads === 1 && /Grok export — 3 conversations, 4 replies/.test(wk.note) && /Anthropic usage report — 1 rows/.test(wk.note), JSON.stringify({ d: wk.defaultThreshold, via: wk.workersVia, inl: wk.workersInline, same: wk.same, rows: wk.rows, reimport: wk.reimport, note: wk.note }));
   } finally {
     await page.close();
   }
