@@ -87,7 +87,7 @@ export async function run({ browser, ok }) {
       App._render();
       const ls = document.getElementById('local-status'), gs = document.getElementById('groq-status'), rb = document.getElementById('rescan-local');
       const codeOf = (n) => n.querySelector('code') ? n.querySelector('code').textContent : null;
-      const at = new Date(2026, 8, 6, 9, 5).getTime();
+      const at = (() => { const d = new Date(Date.now() - 2 * 864e5); d.setHours(9, 5, 0, 0); return d.getTime(); })();   // two days ago — inside connectorStatus's 7-day 'ok' window whenever the suite runs
       Store.setConnector('local', { label: '3 log files', lastSync: at, err: null });
       Store.setConnector('groq', { label: 'API key · last 4: abcd', lastSync: at, err: null });
       ls.textContent = ''; ls.appendChild(el('span', { class: 'ok', text: '● Connected. ' })); ls.appendChild(document.createTextNode('3 log files · 12 messages · scanned 9:05 AM'));   // the line a scan wrote

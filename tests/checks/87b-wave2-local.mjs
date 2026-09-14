@@ -399,7 +399,8 @@ export async function run({ browser, ok }) {
       js.textContent = App.initialStatusText(c); js.dataset.gen = ''; ss.textContent = App.initialStatusText(c, true);   // the lines as a fresh page renders them (the block above left the server line connected)
       const codeOf = (n) => n.querySelector('code') ? n.querySelector('code').textContent : null;
       const localBefore = { text: ls.textContent, code: codeOf(ls) };
-      const at = new Date(2026, 8, 6, 9, 5).getTime();   // local time → 'Sep 6, 9:05 AM' in every zone
+      const at = (() => { const d = new Date(Date.now() - 2 * 864e5); d.setHours(9, 5, 0, 0); return d.getTime(); })();   // two days ago, 9:05 local — inside connectorStatus's 7-day 'ok' window whenever the suite runs (a fixed date went 'warn' after 7 days)
+      const synced = new Date(at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });   // the status line's own format
       Store.connectors.jan = { filesLabel: '2 files', label: '2 files', lastSync: at, err: null, scanErr: null };   // folder-only entry restored from storage (no scan / validate ran in this page)
       Store.connectors.local = { label: '3 files', lastSync: at, err: null };                                       // Claude Code entry restored from storage
       App._render();
@@ -410,11 +411,11 @@ export async function run({ browser, ok }) {
       const withServer = { server: js.textContent, ok: !!js.querySelector('.ok'), scan: ss.textContent };
       js.textContent = App.initialStatusText(c); js.dataset.gen = '';
       Store.connectors = {}; Store.persist(); App._render();
-      return { localBefore, folderOnly, withServer, after: { local: ls.textContent, localCode: codeOf(ls) } };
+      return { localBefore, folderOnly, withServer, synced, after: { local: ls.textContent, localCode: codeOf(ls) } };
     });
     ok('regression (0b45efc) on reload: a restored folder-only Jan entry (filesLabel, no serverLabel) leaves the SERVER line "Not connected." after render (hub dot green — the folder half owns jan-scan-status); the same entry with a serverLabel derives "● Connected (stored data) · synced …"; the Claude Code card keeps its "Not connected. Tip: <code>%USERPROFILE%\\.claude</code>" line',
       sync.folderOnly.server === 'Not connected.' && !sync.folderOnly.serverOk && sync.folderOnly.scan === 'No Jan data folder chosen.' && /\bok\b/.test(sync.folderOnly.dot)
-      && sync.withServer.server === '● Connected (stored data) · synced Sep 6, 9:05 AM' && sync.withServer.ok && sync.withServer.scan === 'No Jan data folder chosen.'
+      && sync.withServer.server === '● Connected (stored data) · synced ' + sync.synced && sync.withServer.ok && sync.withServer.scan === 'No Jan data folder chosen.'
       && sync.localBefore.text === 'Not connected. Tip: in the folder picker, type %USERPROFILE%\\.claude in the address bar.' && sync.localBefore.code === '%USERPROFILE%\\.claude'
       && sync.folderOnly.local === sync.localBefore.text && sync.folderOnly.localCode === '%USERPROFILE%\\.claude' && !sync.folderOnly.localOk && sync.after.local === sync.localBefore.text && sync.after.localCode === '%USERPROFILE%\\.claude', JSON.stringify(sync));
 

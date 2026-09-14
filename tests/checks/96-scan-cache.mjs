@@ -111,6 +111,32 @@ export async function run({ browser, ok }) {
     }, usageLog);
     ok('scan-cache: v4 prefix — a v3 entry misses, is re-parsed (parsedFiles=1, cachedFiles=0) and swept from IDB; the current-prefix twin is kept',
       v4.getMiss && v4.parsed === 1 && v4.cached === 0 && v4.msgs === 3 && v4.v3Gone && v4.curKept && v4.pruneV3Gone && v4.pruneCurKept, JSON.stringify(v4));
+    // v6 (Plan 5 review, item 1): T3 books Codex per-turn last_token_usage (output changed for unchanged bytes) and T2's dupIds / dupOnly
+    // entries need a rewrite → the prefix is bumped to 'scan:v6:'. Mirror of the v3→v4 check: a 'scan:v5:' entry must (a) MISS under
+    // ScanCache.get, (b) be re-parsed by parseFolderCached and (c) be DELETED by prune, while the current-prefix twin survives.
+    const v6 = await page.evaluate(async (text) => {
+      const tmp = { id: 'tmp-v6', platform: 'TmpV6', parser: 'parseUsageLoggerJsonl', patterns: [/\.jsonl$/i] };
+      const file = new File([text], 'ollama-usage.jsonl', { lastModified: 1754000000000 });
+      const files = () => [{ path: 'logs/ollama-usage.jsonl', file }];
+      const sig = 'tmp-v6\u0001logs/ollama-usage.jsonl\u0001' + file.size + '\u00011754000000000';   // exactly what parseFolderCached computes
+      const stale = { rows: [{ d: '2026-01-01', platform: 'TmpV6', model: 'stale', in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }], projects: [], msgs: 1, ids: [] };
+      await IDB.set('scan:v5:' + sig, stale);
+      const getMiss = (await ScanCache.get(sig)) == null;                       // (a) v5 entry not served under the current prefix
+      const res = await parseFolderCached(tmp, files(), null, ScanCache);      // (b) parser runs; (c) prune sweeps the v5 key
+      const keys = await IDB.keys('scan:');
+      const cur = keys.filter(k => k.endsWith(sig));
+      const out = { ver: SCAN_CACHE_VER, getMiss, parsed: res.meta.parsedFiles, cached: res.meta.cachedFiles, msgs: res.meta.msgs, v5Gone: !keys.includes('scan:v5:' + sig),
+        curKeys: cur, curKept: cur.length === 1 && cur[0].startsWith('scan:v6:') };
+      // and prune alone (the public sweep) with the current key in `keep`: v5 twin deleted, current twin kept
+      await IDB.set('scan:v5:' + sig, stale);
+      await ScanCache.prune(new Set([sig]), 'tmp-v6\u0001');
+      const keys2 = await IDB.keys('scan:');
+      out.pruneV5Gone = !keys2.includes('scan:v5:' + sig); out.pruneCurKept = cur.length === 1 && keys2.includes(cur[0]);
+      for (const k of keys2) if (k.endsWith(sig)) await IDB.del(k);   // cleanup
+      return out;
+    }, usageLog);
+    ok('scan-cache: v6 prefix (Plan 5 review) — SCAN_CACHE_VER is scan:v6:, a v5 entry misses, is re-parsed (parsedFiles=1, cachedFiles=0) and swept from IDB; the current-prefix twin is kept',
+      v6.ver === 'scan:v6:' && v6.getMiss && v6.parsed === 1 && v6.cached === 0 && v6.msgs === 3 && v6.v5Gone && v6.curKept && v6.pruneV5Gone && v6.pruneCurKept, JSON.stringify(v6));
 
     // Cline/Roo: the model comes from the SIBLING task_metadata.json, so a changed sibling must invalidate the
     // cached ui_messages.json rows (signature = main file + same-dir sibling size/lastModified), while an
@@ -181,6 +207,31 @@ export async function run({ browser, ok }) {
     ok('scan-cache: a partially duplicated file records its skipped ids (ids [mY:rY], dupIds [mX:rX], not dupOnly, own rows kept) and is re-parsed once its claimant is gone',
       partial.t1.in === 110 && partial.t1.out === 220 && partial.t1.msgs === 2 && JSON.stringify(partial.bIds) === JSON.stringify(['mY:rY']) && JSON.stringify(partial.bDupIds) === JSON.stringify(['mX:rX']) &&
       !partial.bDupOnly && partial.bRows === 1 && partial.p2 === 1 && partial.c2 === 0 && sameTotals(partial.t2, partial.t1) && partial.p3 === 0 && partial.c3 === 1 && sameTotals(partial.t3, partial.t1), JSON.stringify(partial));
+    // Plan 5 review m4: dupIds are capped at 5 000 per entry. A copy of a 5 001-message session is cached with 5 000 dupIds and
+    // dupTruncated: true (still dupOnly) — and a truncated entry is an UNCONDITIONAL miss (the list cannot prove every skipped id is
+    // still claimed), so it is re-parsed on every scan while its twin stays a normal hit; a hand-seeded dupTruncated entry misses too.
+    const capped = await page.evaluate(async () => {
+      const line = (i) => JSON.stringify({ type: 'assistant', timestamp: '2026-08-12T09:00:00.000Z', cwd: 'D:/proj5', requestId: 'r' + i, message: { id: 'm' + i, model: 'claude-sonnet-5', usage: { input_tokens: 1, output_tokens: 2 } } });
+      const text = Array.from({ length: 5001 }, (_, i) => line(i)).join('\n');
+      const mk = (name, lm) => ({ path: 'projects/-D--proj5/' + name, file: new File([text], name, { lastModified: lm }) });
+      const sumOf = (rows) => rows.reduce((t, r) => ({ in: t.in + (r.in || 0), out: t.out + (r.out || 0), msgs: t.msgs + (r.msgs || 0) }), { in: 0, out: 0, msgs: 0 });
+      const cache = new Map();
+      const r1 = await parseClaudeLogsCached([mk('sess-a.jsonl', 1754000001000), mk('sess-b.jsonl', 1754000002000)], null, cache);
+      const b = cache.get([...cache.keys()].find(k => k.includes('sess-b.jsonl'))) || {};
+      const r2 = await parseClaudeLogsCached([mk('sess-a.jsonl', 1754000001000), mk('sess-b.jsonl', 1754000002000)], null, cache);   // A hits, B (truncated) misses again
+      // a seeded entry flagged dupTruncated (no dupIds at all) is a miss on its own
+      const cache2 = new Map();
+      await parseClaudeLogsCached([mk('sess-a.jsonl', 1754000001000)], null, cache2);
+      const k = [...cache2.keys()][0]; cache2.set(k, { ...cache2.get(k), dupTruncated: true });
+      const r3 = await parseClaudeLogsCached([mk('sess-a.jsonl', 1754000001000)], null, cache2);
+      return { t1: sumOf(r1.rows), p1: r1.meta.parsedFiles, bDupIds: Array.isArray(b.dupIds) ? b.dupIds.length : null, bTrunc: b.dupTruncated === true, bDupOnly: b.dupOnly === true, bIds: (b.ids || []).length,
+        p2: r2.meta.parsedFiles, c2: r2.meta.cachedFiles, t2: sumOf(r2.rows), p3: r3.meta.parsedFiles, c3: r3.meta.cachedFiles, t3: sumOf(r3.rows) };
+    });
+    ok('scan-cache: dupIds are capped at 5 000 — a 5 001-message copy is cached { dupOnly, dupIds: 5000, dupTruncated: true } and re-parsed on the next scan (parsedFiles=1, cachedFiles=1, totals unchanged: in=5001 out=10002 msgs=5001)',
+      capped.p1 === 2 && capped.t1.in === 5001 && capped.t1.out === 10002 && capped.t1.msgs === 5001 && capped.bDupIds === 5000 && capped.bTrunc && capped.bDupOnly && capped.bIds === 0
+      && capped.p2 === 1 && capped.c2 === 1 && sameTotals(capped.t2, capped.t1), JSON.stringify(capped));
+    ok('scan-cache: an entry flagged dupTruncated is an unconditional miss (parsedFiles=1, cachedFiles=0, rows re-derived)',
+      capped.p3 === 1 && capped.c3 === 0 && sameTotals(capped.t3, capped.t1), JSON.stringify({ p3: capped.p3, c3: capped.c3, t3: capped.t3 }));
   } finally {
     await page.close();
   }

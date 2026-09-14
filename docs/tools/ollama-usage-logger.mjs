@@ -42,16 +42,18 @@ const TAIL_BYTES = 64 * 1024;   // the counts are read from the last 64 KB — t
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 
 // Head + rolling tail of one response body: push() every chunk; memory is bounded by HEAD_BYTES + TAIL_BYTES + one chunk.
+// The tail is a list of whole chunks — no per-push copy (a Buffer.concat of the 64 KB window per ~100-byte SSE chunk was O(n × 64 KB)
+// over a long stream); chunks fall off the front while the remainder still covers the window; ONE concat happens at read time (tailText).
 class Capture {
-  constructor() { this.size = 0; this.head = []; this.headLen = 0; this.tail = Buffer.alloc(0); }
+  constructor() { this.size = 0; this.head = []; this.headLen = 0; this.chunks = []; this.tailLen = 0; }
   push(chunk) {
     this.size += chunk.length;
     if (this.headLen < HEAD_BYTES) { this.head.push(chunk); this.headLen += chunk.length; }
-    this.tail = this.tail.length ? Buffer.concat([this.tail, chunk]) : chunk;
-    if (this.tail.length > TAIL_BYTES) this.tail = this.tail.subarray(this.tail.length - TAIL_BYTES);   // trim from the front
+    this.chunks.push(chunk); this.tailLen += chunk.length;
+    while (this.chunks.length > 1 && this.tailLen - this.chunks[0].length >= TAIL_BYTES) this.tailLen -= this.chunks.shift().length;   // drop whole chunks from the front while the rest still holds the last TAIL_BYTES
   }
   headText() { return Buffer.concat(this.head).subarray(0, HEAD_BYTES).toString('utf8'); }
-  tailText() { return this.tail.toString('utf8'); }
+  tailText() { const t = this.chunks.length === 1 ? this.chunks[0] : Buffer.concat(this.chunks); return (t.length > TAIL_BYTES ? t.subarray(t.length - TAIL_BYTES) : t).toString('utf8'); }   // exactly the last TAIL_BYTES, as before
 }
 
 // Complete JSON objects in a window of text: one per NDJSON line or per SSE "data:" line (a lone document is one line).

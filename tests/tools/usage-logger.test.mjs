@@ -5,6 +5,7 @@
 //   /api/chat            — 12 MB of streamed NDJSON filler lines, then the done:true object (prompt_eval_count 123 / eval_count 456)
 //   /v1/chat/completions — ~100 KB of SSE chunks, then the usage chunk (77 / 11), then data: [DONE]
 //   /api/generate        — one non-streamed ~200 KB JSON document with the counts near its end (31 / 9)
+//   /v1/completions      — 20 000 SSE chunks of ~110 B (≈ 2 MB) written one by one, then the usage chunk (5 / 3): logged, and the request finishes in < 5 s
 // Windows-safe: 127.0.0.1 only, a probed free port for the proxy, connect-polling for readiness, every wait ≤ 10 s, the child is
 // always killed in finally.
 import http from 'node:http';
@@ -18,8 +19,8 @@ const ROOT = path.join(import.meta.dirname, '..', '..');
 const LOGGER = path.join(ROOT, 'docs', 'tools', 'ollama-usage-logger.mjs');
 const OUT_DIR = path.join(ROOT, 'tests', 'fixtures', 'out');
 const MODEL = 'llama4:8b';
-const CHAT = { in: 123, out: 456 }, V1 = { in: 77, out: 11 }, GEN = { in: 31, out: 9 };
-const PATHS = ['/api/chat', '/v1/chat/completions', '/api/generate'];
+const CHAT = { in: 123, out: 456 }, V1 = { in: 77, out: 11 }, GEN = { in: 31, out: 9 }, SMALL = { in: 5, out: 3 };
+const PATHS = ['/api/chat', '/v1/chat/completions', '/api/generate', '/v1/completions'];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // res.write with backpressure — a 12 MB body must not pile up in the fake upstream's socket buffer
@@ -39,7 +40,12 @@ const sseLine = 'data: ' + JSON.stringify({ id: 'chatcmpl-1', object: 'chat.comp
 const SSE_BLOCK = Buffer.from(sseLine.repeat(Math.ceil(100 * 1024 / sseLine.length)));               // ~100 KB — more than the 64 KB window
 const SSE_FINAL = Buffer.from('data: ' + JSON.stringify({ id: 'chatcmpl-1', object: 'chat.completion.chunk', model: MODEL, choices: [], usage: { prompt_tokens: V1.in, completion_tokens: V1.out, total_tokens: V1.in + V1.out } }) + '\n\ndata: [DONE]\n\n');
 const GEN_DOC = Buffer.from(JSON.stringify({ model: MODEL, created_at: '2026-09-10T00:00:02Z', response: 'y'.repeat(199 * 1024), done: true, done_reason: 'stop', context: Array.from({ length: 300 }, (_, i) => i + 1), total_duration: 5, load_duration: 1, prompt_eval_count: GEN.in, prompt_eval_duration: 2, eval_count: GEN.out, eval_duration: 2 }));
-const EXPECT_BYTES = { '/api/chat': CHAT_BLOCK.length * CHAT_BLOCKS + CHAT_FINAL.length, '/v1/chat/completions': SSE_BLOCK.length + SSE_FINAL.length, '/api/generate': GEN_DOC.length };
+// 20 000 SSE chunks of ~110 B (≈ 2 MB) written ONE BY ONE (each res.write is its own HTTP chunk → its own 'data' event in the proxy), then the
+// usage chunk: the proxy's Capture takes ~20 000 small pushes — a per-push Buffer.concat of the 64 KB tail (O(n × 64 KB)) is what review item m1 removed
+const SMALL_CHUNK = Buffer.from('data: ' + JSON.stringify({ id: 'cmpl-1', object: 'text_completion', model: MODEL, choices: [{ text: 'hi', index: 0, finish_reason: null }] }) + '\n\n');
+const SMALL_CHUNKS = 20000;
+const SMALL_FINAL = Buffer.from('data: ' + JSON.stringify({ id: 'cmpl-1', object: 'text_completion', model: MODEL, choices: [], usage: { prompt_tokens: SMALL.in, completion_tokens: SMALL.out, total_tokens: SMALL.in + SMALL.out } }) + '\n\ndata: [DONE]\n\n');
+const EXPECT_BYTES = { '/api/chat': CHAT_BLOCK.length * CHAT_BLOCKS + CHAT_FINAL.length, '/v1/chat/completions': SSE_BLOCK.length + SSE_FINAL.length, '/api/generate': GEN_DOC.length, '/v1/completions': SMALL_CHUNK.length * SMALL_CHUNKS + SMALL_FINAL.length };
 
 function fakeUpstream() {
   return http.createServer((req, res) => {
@@ -49,6 +55,7 @@ function fakeUpstream() {
       if (req.url === '/api/chat') { res.writeHead(200, { 'content-type': 'application/x-ndjson' }); await writeAll(res, CHAT_BLOCK, CHAT_BLOCKS); res.end(CHAT_FINAL); }
       else if (req.url === '/v1/chat/completions') { res.writeHead(200, { 'content-type': 'text/event-stream' }); await writeAll(res, SSE_BLOCK, 1); res.end(SSE_FINAL); }
       else if (req.url === '/api/generate') { res.writeHead(200, { 'content-type': 'application/json', 'content-length': GEN_DOC.length }); res.end(GEN_DOC); }
+      else if (req.url === '/v1/completions') { res.writeHead(200, { 'content-type': 'text/event-stream' }); await writeAll(res, SMALL_CHUNK, SMALL_CHUNKS); res.end(SMALL_FINAL); }
       else { res.writeHead(404); res.end(); }
     });
   });
@@ -94,8 +101,8 @@ export async function run() {
     while (!listening && Date.now() < deadline && !exited) { listening = await canConnect(port); if (!listening) await sleep(100); }
     if (!listening) { add('usage-logger: proxy starts and listens on LOG_PORT', false, `not listening on ${port} · exit=${JSON.stringify(exited)} · ${io()}`); return summary(); }
 
-    const got = {};
-    for (const p of PATHS) got[p] = await post(port, p);
+    const got = {}, took = {};
+    for (const p of PATHS) { const t0 = Date.now(); got[p] = await post(port, p); took[p] = Date.now() - t0; }
     // the line is appended (fs.appendFile) after the proxy ends the client response — give it a moment
     const until = Date.now() + 5000;
     let lines = [];
@@ -106,12 +113,13 @@ export async function run() {
       const pass = ls.length === 1 && l.in === exp.in && l.out === exp.out && l.model === MODEL && l.platform === 'Ollama' && l.msgs === 1 && !Number.isNaN(Date.parse(l.ts));
       return { pass, detail: ls.length ? `want in=${exp.in} out=${exp.out} model=${MODEL} · got ${JSON.stringify(ls)}` : `no line for ${p} (${lines.length} line(s) total: ${JSON.stringify(lines)}) · ${io()}` };
     };
-    const chat = check('/api/chat', CHAT), v1 = check('/v1/chat/completions', V1), gen = check('/api/generate', GEN);
+    const chat = check('/api/chat', CHAT), v1 = check('/v1/chat/completions', V1), gen = check('/api/generate', GEN), small = check('/v1/completions', SMALL);
     add('usage-logger: 12 MB streamed response is logged with exact counts', chat.pass, chat.detail);
     add('usage-logger: /v1 SSE stream over the window — the final usage chunk is logged (77/11)', v1.pass, v1.detail);
     add('usage-logger: non-streamed 200 KB /api/generate document — the counts near its end are logged (31/9)', gen.pass, gen.detail);
     const passthrough = PATHS.every((p) => got[p].status === 200 && got[p].bytes === EXPECT_BYTES[p]);
-    add('usage-logger: exactly three JSONL lines and every body passed through byte-for-byte', lines.length === PATHS.length && passthrough, `${lines.length} line(s) · ${JSON.stringify(got)} · expected bytes ${JSON.stringify(EXPECT_BYTES)}`);
+    add('usage-logger: 20 000 small SSE chunks (~2 MB) — the final usage chunk is logged (5/3) and the request finishes in under 5 s (tail kept as a chunk list, one concat at read time)', small.pass && took['/v1/completions'] < 5000, small.detail + ' · ' + took['/v1/completions'] + ' ms');
+    add('usage-logger: exactly four JSONL lines and every body passed through byte-for-byte', lines.length === PATHS.length && passthrough, `${lines.length} line(s) · ${JSON.stringify(got)} · expected bytes ${JSON.stringify(EXPECT_BYTES)}`);
     return summary();
   } catch (e) {
     add('usage-logger: test threw', false, (e && e.stack || String(e)) + ' · ' + io());

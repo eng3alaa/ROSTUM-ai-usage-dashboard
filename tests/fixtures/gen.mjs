@@ -144,6 +144,16 @@ export async function generate() {
     jl({ id: 'f2', type: 'session.shutdown', timestamp: '2026-08-11T10:20:00.000Z', data: { modelMetrics: { 'gpt-5.4': { requests: { count: 2, cost: 0 }, usage: { inputTokens: 50, outputTokens: 10 } } } } }),
   ].join('\n') + '\n');
 
+  // Plan 5 review M2 — a SECOND Copilot CLI events file whose assistant.usage ids REPEAT sess-1's (e2 / e3 / e4): on disk every session's
+  // file is named events.jsonl and the sid comes from the parent directory, so two DROPPED files need distinct synthetic directories or the
+  // second one's events dedupe away against the first. Kept OUTSIDE copilot/ so the folder-scan totals above stay 2150/100/900/500/5.
+  //   expected alone: in=10+20+30=60 out=5+7+9=21 msgs=3 · dropped together with sess-1: in=2160 cw=100 cr=900 out=511 msgs=6
+  w('copilot-drop/events.jsonl', [
+    jl({ id: 'e1', type: 'session.start', timestamp: '2026-08-12T09:00:00.000Z', data: { sessionId: 'sess-3' } }),
+    cu('e2', '2026-08-12T09:01:00.000Z', 'gpt-5.4', { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 }),
+    cu('e3', '2026-08-12T09:02:00.000Z', 'gpt-5.4', { inputTokens: 20, outputTokens: 7, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 }),
+    cu('e4', '2026-08-12T09:03:00.000Z', 'gpt-5.4', { inputTokens: 30, outputTokens: 9, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 }),
+  ].join('\n') + '\n');
   // T10 — Continue dev_data. Expected: in=1500+700+300=2500 out=200+50+30=280 msgs=3 badLines=1; chatInteraction.jsonl must be ignored by the pattern.
   w('continue/dev_data/0.2.0/tokensGenerated.jsonl', [
     jl({ eventName: 'tokensGenerated', schema: '0.2.0', timestamp: '2026-08-10T09:00:00.000Z', model: 'claude-sonnet-4.5', provider: 'anthropic', promptTokens: 1500, generatedTokens: 200, userId: 'u', selectedProfileId: 'local' }),

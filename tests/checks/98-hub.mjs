@@ -354,7 +354,8 @@ export async function run({ browser, ok }) {
       App._render();
       const g = document.getElementById('groq-status'), d = document.getElementById('deepseek-status');
       const before = { groq: g.textContent, deepseek: d.textContent, groqHidden: document.getElementById('src-groq').hidden };
-      const at = new Date(2026, 8, 6, 9, 5).getTime();   // local time → 'Sep 6, 9:05 AM' in every zone
+      const at = (() => { const d = new Date(Date.now() - 2 * 864e5); d.setHours(9, 5, 0, 0); return d.getTime(); })();   // two days ago, 9:05 local — inside connectorStatus's 7-day 'ok' window whenever the suite runs (a fixed date went 'warn' after 7 days)
+      const synced = new Date(at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });   // the status line's own format
       Store.connectors.groq = { label: 'API key · last 4: abcd', lastSync: at, err: null };   // restored entry: no fetch ran in this page
       Store.setConnector('deepseek', { label: 'usage export (no key)', lastSync: at });      // the landDeepSeek path (ZIP-only, no key)
       App._render();
@@ -366,11 +367,11 @@ export async function run({ browser, ok }) {
       App._render();
       const guarded = o.textContent; o.dataset.gen = '';
       Store.connectors = {}; Store.persist(); App._render();
-      return { before, after, guarded };
+      return { before, after, guarded, synced };
     });
     ok('hub: a key-driver card revealed by a restored entry (no connectKey run) gets a state-derived status line ("● Connected (stored data) · synced <time>"); DeepSeek via its usage ZIP reads "usage export imported — key optional"; an in-flight line (dataset.gen) is left alone',
       restored.before.groq === 'Not connected.' && restored.before.groqHidden && !restored.after.groqHidden && /\bok\b/.test(restored.after.groqDot) && restored.after.groqOk && restored.after.deepseekOk
-      && restored.after.groq === '● Connected (stored data) · synced Sep 6, 9:05 AM' && /usage export imported — key optional/.test(restored.after.deepseek) && !/Not connected/.test(restored.after.deepseek)
+      && restored.after.groq === '● Connected (stored data) · synced ' + restored.synced && /usage export imported — key optional/.test(restored.after.deepseek) && !/Not connected/.test(restored.after.deepseek)
       && restored.guarded === 'Not connected.', JSON.stringify(restored));
     // ---- Plan 4b: the hub at ~46 cards ----
     const big = await page.evaluate(async () => {
@@ -494,6 +495,30 @@ export async function run({ browser, ok }) {
       && focus.importsOpen.open && focus.importsOpen.hostsImports && /acct-manage/.test(focus.importClose.got.cls || '') && focus.importClose.got.card === 'grok'
       && focus.gone.err === null && focus.gone.got.tag === 'BODY',
       JSON.stringify({ modal: focus.modal, importsOpen: focus.importsOpen, importClose: focus.importClose, gone: focus.gone }));
+    // Plan 5 review m3: the hidden chip's restore focus skips cards inside a collapsed group (display:none cannot take focus — the old pick
+    // landed on <body>): the first restored card that is visible, else the first visible card in the hub
+    const chipFocus = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load(); App._hubQuery = ''; document.getElementById('hub-search').value = '';
+      App._render();
+      const settle = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const idsIn = (g) => [...document.querySelectorAll('#accounts-hub .hub-group[data-group="' + g + '"] .acct')].map(c => c.dataset.connector);
+      const vis = () => [...document.querySelectorAll('#accounts-hub .acct')].filter(c => !c.closest('.sec-collapsed'));
+      const active = () => { const a = document.activeElement; return { tag: a ? a.tagName : null, id: a && a.dataset ? a.dataset.connector : undefined, isCard: !!(a && a.classList && a.classList.contains('acct')), collapsed: !!(a && a.closest && a.closest('.sec-collapsed')) }; };
+      const coding = idsIn('coding'), chat = idsIn('chat');
+      // (a) the only hidden card lives in the coding group (first in DOM order), which is collapsed → the first VISIBLE card in the hub
+      View.hideCard(coding[0]); View.toggleCollapse('hub:coding'); App._render();
+      let chip = document.querySelector('#hub-chips .hub-hidden-chip'); chip.focus(); chip.click(); await settle();
+      const onlyCollapsed = { got: active(), expect: vis().length ? vis()[0].dataset.connector : null, codingCollapsed: View.isCollapsed('hub:coding'), chipGone: !document.querySelector('#hub-chips .hub-hidden-chip') };
+      // (b) two cards restored — one in the collapsed coding group (earlier in DOM order), one visible in chat → the visible restored one
+      View.hideCard(coding[1]); View.hideCard(chat[1]); App._render();
+      chip = document.querySelector('#hub-chips .hub-hidden-chip'); chip.focus(); chip.click(); await settle();
+      const mixed = { got: active(), expect: chat[1] };
+      View.toggleCollapse('hub:coding'); View.showAllCards(); App._render();
+      return { onlyCollapsed, mixed, expanded: !View.isCollapsed('hub:coding') };
+    });
+    ok('focus (review m3): the hidden chip restore never lands on <body> — a restored card inside a collapsed group is skipped: the visible restored card when there is one, else the first visible card in the hub',
+      chipFocus.onlyCollapsed.got.isCard && !chipFocus.onlyCollapsed.got.collapsed && chipFocus.onlyCollapsed.got.id === chipFocus.onlyCollapsed.expect && chipFocus.onlyCollapsed.codingCollapsed && chipFocus.onlyCollapsed.chipGone
+      && chipFocus.mixed.got.isCard && !chipFocus.mixed.got.collapsed && chipFocus.mixed.got.id === chipFocus.mixed.expect && chipFocus.expanded, JSON.stringify(chipFocus));
   } finally {
     await page.close();
   }

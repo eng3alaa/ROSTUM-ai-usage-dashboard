@@ -301,6 +301,53 @@ export async function run({ browser, ok }) {
     ok('imports-route: a Claude session in the same drop keeps the local-import path (in=110 msgs=2) while the Codex file is routed again; only the Claude file counts ("1 file(s) imported"); an unrecognized .jsonl → "format not recognized", no source, Imports not connected',
       routed.claude.in === 110 && routed.claude.msgs === 2 && routed.codexAgain.in === 200 && routed.codexAgain.msgs === 3 && routed.importsLabel === '1 file(s) imported' && /1 \.jsonl file/.test(routed.noteB) && /routed to OpenAI Codex CLI/.test(routed.noteB)
       && /mystery\.jsonl: format not recognized/.test(routed.unknownNote) && routed.unknownSources.length === 0 && routed.unknownImports === 'unset', JSON.stringify(routed));
+    // Plan 5 review M1: a drop is a scan of JUST the dropped files — it must not sweep the connector's ScanCache prefix (the folder scan's
+    // entries stay for the next re-scan), it still REPLACES the card's rows / filesLabel (merging would double count against a later
+    // re-scan), and the Imports note says so honestly when the card had a scan before.
+    const codexFiles = fs.readdirSync(path.join(OUT, 'codex'), { recursive: true }).map(String).filter(p => /\.jsonl$/i.test(p))
+      .map(p => ({ path: p.split(path.sep).join('/'), text: fs.readFileSync(path.join(OUT, 'codex', p), 'utf8') }));
+    const dropOver = await page.evaluate(async (files, codex) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set();
+      const sum = (rows) => rows.reduce((t, r) => ({ in: t.in + (r.in || 0), cr: t.cr + (r.cr || 0), out: t.out + (r.out || 0), msgs: t.msgs + (r.msgs || 0) }), { in: 0, cr: 0, out: 0, msgs: 0 });
+      const c = connectorById('codex'), prefix = 'scan:v6:codex\u0001';
+      const codexKeys = async () => (await IDB.keys('scan:')).filter(k => k.startsWith(prefix));
+      for (const k of await codexKeys()) await IDB.del(k);
+      await App.scanFiles(c, files.map((f, i) => ({ path: f.path, file: new File([f.text], f.path.split('/').pop(), { lastModified: 1754000000000 + i }) })));   // the folder scan
+      const before = { label: (Store.connectors.codex || {}).filesLabel, keys: await codexKeys(), total: sum((Store.sources.codex || {}).rows || []) };
+      await App.handleImportFiles([new File([codex], 'rollout-2026-08-10T09-00-00-abc.jsonl')]);   // ONE rollout dropped on Imports
+      const keysAfter = await codexKeys();
+      const after = { label: (Store.connectors.codex || {}).filesLabel, keptAll: before.keys.every(k => keysAfter.includes(k)), nKeys: keysAfter.length, total: sum((Store.sources.codex || {}).rows || []),
+        note: document.getElementById('import-status').textContent, status: Store.connectorStatus(c) };
+      for (const k of keysAfter) await IDB.del(k);
+      Store.sources = {}; Store.connectors = {}; Store.projectsBy = {}; Store.persist(); App._render();
+      return { before, after };
+    }, codexFiles, codexText);
+    ok('imports-route (review M1): after a 4-file Codex folder scan, ONE rollout dropped on Imports keeps every folder-scan ScanCache entry (no prefix prune: 4 + 1 keys), replaces the rows with the dropped file only (in=200 cr=200 out=130 msgs=3, "1 file"), and the note reads "1 file routed to OpenAI Codex CLI — this replaced the 4 files previously scanned for that card; re-scan its folder to restore"',
+      dropOver.before.label === '4 files' && dropOver.before.keys.length === 4 && dropOver.before.total.msgs > 3
+      && dropOver.after.keptAll && dropOver.after.nKeys === 5 && dropOver.after.label === '1 file' && dropOver.after.status === 'ok'
+      && dropOver.after.total.in === 200 && dropOver.after.total.cr === 200 && dropOver.after.total.out === 130 && dropOver.after.total.msgs === 3
+      && dropOver.after.note.includes('1 file routed to OpenAI Codex CLI — this replaced the 4 files previously scanned for that card; re-scan its folder to restore'), JSON.stringify(dropOver));
+    // Plan 5 review M2: every dropped file gets its own synthetic directory (drop-<i>/…) — two events.jsonl whose assistant.usage ids repeat
+    // (every Copilot CLI session file is named events.jsonl; the sid comes from the parent directory) both count, under distinct sids
+    const cpDrop = fs.readFileSync(path.join(OUT, 'copilot-drop', 'events.jsonl'), 'utf8');
+    const twoSids = await page.evaluate(async (a, b) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set();
+      const sum = (rows) => rows.reduce((t, r) => ({ in: t.in + (r.in || 0), cw: t.cw + (r.cw || 0), cr: t.cr + (r.cr || 0), out: t.out + (r.out || 0), msgs: t.msgs + (r.msgs || 0) }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
+      const prefix = 'scan:v6:copilot-cli\u0001';
+      for (const k of (await IDB.keys('scan:')).filter(k => k.startsWith(prefix))) await IDB.del(k);
+      await App.handleImportFiles([new File([a], 'events.jsonl'), new File([b], 'events.jsonl')]);
+      const keys = (await IDB.keys('scan:')).filter(k => k.startsWith(prefix));
+      const ids = []; for (const k of keys) ids.push(...(((await IDB.get(k)) || {}).ids || []));
+      const out = { total: sum((Store.sources['copilot-cli'] || {}).rows || []), label: (Store.connectors['copilot-cli'] || {}).filesLabel,
+        paths: keys.map(k => k.slice(prefix.length).split('\u0001')[0]).sort(), ids: ids.sort(), note: document.getElementById('import-status').textContent };
+      for (const k of keys) await IDB.del(k);
+      Store.sources = {}; Store.connectors = {}; Store.projectsBy = {}; Store.persist(); App._render();
+      return out;
+    }, cpA, cpDrop);
+    ok('imports-route (review M2): two dropped events.jsonl with the SAME assistant.usage ids (e2/e3/e4) both land — paths drop-0/events.jsonl + drop-1/events.jsonl, ids drop-0:e2 … drop-1:e4 (distinct sids), totals in=2160 cw=100 cr=900 out=511 msgs=6, "2 files"',
+      twoSids.total.in === 2160 && twoSids.total.cw === 100 && twoSids.total.cr === 900 && twoSids.total.out === 511 && twoSids.total.msgs === 6 && twoSids.label === '2 files'
+      && JSON.stringify(twoSids.paths) === JSON.stringify(['drop-0/events.jsonl', 'drop-1/events.jsonl'])
+      && JSON.stringify(twoSids.ids) === JSON.stringify(['drop-0:e2', 'drop-0:e3', 'drop-0:e4', 'drop-1:e2', 'drop-1:e3', 'drop-1:e4']) && /2 files routed to GitHub Copilot CLI \(logs\)/.test(twoSids.note), JSON.stringify(twoSids));
 
     // Task 4 (4a-4): Cursor usage-events CSV re-import merges by WINDOW. Each export is the date range picked on cursor.com/dashboard →
     // Usage → Export CSV, so a re-import replaces ONLY the days the export covers ([min d, max d] of its parsed rows) and keeps every

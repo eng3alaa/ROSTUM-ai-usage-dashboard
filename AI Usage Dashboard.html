@@ -1808,9 +1808,12 @@ async function collectFilesFromHandle(dirHandle, patterns, path = '', out = [], 
  *  Those are kept on the entry (dupOnly: true when the file added nothing of its own) and make it a MISS whenever one of
  *  them is no longer claimed by a preceding file (the claimant vanished or now sorts later): a duplicate-only file (the same
  *  session logged twice, a copy, a rotated log) would otherwise be cached as empty forever and hide its usage once the
- *  original is gone. Entries written before dupIds existed carry none and behave as before (no SCAN_CACHE_VER bump).
- *  Pruning is scoped to THIS connector's signature prefix — one connector's scan never evicts another's. */
-async function parseFolderCached(connector, files, onProgress, cache) {
+ *  original is gone. dupIds are capped at DUP_IDS_CAP per entry — a capped entry is flagged dupTruncated and is an UNCONDITIONAL miss (a
+ *  partial list cannot prove every skipped id is still claimed). SCAN_CACHE_VER v6 re-parses the entries written before dupIds existed.
+ *  Pruning is scoped to THIS connector's signature prefix — one connector's scan never evicts another's; opts.noPrune skips it (a
+ *  drop-sourced scan sees only the dropped files — sweeping the prefix would evict the folder scan's entries). */
+const DUP_IDS_CAP = 5000;   // dupIds kept per cache entry — beyond it the entry is dupTruncated (always a miss) rather than an unbounded IDB record
+async function parseFolderCached(connector, files, onProgress, cache, opts = {}) {
   const parser = globalThis[connector.parser];
   if (typeof parser !== 'function') throw new Error('No parser registered: ' + connector.parser);
   const pats = connector.patterns || [/./];
@@ -1832,8 +1835,8 @@ async function parseFolderCached(connector, files, onProgress, cache) {
     seen.add(sig);
     let entry = cache ? await cache.get(sig) : null;
     // an entry without `ids`, or whose ids collide with what's already been counted this scan, is a miss (re-parse); so is one
-    // whose dupIds (skipped as duplicates when it was parsed) are no longer ALL claimed by an earlier file of this scan
-    const isMiss = !entry || !entry.ids || entry.ids.some(id => runningSeen.has(id)) || (Array.isArray(entry.dupIds) && entry.dupIds.some(id => !runningSeen.has(id)));
+    // whose dupIds (skipped as duplicates when it was parsed) are no longer ALL claimed by an earlier file of this scan, or were truncated (DUP_IDS_CAP)
+    const isMiss = !entry || !entry.ids || entry.dupTruncated === true || entry.ids.some(id => runningSeen.has(id)) || (Array.isArray(entry.dupIds) && entry.dupIds.some(id => !runningSeen.has(id)));
     if (isMiss) {
       let res;
       // one unreadable file (Chrome throws NotReadableError when an FSA file changed after getFile() — a CLI
@@ -1844,7 +1847,7 @@ async function parseFolderCached(connector, files, onProgress, cache) {
       entry = { rows: res.rows, projects: res.projects || [], msgs: res.meta.msgs || 0, ids: res.meta.addedIds || [], lines: res.meta.lines || 0, badLines: res.meta.badLines || 0 };
       // ids this file skipped as duplicates of an EARLIER file (an in-file repeat is the file's own id, not another file's)
       const own = new Set(entry.ids), dupIds = [...new Set(res.meta.dupIds || [])].filter(id => !own.has(id));
-      if (dupIds.length) { entry.dupIds = dupIds; if (!entry.ids.length) entry.dupOnly = true; }
+      if (dupIds.length) { entry.dupIds = dupIds.slice(0, DUP_IDS_CAP); if (dupIds.length > DUP_IDS_CAP) entry.dupTruncated = true; if (!entry.ids.length) entry.dupOnly = true; }   // capped: a truncated list cannot prove every skipped id is still claimed → dupTruncated = unconditional miss
       if (cache) await cache.set(sig, entry);
       parsedFiles++;
     } else {
@@ -1855,7 +1858,7 @@ async function parseFolderCached(connector, files, onProgress, cache) {
     lines += entry.lines ?? 0; badLines += entry.badLines ?? 0;   // pre-fix entries lack these — 0, not NaN
     done++; if (onProgress) onProgress(done, main.length);
   }
-  if (cache) {
+  if (cache && !opts.noPrune) {   // noPrune: a drop-sourced scan — its entries join the cache, the folder scan's entries stay for the next re-scan
     if (typeof cache.prune === 'function') await cache.prune(seen, prefix);
     else if (typeof cache.keys === 'function') for (const k of [...cache.keys()]) if (k.startsWith(prefix) && !seen.has(k)) cache.delete(k);
   }
@@ -2497,8 +2500,9 @@ async function parseOllamaFiles(files, onProgress, seen = new Set(), c, siblingF
 /** ScanCache key prefix — bump whenever a parser's OUTPUT changes for unchanged bytes (cached per-file entries
  *  would otherwise serve pre-fix rows forever for finished files). History: 'scan:' → v3 (per-hour granularity,
  *  connector-prefixed signatures) → v4 (Roo/Cline inclusive tokensIn + per-request model, local:1 flags, Gemini CLI
- *  tool tokens). prune() sweeps EVERY older-version key so IDB keeps no dead entries. */
-const SCAN_CACHE_VER = 'scan:v5:';   // v5: folder-log parsers emit project rows (Plan 4b T15) — output changed for unchanged bytes → one-time re-parse
+ *  tool tokens) → v5 (folder-log project rows) → v6 (Codex per-turn last_token_usage; dupIds / dupTruncated entries). prune() sweeps
+ *  EVERY older-version key so IDB keeps no dead entries. */
+const SCAN_CACHE_VER = 'scan:v6:';   // v6 (Plan 5 review): T3 books Codex per-turn last_token_usage — output changed for unchanged bytes — and T2's dupIds / dupOnly entries need a rewrite (pre-T2 entries carry none) → one-time re-parse. v5: folder-log parsers emit project rows (Plan 4b T15)
 const ScanCache = {
   async get(sig) { try { return await IDB.get(SCAN_CACHE_VER + sig); } catch { return null; } },
   async set(sig, entry) { try { await IDB.set(SCAN_CACHE_VER + sig, entry); } catch {} },
@@ -4005,7 +4009,8 @@ async function sniffJsonlFile(file, name) {
 }
 /** Dropzone route per sniffed kind: the connector whose parser owns the format, and the path handed to that parser for a dropped file — the
  *  on-disk name when it already matches the connector's patterns, else a synthetic name the parser's own filename filter accepts (a renamed
- *  rollout / events file still parses; the parser's sid stays derived from the name). parseFolderCached filters by connector.patterns and
+ *  rollout / events file still parses; the parser's sid stays derived from the name). handleImportFiles prefixes every routed path with its
+ *  own drop-<i>/ directory, so a directory-derived sid (Copilot CLI) differs per dropped file. parseFolderCached filters by connector.patterns and
  *  every parser by its own filename test, so the sniff decides and the path is made to agree. */
 const JSONL_ROUTE = {
   codex: { id: 'codex', canon: (n) => 'rollout-' + n },
@@ -4785,7 +4790,8 @@ const App = {
     const chips = clear($('hub-chips'));
     if (hiddenN) chips.appendChild(el('button', { class: 'chip hub-hidden-chip', type: 'button', text: `${hiddenN} hidden — show`, title: 'Show hidden account cards',
       onclick: () => { const was = new Set(View.prefs.hiddenCards); View.showAllCards(); this.render();
-        this._focusAfterRender(() => [...document.querySelectorAll('#accounts-hub .acct')].find(c => was.has(c.dataset.connector)) || null); } }));
+        // a restored card inside a collapsed group cannot take focus (display:none) → the first VISIBLE restored card, else the first visible card
+        this._focusAfterRender(() => { const vis = [...document.querySelectorAll('#accounts-hub .acct')].filter(c => !c.closest('.sec-collapsed')); return vis.find(c => was.has(c.dataset.connector)) || vis[0] || null; }); } }));
     const rank = { ok: 0, warn: 1, off: 2 };
     for (const g of HUB_GROUPS) {
       const members = visible.filter(c => (c.category || 'api') === g.id && (!q || c.name.toLowerCase().includes(q)));
@@ -5493,15 +5499,17 @@ const App = {
     const st = Store.connectors[id], src = Store.sources[id];
     return !!(st && st.filesLabel && src && Array.isArray(src.rows) && src.rows.length);
   },
-  /** Single scan entry point for folder-log connectors (folder pick, classic chooser, tests). files: [{path, file}]. */
-  async scanFiles(c, files) {
+  /** Single scan entry point for folder-log connectors (folder pick, classic chooser, tests, Imports drop). files: [{path, file}];
+   *  opts.fromDrop: the files came from the Imports dropzone — no ScanCache prune (a drop is a scan of just those files: it REPLACES the
+   *  connector's rows like a re-scan does — merging would double count against a later re-scan). Returns true when the rows were replaced. */
+  async scanFiles(c, files, opts = {}) {
     const status = this._scanStatusEl(c.id), prog = $(c.id + '-progress');
     const gen = this._gen[c.id] = (this._gen[c.id] || 0) + 1;   // scan slot only — connectServer has its own (c.id + ':server'), so the two never supersede each other
     try {
       if (!files.length) { status.textContent = `No matching files found in that folder — expected ${c.hint || 'log files'}.`; return; }
       if (prog) { prog.hidden = false; prog.value = 0; prog.max = files.length; }
       document.querySelectorAll('.card').forEach(x => x.classList.add('stale'));
-      const res = await parseFolderCached(c, files, (done, total) => { if (prog) { prog.max = total; prog.value = done; } }, ScanCache);
+      const res = await parseFolderCached(c, files, (done, total) => { if (prog) { prog.max = total; prog.value = done; } }, ScanCache, { noPrune: !!opts.fromDrop });
       if (gen !== this._gen[c.id]) return;   // superseded by a newer scan of this connector
       if (!res.meta.files) { status.textContent = `No matching files found — expected ${c.hint || 'log files'}.`; return; }
       if (res.projects && res.projects.length) Store.projectsBy[c.id] = res.projects; else delete Store.projectsBy[c.id];   // Projects table rows (persisted by setSource's persist below); a re-scan that finds none clears the stale set
@@ -5518,6 +5526,7 @@ const App = {
         + (res.meta.badLines ? ` · ${fmtInt(res.meta.badLines)} unreadable line(s) skipped` : '')
         + (res.meta.badFiles ? ` · ${fmtInt(res.meta.badFiles)} file(s) unreadable` : '')));
       this.render();
+      return true;   // rows / filesLabel replaced (the Imports note reads this)
     } catch (e) {
       if (gen !== this._gen[c.id]) return;
       const scanErr = (e.message || String(e)).slice(0, 80);
@@ -6168,10 +6177,16 @@ const App = {
         const c = JSONL_ROUTE[kind] ? connectorById(JSONL_ROUTE[kind].id) : null;
         if (!c) { for (const jf of list) notes.push(`${jf.path}: format not recognized`); continue; }
         const n = list.length, what = `${n} file${n === 1 ? '' : 's'} routed to ${c.name}`;
+        const prevLabel = (Store.connectors[c.id] || {}).filesLabel || null;   // what the card showed before this drop (a folder scan or an earlier drop)
         try {
-          await this.scanFiles(c, list.map(jf => ({ path: jsonlRoutePath(c, kind, jf.path), file: jf.file })));
+          // every dropped file gets its own synthetic directory (drop-<i>/…): the patterns still match, and a parser that derives the session id
+          // from the parent directory (Copilot CLI events.jsonl — every session's file has the same name) sees distinct sids, so two dropped
+          // files with the same event ids both count instead of the second deduping away against the first
+          const replaced = await this.scanFiles(c, list.map((jf, i) => ({ path: `drop-${i}/${jsonlRoutePath(c, kind, jf.path)}`, file: jf.file })), { fromDrop: true });
           const err = (Store.connectors[c.id] || {}).scanErr;
-          notes.push(`${what} (see its card)` + (err ? ` — scan failed: ${err}` : ''));
+          if (err) notes.push(`${what} (see its card) — scan failed: ${err}`);
+          else if (replaced && prevLabel) notes.push(`${what} — this replaced the ${prevLabel} previously scanned for that card; re-scan its folder to restore`);   // honest: a drop replaces, it does not merge
+          else notes.push(`${what} (see its card)`);
         } catch (e) { notes.push(`${what} — failed: ${e.message || e}`); }
       }
       const claudeFiles = groups.get('claude') || [];
