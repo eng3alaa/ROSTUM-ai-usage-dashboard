@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { openDashboard, OUT } from '../lib/harness.mjs';
 
-// Plan 7 T2: the local collector card. window.fetch is stubbed INSIDE the page to serve /api/status, /api/list and /api/file from the
+// Plan 7 T2: the local collector card; T3: automatic mode (the status watch, per-tool re-scan on change, Re-scan routing, restore on init). window.fetch is stubbed INSIDE the page to serve /api/status, /api/list and /api/file from the
 // existing fixture texts (Claude jsonl + Codex rollouts + Copilot CLI events); every request's Authorization header is recorded.
 // Expected totals are the folder-scan numbers already asserted in 10-baseline (sess-aaa 110/25/50/220/2) and 87-folder-logs
 // (codex abc 200/200/130/3, resumed 700/300/150/4, oss session local:1; copilot-cli 2150/100/900/500/5).
@@ -54,12 +54,12 @@ export async function run({ browser, ok }) {
           if (opts.reject401 || auth !== 'Bearer ' + opts.token) return json({ error: 'unauthorized' }, 401);
           if (u.pathname === '/api/status') return json({ version: '7', home: '/home/t', os: 'test', startedAt: 1, tools: Object.entries(meta).map(([id, m]) => {
             const files = fx[id], found = !!files;
-            return { id, name: m.name, roots: m.roots, found, files: found ? Object.keys(files).length : 0, bytes: 0, newestMtime: found ? 1755000000000 : 0, scannedAt: 1 };
+            return { id, name: m.name, roots: m.roots, found, files: found ? Object.keys(files).length : 0, bytes: 0, newestMtime: found ? ((opts.mtime || {})[id] || 1755000000000) : 0, scannedAt: 1 };   // opts.mtime[id]: T3's watch checks read it live
           }) });
           if (u.pathname === '/api/list') {
             const id = u.searchParams.get('tool'), files = fx[id];
             if (!files) return json({ error: 'unknown tool' }, 404);
-            return json({ tool: id, root: meta[id].roots[0], files: Object.entries(files).map(([p, text]) => ({ path: p, size: new TextEncoder().encode(text).length, mtime: 1755000000000 })) });
+            return json({ tool: id, root: meta[id].roots[0], files: Object.entries(files).map(([p, text]) => ({ path: p, size: new TextEncoder().encode(text).length, mtime: (opts.mtime || {})[id] || 1755000000000 })) });
           }
           if (u.pathname === '/api/file') {
             const id = u.searchParams.get('tool'), p = u.searchParams.get('path');
@@ -173,11 +173,11 @@ export async function run({ browser, ok }) {
         document.getElementById('collector-key').value = 'tok-wrong';
         await App.connectCollector(c);
         return { hasEntry: true, err: (Store.connectors.collector || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('collector-status').textContent,
-          landed: Object.keys(Store.sources), entries: Object.keys(Store.connectors), lists: reqs.filter(r => /\/api\/list/.test(r.path)).length, files: reqs.filter(r => /\/api\/file/.test(r.path)).length };
+          landed: Object.keys(Store.sources), entries: Object.keys(Store.connectors), lists: reqs.filter(r => /\/api\/list/.test(r.path)).length, files: reqs.filter(r => /\/api\/file/.test(r.path)).length, watch: !!App._pollTimers.collector };
       } finally { window.fetch = origFetch; }
     }, fx);
-    ok('collector (b): 401 → err "Token rejected — copy the token the collector printed" (attention), status line says so, nothing lands, no tool entry, no /api/list or /api/file',
-      b.hasEntry && b.err === 'Token rejected — copy the token the collector printed' && b.status === 'warn' && /Token rejected/.test(b.statusText) && b.landed.length === 0 && JSON.stringify(b.entries) === JSON.stringify(['collector']) && b.lists === 0 && b.files === 0, JSON.stringify(b));
+    ok('collector (b): 401 → err "Token rejected — copy the token the collector printed" (attention), status line says so, nothing lands, no tool entry, no /api/list or /api/file, no watch started',
+      b.hasEntry && b.err === 'Token rejected — copy the token the collector printed' && b.status === 'warn' && /Token rejected/.test(b.statusText) && b.landed.length === 0 && JSON.stringify(b.entries) === JSON.stringify(['collector']) && b.lists === 0 && b.files === 0 && b.watch === false, JSON.stringify(b));
 
     // ---- (c) network failure ----
     const cc = await page.evaluate(async (fx) => {
@@ -190,13 +190,13 @@ export async function run({ browser, ok }) {
         Store.setConnector('collector', { label: 'stale entry', lastSync: Date.now(), err: null });   // a previous session's entry must not survive "not running" (connectServer's rule)
         await App.connectCollector(c);
         App.renderHub();
-        return { hasEntry: true, entry: Store.connectors.collector, status: Store.connectorStatus(c), statusText: document.getElementById('collector-status').textContent, landed: Object.keys(Store.sources),
+        return { hasEntry: true, entry: Store.connectors.collector, status: Store.connectorStatus(c), statusText: document.getElementById('collector-status').textContent, landed: Object.keys(Store.sources), watch: !!App._pollTimers.collector,
           persisted: !!(((JSON.parse(localStorage.getItem('aiusage:data') || '{}')).connectors || {}).collector),
           hub: [...document.querySelectorAll('#accounts-hub .hub-group[data-group="coding"] .acct')].map(x => x.dataset.connector)[0], actions: [...document.querySelectorAll('#accounts-hub .acct[data-connector="collector"] .acct-actions button')].map(b => b.textContent) };
       } finally { window.fetch = origFetch; }
     }, fx);
-    ok('collector (c): fetch rejects → status "' + NOT_RUNNING + '", NO connector state (a stale entry is deleted, not persisted), nothing lands, card off (Connect only), still first in Coding',
-      cc.hasEntry && cc.statusText === NOT_RUNNING && cc.entry === undefined && cc.status === 'off' && cc.landed.length === 0 && !cc.persisted && cc.hub === 'collector' && JSON.stringify(cc.actions) === JSON.stringify(['Connect']), JSON.stringify(cc));
+    ok('collector (c): fetch rejects → status "' + NOT_RUNNING + '", NO connector state (a stale entry is deleted, not persisted), nothing lands, card off (Connect only), still first in Coding, no watch',
+      cc.hasEntry && cc.statusText === NOT_RUNNING && cc.entry === undefined && cc.status === 'off' && cc.landed.length === 0 && !cc.persisted && cc.hub === 'collector' && JSON.stringify(cc.actions) === JSON.stringify(['Connect']) && cc.watch === false, JSON.stringify(cc));
 
     // ---- (d) Remember opt-in · sync / refreshAll routing · disconnect keeps the tools ----
     const d = await page.evaluate(async (fx) => {
@@ -212,24 +212,25 @@ export async function run({ browser, ok }) {
         const out = { hasEntry: true, remembered: LS.get('key:collector', null), entry: !!Store.connectors.collector, codexEntry: !!Store.connectors.codex };
         let calls = 0; App.connectCollector = async function (cc) { calls++; return orig.call(this, cc); };
         await App.syncConnector('collector'); out.syncCalls = calls;
-        calls = 0; await App.refreshAll(); out.refreshCalls = calls;                              // connected + token at hand → re-run once
-        calls = 0; key.value = ''; await App.refreshAll(); out.refreshFromLS = calls; out.refilled = key.value;   // input blank but remembered → still re-run (token restored into the input)
-        App.connectCollector = orig;
+        const origTick = App._collectorTick; let ticks = 0; App._collectorTick = async function (cc) { ticks++; };   // T3: Refresh all = one status tick, never a full reconnect
+        calls = 0; await App.refreshAll(); out.refreshCalls = calls; out.refreshTicks = ticks;                              // connected + token at hand → one tick
+        calls = 0; ticks = 0; key.value = ''; await App.refreshAll(); out.refreshFromLS = ticks; out.refreshFromLSConnects = calls; out.refilled = key.value;   // input blank but remembered → still ticks (token restored into the input)
+        App.connectCollector = orig; App._collectorTick = origTick;
         App.disconnectConnector('collector');
         out.after = { remembered: LS.get('key:collector', null), key: key.value, rem: rem.checked, entry: !!Store.connectors.collector, codexEntry: !!Store.connectors.codex, localEntry: !!Store.connectors.local,
           codexRows: ((Store.sources.codex || {}).rows || []).length, localRows: ((Store.sources.local || {}).rows || []).length, confirms, statusText: document.getElementById('collector-status').textContent,
           status: Store.connectorStatus(c), tableRows: document.querySelectorAll('#collector-tools tr').length };
-        calls = 0; App.connectCollector = async function () { calls++; }; await App.refreshAll(); App.connectCollector = orig; out.refreshAfterDisconnect = calls;
+        calls = 0; App.connectCollector = async function () { calls++; }; App._collectorTick = async function () { calls++; }; await App.refreshAll(); App.connectCollector = orig; App._collectorTick = origTick; out.refreshAfterDisconnect = calls;
         // sync with nothing at hand → the card is surfaced (modal), no network call
         calls = 0; App.connectCollector = async function () { calls++; }; App.syncConnector('collector'); App.connectCollector = orig;
         out.syncNoToken = { calls, modalOpen: document.getElementById('connector-modal').open, hosted: !!document.querySelector('#modal-body #src-collector') };
         App.closeConnectorModal();
         return out;
-      } finally { window.fetch = origFetch; window.confirm = origConfirm; App.connectCollector = orig; }
+      } finally { window.fetch = origFetch; window.confirm = origConfirm; App.connectCollector = orig; if (App.stopCollectorWatch) App.stopCollectorWatch('collector'); }
     }, fx);
-    ok('collector (d): token persisted ONLY with Remember (LS key:collector); syncConnector("collector") → connectCollector; refreshAll re-runs it while connected — from the input, or from the remembered token when the input is blank (input refilled)',
-      d.hasEntry && d.remembered === 'tok-abc' && d.entry && d.codexEntry && d.syncCalls === 1 && d.refreshCalls === 1 && d.refreshFromLS === 1 && d.refilled === 'tok-abc', JSON.stringify(d));
-    ok('collector (d): disconnect clears the token (input, Remember, LS) and the collector entry only — no confirm prompt, the tools keep their entries AND their rows, status back to "Not connected.", tools table emptied; refreshAll afterwards never calls the collector; Sync with no token opens the card instead of fetching',
+    ok('collector (d): token persisted ONLY with Remember (LS key:collector); syncConnector("collector") → connectCollector (full); refreshAll runs ONE _collectorTick while connected (never connectCollector) — from the input, or from the remembered token when the input is blank (input refilled)',
+      d.hasEntry && d.remembered === 'tok-abc' && d.entry && d.codexEntry && d.syncCalls === 1 && d.refreshCalls === 0 && d.refreshTicks === 1 && d.refreshFromLS === 1 && d.refreshFromLSConnects === 0 && d.refilled === 'tok-abc', JSON.stringify(d));
+    ok('collector (d): disconnect clears the token (input, Remember, LS) and the collector entry only — no confirm prompt, the tools keep their entries AND their rows, status back to "Not connected.", tools table emptied; refreshAll afterwards neither connects nor ticks; Sync with no token opens the card instead of fetching',
       d.hasEntry && d.after && d.after.remembered === null && d.after.key === '' && d.after.rem === false && !d.after.entry && d.after.codexEntry && d.after.localEntry && d.after.codexRows > 0 && d.after.localRows > 0
       && d.after.confirms === 0 && d.after.statusText === 'Not connected.' && d.after.status === 'off' && d.after.tableRows === 0 && d.refreshAfterDisconnect === 0
       && d.syncNoToken.calls === 0 && d.syncNoToken.modalOpen === true && d.syncNoToken.hosted, JSON.stringify(d.after) + ' ' + JSON.stringify({ refreshAfter: d.refreshAfterDisconnect, syncNoToken: d.syncNoToken }));
@@ -318,6 +319,179 @@ export async function run({ browser, ok }) {
     ok('App.scanLocalFiles: extracted from the #folder-fallback handler — lands rows + projects under local (sess-aaa: 2 msgs, 2 project×model rows), label "1 log files" / status "Loaded … one-time load"; with { fromCollector: true } the label reads "1 log files · via collector" and the status says so; an empty list is a no-op',
       sl.defined && sl.plain === true && sl.label === '1 log files' && /Loaded/.test(sl.statusText) && /one-time load/.test(sl.statusText) && sl.msgs === 2 && sl.projects === 2
       && sl.viaC === true && sl.labelC === '1 log files · via collector' && /via collector/.test(sl.statusC) && !/one-time load/.test(sl.statusC) && sl.empty === undefined, JSON.stringify(sl));
+
+    // ================= Plan 7 T3: automatic mode — the status watch =================
+    const clineFx = {
+      'tasks/1786352400000/ui_messages.json': read('cline', 'tasks', '1786352400000', 'ui_messages.json'),
+      'tasks/1786352400000/task_metadata.json': read('cline', 'tasks', '1786352400000', 'task_metadata.json'),
+      'tasks/1786352500000/ui_messages.json': read('cline', 'tasks', '1786352500000', 'ui_messages.json'),
+    };
+    // (w1–w5) one page state: connect (watch starts) → codex's newestMtime moves → ONE tick re-scans codex only; unchanged → no scan; hidden tab → skipped;
+    // 401 / network failure on a tick → err on the collector entry only (tools intact, watch alive), the next good tick clears it; a tool that newly appears is read
+    const w = await page.evaluate(async (fx, cl) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {};
+      const c = connectorById('collector'); if (!c) return { hasEntry: false };
+      const missing = ['startCollectorWatch', 'stopCollectorWatch', '_collectorTick', 'rescanViaCollector'].filter(n => typeof App[n] !== 'function');
+      if (missing.length) return { hasEntry: true, missing };
+      const origFetch = window.fetch, origScan = App.scanFiles, origLocal = App.scanLocalFiles;
+      const opts = { token: 'tok-abc', mtime: {} };
+      const reqs = window.__collectorStub(fx, opts);
+      const scans = [], localScans = [];
+      App.scanFiles = function (cc, files, o) { scans.push(cc.id); return origScan.call(this, cc, files, o); };
+      App.scanLocalFiles = function (files, o) { localScans.push('local'); return origLocal.call(this, files, o); };
+      const row = (re) => [...document.querySelectorAll('#collector-tools tbody tr')].find(tr => re.test(tr.children[0].textContent));
+      const line = () => document.getElementById('collector-status').textContent;
+      const reset = () => { scans.length = 0; localScans.length = 0; reqs.length = 0; };
+      try {
+        document.getElementById('collector-key').value = 'tok-abc'; document.getElementById('remember-collector').checked = false;
+        await App.connectCollector(c);
+        const out = { hasEntry: true, missing: [], timer: !!App._pollTimers.collector, every: c.pollEvery || 60000, statusAfterConnect: line(), scansAtConnect: scans.slice(), localAtConnect: localScans.slice() };
+        const before = { codexSync: Store.connectors.codex.lastSync, localSync: Store.connectors.local.lastSync, copilotSync: Store.connectors['copilot-cli'].lastSync,
+          codexRows: __sum(Store.sources.codex.rows), codexNewest: row(/Codex/).children[3].textContent };
+        await new Promise(r => setTimeout(r, 5));
+        reset(); opts.mtime.codex = 1756000000000;   // only codex moved
+        const ret = await App._collectorTick(c);
+        Object.assign(out, { ret, scans: scans.slice(), localScans: localScans.slice(), reqs: reqs.map(r => r.path), allBearer: reqs.length > 0 && reqs.every(r => r.auth === 'Bearer tok-abc'),
+          labels: { collector: Store.connectors.collector.label, codex: Store.connectors.codex.label, local: Store.connectors.local.label }, err: Store.connectors.collector.err, status: Store.connectorStatus(c), statusText: line(),
+          codexRows: __sum(Store.sources.codex.rows), codexRowsBefore: before.codexRows, codexMoved: Store.connectors.codex.lastSync > before.codexSync,
+          localUntouched: Store.connectors.local.lastSync === before.localSync, copilotUntouched: Store.connectors['copilot-cli'].lastSync === before.copilotSync,
+          codexNewestBefore: before.codexNewest, codexNewest: row(/Codex/).children[3].textContent, codexCell: row(/Codex/).children[2].textContent, timerStill: !!App._pollTimers.collector, tokenInDom: document.documentElement.outerHTML.includes('tok-abc') });
+        // (w2) unchanged
+        reset();
+        await App._collectorTick(c);
+        out.unchanged = { scans: scans.slice(), localScans: localScans.slice(), reqs: reqs.map(r => r.path), label: Store.connectors.collector.label, statusText: line() };
+        // (w3) hidden tab
+        reset(); opts.mtime.codex = 1757000000000;
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+        try { await App._collectorTick(c); } finally { delete document.hidden; }
+        out.hidden = { scans: scans.slice(), reqs: reqs.map(r => r.path), restored: document.hidden === false, label: Store.connectors.collector.label };
+        // (w4) failing ticks
+        reset(); opts.reject401 = true;
+        await App._collectorTick(c);
+        out.e401 = { err: Store.connectors.collector.err, status: Store.connectorStatus(c), statusText: line(), timer: !!App._pollTimers.collector, codexRows: __sum(Store.sources.codex.rows),
+          localRows: ((Store.sources.local || {}).rows || []).length, codexLabel: Store.connectors.codex.label, codexErr: Store.connectors.codex.err, scans: scans.slice(), reqs: reqs.map(r => r.path), tableRows: document.querySelectorAll('#collector-tools tbody tr').length };
+        opts.reject401 = false; opts.down = true;
+        await App._collectorTick(c);
+        out.down = { err: Store.connectors.collector.err, status: Store.connectorStatus(c), entry: !!Store.connectors.collector, statusText: line(), codexRows: __sum(Store.sources.codex.rows), timer: !!App._pollTimers.collector };
+        opts.down = false; reset();
+        await App._collectorTick(c);   // good again: err cleared; codex moved during the outage → read now
+        out.recovered = { err: Store.connectors.collector.err, status: Store.connectorStatus(c), statusText: line(), scans: scans.slice(), label: Store.connectors.collector.label };
+        // (w5) a tool appears
+        reset(); fx.cline = cl;
+        await App._collectorTick(c);
+        out.appeared = { scans: scans.slice(), localScans: localScans.slice(), cline: __sum(((Store.sources.cline || {}).rows) || []), clineLabel: (Store.connectors.cline || {}).label, collectorLabel: Store.connectors.collector.label,
+          reqs: reqs.map(r => r.path), clineRescan: (document.getElementById('cline-rescan') || {}).hidden, clineStatus: (document.getElementById('cline-status') || {}).textContent, clineCell: row(/Cline/).children[2].textContent };
+        return out;
+      } finally { window.fetch = origFetch; App.scanFiles = origScan; App.scanLocalFiles = origLocal; delete document.hidden; if (App.stopCollectorWatch) App.stopCollectorWatch(c); }
+    }, fx, clineFx);
+    const mtimeOk = (p) => /^\/api\/file\?tool=codex&path=/.test(p);
+    ok('watch (w1): connectCollector starts the watch (App._pollTimers.collector, pollEvery 60000) and the status line says "watching for changes every 60 s"; the connect itself scanned codex + copilot-cli (scanFiles) and local (scanLocalFiles)',
+      w.hasEntry && !(w.missing || []).length && w.timer && w.every === 60000 && /watching for changes every 60 s/.test(w.statusAfterConnect) && JSON.stringify(w.scansAtConnect) === JSON.stringify(['codex', 'copilot-cli']) && JSON.stringify(w.localAtConnect) === JSON.stringify(['local']),
+      JSON.stringify({ missing: w.missing, timer: w.timer, every: w.every, status: w.statusAfterConnect, scans: w.scansAtConnect, local: w.localAtConnect }));
+    ok('watch (w1): codex\'s newestMtime moved → ONE _collectorTick: GET /api/status (no ?refresh), /api/list?tool=codex, its 4 files — scanFiles exactly once, for codex; scanLocalFiles never; local / copilot-cli entries untouched; codex rows unchanged, its entry re-synced; collector label "3 tools · 8 files", err null, line "checked … watching"; codex table row shows the new last change; token never in the DOM',
+      w.hasEntry && w.ret === true && JSON.stringify(w.scans) === JSON.stringify(['codex']) && w.localScans.length === 0 && w.reqs[0] === '/api/status' && w.reqs.filter(p => /^\/api\/status/.test(p)).length === 1 && !w.reqs.some(p => /refresh/.test(p))
+      && w.reqs.filter(p => /^\/api\/list/.test(p)).length === 1 && w.reqs.includes('/api/list?tool=codex') && w.reqs.filter(mtimeOk).length === 4 && w.reqs.length === 6 && w.allBearer
+      && w.labels.collector === '3 tools · 8 files' && w.labels.codex === '4 files · via collector' && w.labels.local === '2 log files · via collector' && w.err === null && w.status === 'ok' && /Connected/.test(w.statusText) && /checked/.test(w.statusText) && /watching for changes every 60 s/.test(w.statusText)
+      && eq(w.codexRows, w.codexRowsBefore) && w.codexMoved && w.localUntouched && w.copilotUntouched && w.codexNewest !== w.codexNewestBefore && w.codexCell === '4 files' && w.timerStill && !w.tokenInDom,
+      JSON.stringify({ ret: w.ret, scans: w.scans, local: w.localScans, reqs: w.reqs, labels: w.labels, err: w.err, status: w.status, text: w.statusText, moved: w.codexMoved, untouched: [w.localUntouched, w.copilotUntouched], newest: [w.codexNewestBefore, w.codexNewest], cell: w.codexCell }));
+    ok('watch (w2): unchanged status → the tick reads /api/status only — no list, no file, no scan; label kept, line re-stamped',
+      w.hasEntry && w.unchanged && w.unchanged.scans.length === 0 && w.unchanged.localScans.length === 0 && JSON.stringify(w.unchanged.reqs) === JSON.stringify(['/api/status']) && w.unchanged.label === '3 tools · 8 files' && /checked/.test(w.unchanged.statusText), JSON.stringify(w.unchanged));
+    ok('watch (w3): document.hidden → the tick is skipped entirely (no request, no scan, label kept)',
+      w.hasEntry && w.hidden && w.hidden.scans.length === 0 && w.hidden.reqs.length === 0 && w.hidden.restored && w.hidden.label === '3 tools · 8 files', JSON.stringify(w.hidden));
+    ok('watch (w4): a 401 tick → collector err "Token rejected …" (warn), line says so, the watch keeps running, no scan; the tools\' entries, rows and table stay; a network failure likewise keeps the entry ("Not running at …", warn); the next good tick clears the err (ok, "watching") and reads codex (moved during the outage)',
+      w.hasEntry && w.e401 && w.e401.err === 'Token rejected — copy the token the collector printed' && w.e401.status === 'warn' && /Token rejected/.test(w.e401.statusText) && w.e401.timer && eq(w.e401.codexRows, w.codexRows) && w.e401.localRows > 0
+      && w.e401.codexLabel === '4 files · via collector' && w.e401.codexErr === null && w.e401.scans.length === 0 && JSON.stringify(w.e401.reqs) === JSON.stringify(['/api/status']) && w.e401.tableRows === 5
+      && w.down && /^Not running at http:\/\/127\.0\.0\.1:11436/.test(w.down.err || '') && w.down.status === 'warn' && w.down.entry && /Not running at/.test(w.down.statusText) && eq(w.down.codexRows, w.codexRows) && w.down.timer
+      && w.recovered && w.recovered.err === null && w.recovered.status === 'ok' && /Connected/.test(w.recovered.statusText) && /watching for changes every 60 s/.test(w.recovered.statusText) && JSON.stringify(w.recovered.scans) === JSON.stringify(['codex']) && w.recovered.label === '3 tools · 8 files',
+      JSON.stringify({ e401: w.e401, down: w.down, recovered: w.recovered }));
+    ok('watch (w5): a tool that newly appears (cline: found flips true) is read on the next tick — scanFiles once, for cline; in=1700 cw=100 cr=900 out=380 msgs=2 (87-folder-logs), "2 files · via collector", its Re-scan button shown; collector label "4 tools · 11 files"; table cell "3 files"',
+      w.hasEntry && w.appeared && JSON.stringify(w.appeared.scans) === JSON.stringify(['cline']) && w.appeared.localScans.length === 0 && is(w.appeared.cline, 1700, 100, 900, 380, 2) && w.appeared.clineLabel === '2 files · via collector'
+      && w.appeared.collectorLabel === '4 tools · 11 files' && w.appeared.reqs.filter(p => /^\/api\/list/.test(p)).length === 1 && w.appeared.reqs.includes('/api/list?tool=cline') && w.appeared.reqs.filter(p => /^\/api\/file\?tool=cline/.test(p)).length === 3
+      && w.appeared.clineRescan === false && /via collector/.test(w.appeared.clineStatus) && w.appeared.clineCell === '3 files', JSON.stringify(w.appeared));
+
+    // (w6) Re-scan routing while connected, the real rescanViaCollector, hub Sync, disconnect (watch stopped, buttons revert, a later tick is a no-op)
+    const w6 = await page.evaluate(async (fx) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {};
+      const c = connectorById('collector'); if (!c || typeof App.rescanViaCollector !== 'function' || typeof App._collectorTick !== 'function') return { hasEntry: false };
+      const origFetch = window.fetch, origVia = App.rescanViaCollector, origFolder = App.rescanFolder, origScan = App.scanFiles, origLocal = App.scanLocalFiles;
+      const opts = { token: 'tok-abc', mtime: {} };
+      const reqs = window.__collectorStub(fx, opts);
+      const via = [], folder = [], scans = [], localScans = [];
+      const spyRoutes = () => { via.length = 0; folder.length = 0; App.rescanViaCollector = async function (id) { via.push(id); }; App.rescanFolder = async function (id) { folder.push(id); }; };
+      const unspyRoutes = () => { App.rescanViaCollector = origVia; App.rescanFolder = origFolder; };
+      const btn = (id) => (document.getElementById(id) || {}).hidden;
+      try {
+        document.getElementById('collector-key').value = 'tok-abc'; document.getElementById('remember-collector').checked = false;
+        await App.connectCollector(c);
+        const out = { hasEntry: true, buttons: { codex: btn('codex-rescan'), local: btn('rescan-local'), copilot: btn('copilot-cli-rescan'), cline: btn('cline-rescan') }, timer: !!App._pollTimers.collector };
+        spyRoutes();
+        document.getElementById('codex-rescan').click(); document.getElementById('rescan-local').click();
+        await new Promise(r => setTimeout(r, 5));
+        out.connected = { via: via.slice(), folder: folder.slice() };
+        unspyRoutes();
+        App.scanFiles = function (cc, files, o) { scans.push(cc.id); return origScan.call(this, cc, files, o); };
+        App.scanLocalFiles = function (files, o) { localScans.push('local'); return origLocal.call(this, files, o); };
+        reqs.length = 0;
+        const ret = await App.rescanViaCollector('codex');
+        out.real = { ret, scans: scans.slice(), localScans: localScans.slice(), reqs: reqs.map(r => r.path), codex: __sum(Store.sources.codex.rows), codexLabel: Store.connectors.codex.label, codexStatus: document.getElementById('codex-status').textContent,
+          collectorLabel: Store.connectors.collector.label, collectorStatus: document.getElementById('collector-status').textContent, codexBtn: btn('codex-rescan'), timer: !!App._pollTimers.collector };
+        App.scanFiles = origScan; App.scanLocalFiles = origLocal;
+        spyRoutes();
+        await App.syncConnector('codex');
+        out.sync = { via: via.slice(), folder: folder.slice() };
+        unspyRoutes();
+        App.disconnectConnector('collector');
+        out.after = { timer: !!App._pollTimers.collector, buttons: { codex: btn('codex-rescan'), local: btn('rescan-local'), copilot: btn('copilot-cli-rescan') }, codexEntry: !!Store.connectors.codex, codexRows: ((Store.sources.codex || {}).rows || []).length, entry: !!Store.connectors.collector };
+        spyRoutes();
+        document.getElementById('codex-rescan').click();
+        await new Promise(r => setTimeout(r, 5));
+        out.after.click = { via: via.slice(), folder: folder.slice() };
+        unspyRoutes();
+        App.scanFiles = function (cc, files, o) { scans.push(cc.id); return origScan.call(this, cc, files, o); };
+        scans.length = 0; reqs.length = 0; opts.mtime.codex = 1758000000000;
+        const tick = await App._collectorTick(c);
+        out.after.tick = { ret: tick, scans: scans.slice(), reqs: reqs.map(r => r.path), entry: !!Store.connectors.collector, timer: !!App._pollTimers.collector, statusText: document.getElementById('collector-status').textContent };
+        return out;
+      } finally { window.fetch = origFetch; App.rescanViaCollector = origVia; App.rescanFolder = origFolder; App.scanFiles = origScan; App.scanLocalFiles = origLocal; if (App.stopCollectorWatch) App.stopCollectorWatch(c); }
+    }, fx);
+    ok('watch (w6): while the collector is connected every collector-fed tool card shows Re-scan (codex, copilot-cli, Claude Code; cline — not found — stays hidden) and the button calls App.rescanViaCollector(id) (codex; Claude Code\'s rescan() routes to "local"), never rescanFolder',
+      w6.hasEntry && w6.buttons.codex === false && w6.buttons.local === false && w6.buttons.copilot === false && w6.buttons.cline === true && w6.timer && JSON.stringify(w6.connected.via) === JSON.stringify(['codex', 'local']) && w6.connected.folder.length === 0,
+      JSON.stringify({ buttons: w6.buttons, connected: w6.connected }));
+    ok('watch (w6): App.rescanViaCollector("codex") re-lists and scans codex only (1 list, no /api/status; scanFiles once, for codex; NO /api/file — the 4 unchanged files hit the ScanCache, the incremental proof), the codex card reads "via collector", the collector line/label follow ("3 tools · 8 files", "checked … watching"), the watch keeps running; hub Sync on codex routes to the collector too',
+      w6.hasEntry && w6.real && w6.real.ret === true && JSON.stringify(w6.real.scans) === JSON.stringify(['codex']) && w6.real.localScans.length === 0 && !w6.real.reqs.some(p => /status/.test(p)) && JSON.stringify(w6.real.reqs.filter(p => /list/.test(p))) === JSON.stringify(['/api/list?tool=codex'])
+      && w6.real.reqs.filter(p => /^\/api\/file\?/.test(p)).length === 0 && w6.real.reqs.length === 1 && w6.real.codex.msgs > 0 && w6.real.codexLabel === '4 files · via collector' && /via collector/.test(w6.real.codexStatus) && w6.real.collectorLabel === '3 tools · 8 files'
+      && /checked/.test(w6.real.collectorStatus) && /watching for changes every 60 s/.test(w6.real.collectorStatus) && w6.real.codexBtn === false && w6.real.timer && JSON.stringify(w6.sync.via) === JSON.stringify(['codex']) && w6.sync.folder.length === 0,
+      JSON.stringify({ real: w6.real, sync: w6.sync }));
+    ok('watch (w6): disconnectConnector("collector") stops the watch (no timer), the tools keep their entries and rows, the Re-scan buttons revert to the folder-handle rule (no handle → hidden) and a click now calls rescanFolder; a later tick is a no-op (no request, no scan, no entry re-created, no timer)',
+      w6.hasEntry && w6.after && w6.after.timer === false && !w6.after.entry && w6.after.buttons.codex === true && w6.after.buttons.local === true && w6.after.buttons.copilot === true && w6.after.codexEntry && w6.after.codexRows > 0
+      && JSON.stringify(w6.after.click.folder) === JSON.stringify(['codex']) && w6.after.click.via.length === 0
+      && w6.after.tick.ret === undefined && w6.after.tick.scans.length === 0 && w6.after.tick.reqs.length === 0 && !w6.after.tick.entry && !w6.after.tick.timer && w6.after.tick.statusText === 'Not connected.', JSON.stringify(w6.after));
+
+    // (w7) restore on init: a restored collector entry + a remembered token → the watch starts at init (no request until the first tick); without a token → Reconnect guidance, no watch
+    await page.evaluate(() => {
+      Store.sources = {}; Store.connectors = {}; Store.setConnector('collector', { label: '3 tools · 8 files', lastSync: Date.now() - 60000, err: null });
+      LS.set('key:collector', 'tok-abc'); LS.set('url:collector', 'http://127.0.0.1:11436');
+    });
+    await page.reload({ waitUntil: 'load' });
+    const w7 = await page.evaluate(async () => {
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));   // let the batched first render (and _syncStatusLine) run
+      return { timer: !!(App._pollTimers && App._pollTimers.collector), entry: !!Store.connectors.collector, status: Store.connectorStatus(connectorById('collector')), statusText: document.getElementById('collector-status').textContent,
+        key: document.getElementById('collector-key').value, rem: document.getElementById('remember-collector').checked, tokenInDom: document.documentElement.outerHTML.includes('tok-abc'),
+        hubActions: [...document.querySelectorAll('#accounts-hub .acct[data-connector="collector"] .acct-actions button')].map(b => b.textContent) };
+    });
+    ok('watch (w7): reload with a restored collector entry AND a remembered token → the watch is running right after init (App._pollTimers.collector), line "● Connected (stored data …) · watching for changes every 60 s", token restored into the input (Remember checked), never in the DOM; hub Manage / Sync / Disconnect',
+      w7.timer && w7.entry && w7.status === 'ok' && /Connected/.test(w7.statusText) && /stored data/.test(w7.statusText) && /watching for changes every 60 s/.test(w7.statusText) && w7.key === 'tok-abc' && w7.rem === true && !w7.tokenInDom
+      && JSON.stringify(w7.hubActions) === JSON.stringify(['Manage', 'Sync', 'Disconnect']), JSON.stringify(w7));
+    await page.evaluate(() => { LS.del('key:collector'); });
+    await page.reload({ waitUntil: 'load' });
+    const w8 = await page.evaluate(async () => {
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+      const out = { timer: !!(App._pollTimers && App._pollTimers.collector), entry: !!Store.connectors.collector, statusText: document.getElementById('collector-status').textContent, key: document.getElementById('collector-key').value };
+      Store.connectors = {}; Store.persist();
+      return out;
+    });
+    ok('watch (w8): reload with a restored entry but NO remembered token → no watch, the card says "Reconnect: paste the collector token and click Validate & connect …" (the entry and the tools\' stored data stay)',
+      !w8.timer && w8.entry && /^Reconnect: paste the collector token and click Validate & connect/.test(w8.statusText) && w8.key === '', JSON.stringify(w8));
 
     ok('collector: no page errors during the collector checks', errors.length === 0, errors.join(' | '));
   } finally {
