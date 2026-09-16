@@ -38,6 +38,28 @@ export async function run({ browser, ok }) {
       return { hoursNote: document.getElementById('ins-hours').textContent, cards: document.querySelectorAll('#insights .insight').length };
     });
     ok('insights-ui: empty data degrades to notes, not errors', empty.cards === 7 && /no timestamped|no data/i.test(empty.hoursNote), JSON.stringify(empty));
+
+    // Plan 6 (v6-unpriced): breakdown rows whose model no price row matches carry a "fallback price" badge; local rows never do
+    const badge = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      App.filters.range = '30'; App._drill = null; App.filters.hiddenPlatforms = new Set();
+      const r = (platform, model, extra = {}) => ({ d: '2026-08-10', platform, model, in: 1000, cw: 0, cr: 0, out: 0, msgs: 1, ...extra });
+      Store.setSource('codex', [r('OpenAI Codex CLI', 'gpt-6-astra'), r('Cline', 'weird-local-model', { local: 1 })], {});
+      Store.setSource('anthropic', [r('Anthropic API', 'claude-sonnet-5')], {});
+      Store.setSource('ollama', [r('Ollama', 'llama-mystery')], {});
+      App._render();
+      const out = {};
+      for (const tr of document.querySelectorAll('#breakdown-table tbody tr:not(.total)')) {
+        const name = tr.querySelector('td.name'); const b = name.querySelector('.badge.fallback-price');
+        out[[...name.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim()] = b ? b.title : false;
+      }
+      Store.sources = {};
+      return out;
+    });
+    ok('breakdown: "fallback price" badge on gpt-6-astra (with the add-a-row hint), none on claude-sonnet-5',
+      /No price row matches this model/.test(badge['gpt-6-astra']) && /API price list/.test(badge['gpt-6-astra']) && badge['claude-sonnet-5'] === false, JSON.stringify(badge));
+    ok('breakdown: local rows are never flagged (Ollama platform row; Cline row with local:1)',
+      badge['llama-mystery'] === false && badge['weird-local-model'] === false, JSON.stringify(badge));
   } finally {
     await page.close();
   }

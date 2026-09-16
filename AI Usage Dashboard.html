@@ -217,6 +217,8 @@ input[type="date"], input[type="text"], input[type="password"], input[type="sear
 #alerts .alert { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin: 0 0 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-1); font-size: 13px; }
 #alerts .alert.serious { border-left: 4px solid var(--serious); } #alerts .alert.critical { border-left: 4px solid var(--critical); }
 #alerts .alert .alert-dismiss { margin-left: auto; }
+#alerts .alert .alert-action { margin-left: auto; } #alerts .alert .alert-action + .alert-dismiss { margin-left: 0; }   /* Plan 6: "Set prices" sits beside Dismiss on the unpriced-models notice */
+#breakdown-table td.name .badge.fallback-price { font-size: 9px; padding: 0 5px; margin-left: 6px; color: var(--serious); vertical-align: middle; }   /* Plan 6: model priced at the '.*' fallback row */
 .budget-row { display: grid; grid-template-columns: 1fr 120px 1fr; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--grid); }
 .budget-row:first-child { border-top: 0; }
 .budget-bar { height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; margin-top: 6px; }
@@ -987,6 +989,10 @@ const Pricing = {
   load() { this.rows = LS.get('prices', null) || JSON.parse(JSON.stringify(DEFAULT_PRICES)); this._cache.clear(); },
   save() { LS.set('prices', this.rows); this._cache.clear(); },
   reset() { this.rows = JSON.parse(JSON.stringify(DEFAULT_PRICES)); this.save(); },
+  /** Plan 6: the catch-all row — the one whose pattern is '.*' (a user may edit or reorder the list), else the last row (what resolve() falls back to). */
+  fallbackRow() { return this.rows.find(r => r.pat === '.*') || this.rows[this.rows.length - 1] || null; },
+  /** true when resolve(model) lands on the fallback row, i.e. NO price row knows this id — the price is a guess, and every surface says so. */
+  isFallback(model) { const hit = this.resolve(model); return hit === this.fallbackRow() || !this.rows.includes(hit); },
   resolve(model) {
     const m = String(model || '').toLowerCase();
     if (this._cache.has(m)) return this._cache.get(m);
@@ -1129,7 +1135,8 @@ const Budgets = {
     for (const [p, s] of Object.entries(st.byPlatform)) consider(p, s, p);
     return list;
   },
-  dismiss(kind, today) { const d = LS.get('dismissedAlerts', {}); d[`${kind}:${this.monthKey(today)}`] = Date.now(); LS.set('dismissedAlerts', d); },
+  dismiss(kind, today) { this.dismissKey(`${kind}:${this.monthKey(today)}`); },
+  dismissKey(key) { const d = LS.get('dismissedAlerts', {}); d[key] = Date.now(); LS.set('dismissedAlerts', d); },   // Plan 6: the unpriced notice keys on the SET of model names, not the month
 };
 
 /* =================================================================
@@ -4522,15 +4529,53 @@ const App = {
   renderAlerts() {
     const box = clear($('alerts'));
     const all = Budgets.alerts();
+    const un = this.unpricedAlert(); if (un) all.unshift(un);   // Plan 6: first — it qualifies the spend numbers the budget alerts are built on
     const MAX = 4;
     for (const a of all.slice(0, MAX)) {
       const n = el('div', { class: 'alert ' + a.level, 'data-kind': a.kind, role: 'status' },
         el('span', { text: (a.level === 'critical' ? '⛔ ' : '⚠ ') + a.msg }),
-        el('button', { class: 'btn small alert-dismiss', text: 'Dismiss', onclick: () => { Budgets.dismiss(a.kind); this.render(); } }));
+        a.kind === 'unpriced' ? el('button', { class: 'btn small alert-action', text: 'Set prices', onclick: () => this.showPricing() }) : null,
+        el('button', { class: 'btn small alert-dismiss', text: 'Dismiss', onclick: () => { if (a.key) Budgets.dismissKey(a.key); else Budgets.dismiss(a.kind); this.render(); } }));
       box.appendChild(n);
     }
     if (all.length > MAX) box.appendChild(el('div', { class: 'note', text: `+${all.length - MAX} more — see Budgets` }));
   },
+  /* ---------- Plan 6: unpriced models — models the price list does not know are priced at the fallback row; say so, never guess silently ---------- */
+  /** Rows whose model id resolves to the fallback ('.*') row, grouped by model → [{ model, platforms: [..], msgs, tokens, cost }] sorted by
+   *  cost desc. Local rows (platform in LOCAL_PLATFORMS, or local:1 from a coding-tool parser) are $0 by rule and are never "guessed", so
+   *  they are skipped. Totals and KPIs are NOT changed — the fallback price still applies; this only names what was guessed. */
+  unpricedModels(rows) {
+    const by = new Map();
+    for (const r of rows) {
+      if (r.local || LOCAL_PLATFORMS.has(r.platform) || !Pricing.isFallback(r.model)) continue;
+      const m = String(r.model || '');
+      let e = by.get(m);
+      if (!e) { e = { model: m, platforms: [], msgs: 0, tokens: 0, cost: 0 }; by.set(m, e); }
+      if (!e.platforms.includes(r.platform)) e.platforms.push(r.platform);
+      e.msgs += r.msgs || 0; e.tokens += (r.in || 0) + (r.cw || 0) + (r.cr || 0) + (r.out || 0); e.cost += Pricing.cost(r.model, r);
+    }
+    return [...by.values()].sort((a, b) => b.cost - a.cost);
+  },
+  /** The #alerts notice, over ALL stored rows (like Budgets.alerts — it is about the price list vs the data you have, not the
+   *  date window). The fallback prices are read from the fallback row. Dismissal keys on the sorted SET of model names
+   *  ('unpriced:<a,b,c>' in LS 'dismissedAlerts'), so a new unknown model re-raises it. Text reaches the DOM via textContent. */
+  unpricedAlert() {
+    const list = this.unpricedModels(Store.allRows());
+    if (!list.length) return null;
+    const key = 'unpriced:' + list.map(u => u.model).sort().join(',');
+    if (LS.get('dismissedAlerts', {})[key]) return null;
+    const fb = Pricing.fallbackRow() || { in: 0, out: 0 };
+    const n = list.length, MAXN = 5;
+    const shown = list.slice(0, MAXN).map(u => `${u.model || '(no model id)'} (${fmtCompact(u.msgs)} msg${u.msgs === 1 ? '' : 's'}, ${fmtUSD(u.cost)})`);
+    const msg = `${n} model${n === 1 ? ' is' : 's are'} priced at the fallback rate ($${+fb.in || 0} in / $${+fb.out || 0} out per M): ${shown.join(', ')}${n > MAXN ? `, +${n - MAXN} more` : ''} — set their prices in the API price list.`;
+    return { kind: 'unpriced', key, msg, level: 'serious', models: list };
+  },
+  /** "Set prices" — expand the price list section if it is collapsed and bring it into view. */
+  showPricing() {
+    View._del('collapsed', 'pricing'); this.applyCollapse();
+    const head = $('pricing-title'); if (head) head.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
   renderBudgets() {
     const box = clear($('budget-editor'));
     const st = Budgets.status();
@@ -4645,7 +4690,9 @@ const App = {
     const p = Insights.projection(this.visibleRows(), costOf, todayKey());
     const w = Insights.weekOverWeek(this.visibleRows(), costOf, todayKey());
     const S = [];
-    S.push(`You used ${fmtCompact(tok)} tokens across ${fmtCompact(msgs)} messages, worth about ${fmtUSD(cost)} at API list prices.`);
+    // Plan 6: disclose the share of that figure that is only a guess (models no price row matches, priced at the fallback row)
+    const un = this.unpricedModels(rows), unCost = un.reduce((s, u) => s + u.cost, 0);
+    S.push(`You used ${fmtCompact(tok)} tokens across ${fmtCompact(msgs)} messages, worth about ${fmtUSD(cost)} at API list prices${unCost > 0 ? ` — ${fmtUSD(unCost)} of that is guessed at the fallback rate for ${un.length} unpriced model${un.length === 1 ? '' : 's'}` : ''}.`);
     if (tm && cost > 0) S.push(`${tm[0]} was the biggest line item at ${fmtUSD(tm[1])} (${Math.round(tm[1] / cost * 100)}% of spend)${tp ? `, and ${tp[0]} was the top platform` : ''}.`);
     if (td) S.push(`Your busiest day was ${fmtDayShort(td[0])} at ${fmtUSD(td[1])}.`);
     if (w.lastWeek > 0 || w.thisWeek > 0) S.push(`This week to date is ${w.pct === 0 ? 'flat' : (w.pct > 0 ? 'up ' : 'down ') + Math.abs(w.pct) + '%'} versus the same days last week.`);
@@ -5271,9 +5318,10 @@ const App = {
     for (const r of rows) {
       const k = r.platform + ' ' + r.model;
       let b = map.get(k);
-      if (!b) { b = { platform: r.platform, model: r.model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0, est: 0, cost: 0 }; map.set(k, b); }
+      if (!b) { b = { platform: r.platform, model: r.model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0, est: 0, cost: 0, priced: 0 }; map.set(k, b); }
       b.in += r.in || 0; b.cw += r.cw || 0; b.cr += r.cr || 0; b.out += r.out || 0; b.msgs += r.msgs || 0;
       b.cost += Pricing.cost(r.model, r);   // per ROW: a local:1 row ($0) and a hosted row of the same platform/model share a line without repricing each other
+      if (!(r.local || LOCAL_PLATFORMS.has(r.platform))) b.priced = 1;   // Plan 6: at least one row on this line is actually priced (local rows are $0 by rule, never a guess)
       if (r.est) b.est = 1;
     }
     const list = [...map.values()].sort((a, b) => b.cost - a.cost);
@@ -5287,7 +5335,8 @@ const App = {
       tbody.appendChild(el('tr', {},
         el('td', { class: 'name' },
           el('span', { class: 'swdot', style: { background: ColorMap.colorOf('platform', b.platform, candidates) } }),
-          document.createTextNode(b.model + (b.est ? ' (est.)' : ''))),
+          document.createTextNode(b.model + (b.est ? ' (est.)' : '')),
+          b.priced && Pricing.isFallback(b.model) ? el('span', { class: 'badge fallback-price', text: 'fallback price', title: 'No price row matches this model — priced at the Unknown-model row; add a row in the API price list' }) : null),   // Plan 6
         el('td', { text: b.platform }),
         el('td', { text: fmtCompact(b.in) }),
         el('td', { text: fmtCompact(b.cw) }),

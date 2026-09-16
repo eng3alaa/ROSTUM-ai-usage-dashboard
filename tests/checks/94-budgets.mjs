@@ -104,6 +104,86 @@ export async function run({ browser, ok }) {
       return Budgets.limits.total === undefined && !('total' in Budgets.limits);
     });
     ok('budgets: non-finite input is rejected, not stored as Infinity', inf, String(inf));
+
+    // Plan 6 (v6-unpriced): model ids no price row matches are priced at the '.*' fallback row — the dashboard must SAY so
+    // (never guess silently). Local rows are $0 by platform / local:1 and are never "guessed".
+    const un = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; Budgets.limits = {}; LS.del('budgets'); LS.set('dismissedAlerts', {});
+      App._drill = null; App.filters.hiddenPlatforms = new Set();
+      Store.setSource('codex', [
+        { d: todayKey(), platform: 'OpenAI Codex CLI', model: 'gpt-6-astra', in: 1_000_000, cw: 0, cr: 0, out: 100_000, msgs: 5730 },   // $3 + $1.50 at the fallback row
+        { d: todayKey(), platform: 'OpenAI Codex CLI', model: 'codex-auto-review', in: 100_000, cw: 0, cr: 0, out: 0, msgs: 3 },         // $0.30
+      ], {});
+      Store.setSource('anthropic', [{ d: todayKey(), platform: 'Anthropic API', model: 'claude-sonnet-5', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 1 }], {});   // priced: $2
+      Store.setSource('ollama', [{ d: todayKey(), platform: 'Ollama', model: 'llama-mystery', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 9 }], {});               // local: $0, never flagged
+      App._render();
+      const list = App.unpricedModels(Store.allRows());
+      const a = document.querySelector('#alerts .alert[data-kind="unpriced"]');
+      const total = [...document.querySelectorAll('#breakdown-table tr.total td')].pop();
+      return {
+        isFb: [Pricing.isFallback('gpt-6-astra'), Pricing.isFallback('claude-sonnet-5'), Pricing.isFallback('llama-mystery')],
+        list: list.map(u => [u.model, u.platforms.join('|'), u.msgs, u.tokens, +u.cost.toFixed(2)]),
+        text: a ? a.textContent : null, level: a && a.className,
+        buttons: a ? [...a.querySelectorAll('button')].map(b => b.textContent) : [],
+        total: total && total.textContent,
+      };
+    });
+    ok('unpriced: Pricing.isFallback is true only for ids no price row matches',
+      un.isFb[0] === true && un.isFb[1] === false && un.isFb[2] === true, JSON.stringify(un.isFb));
+    ok('unpriced: App.unpricedModels lists fallback-priced non-local models by cost desc (local Ollama row excluded)',
+      JSON.stringify(un.list) === JSON.stringify([['gpt-6-astra', 'OpenAI Codex CLI', 5730, 1_100_000, 4.5], ['codex-auto-review', 'OpenAI Codex CLI', 3, 100_000, 0.3]]), JSON.stringify(un.list));
+    ok('unpriced: alert banner names the models, the fallback prices and the price list, with Set prices + Dismiss',
+      !!un.text && /2 models are priced at the fallback rate \(\$3 in \/ \$15 out per M\): gpt-6-astra \(5,730 msgs, \$4\.50\), codex-auto-review \(3 msgs, \$0\.300\) — set their prices in the API price list\./.test(un.text) && /serious/.test(un.level) && un.buttons.join() === 'Set prices,Dismiss',
+      JSON.stringify([un.text, un.level, un.buttons]));
+    ok('unpriced: totals unchanged — the fallback price is still applied (breakdown total $6.80)', un.total === '$6.80', String(un.total));
+
+    const fbRow = await page.evaluate(() => {
+      const fb = Pricing.rows.find(r => r.pat === '.*'); const was = fb.in; fb.in = 4; Pricing.save();
+      App._render();
+      const t = document.querySelector('#alerts .alert[data-kind="unpriced"]').textContent;
+      fb.in = was; Pricing.save(); App._render();
+      return t;
+    });
+    ok('unpriced: the fallback prices in the banner are read from the ".*" row, not hard-coded',
+      /\(\$4 in \/ \$15 out per M\)/.test(fbRow) && /gpt-6-astra \(5,730 msgs, \$5\.50\)/.test(fbRow), fbRow);
+
+    const cap = await page.evaluate(() => {
+      Store.setSource('csv', ['u1', 'u2', 'u3', 'u4', 'u5'].map(m => ({ d: todayKey(), platform: 'Gemini', model: m, in: 1000, cw: 0, cr: 0, out: 0, msgs: 1 })), {});
+      App._render();
+      const t = document.querySelector('#alerts .alert[data-kind="unpriced"]').textContent;
+      delete Store.sources.csv; App._render();
+      return t;
+    });
+    ok('unpriced: the model list is capped at 5 with "+N more"',
+      /7 models are priced/.test(cap) && /codex-auto-review \(3 msgs, \$0\.300\), u1 \(1 msg, \$0\.003\), u2 \(1 msg, \$0\.003\), u3 \(1 msg, \$0\.003\), \+2 more — set their prices/.test(cap) && !/u4|u5/.test(cap), cap);
+
+    const dis = await page.evaluate(() => {
+      document.querySelector('#alerts .alert[data-kind="unpriced"] .alert-dismiss').click();
+      App._render();
+      const gone = !document.querySelector('#alerts .alert[data-kind="unpriced"]');
+      const keys = Object.keys(LS.get('dismissedAlerts', {}));
+      // a NEW unknown model re-raises the notice: the dismissal is for the SET of names, not forever
+      Store.setSource('codex2', [{ d: todayKey(), platform: 'OpenAI Codex CLI', model: 'codex', in: 1000, cw: 0, cr: 0, out: 0, msgs: 1 }], {});
+      App._render();
+      const back = document.querySelector('#alerts .alert[data-kind="unpriced"]');
+      return { gone, keys, back: back ? back.textContent : null };
+    });
+    ok('unpriced: Dismiss hides the notice and persists it for the SET of model names',
+      dis.gone && dis.keys.length === 1 && dis.keys[0] === 'unpriced:codex-auto-review,gpt-6-astra', JSON.stringify(dis));
+    ok('unpriced: a new unknown model re-raises the notice', !!dis.back && /3 models are priced/.test(dis.back) && /codex \(1 msg, \$0\.003\)/.test(dis.back), String(dis.back));
+
+    const sp = await page.evaluate(() => {
+      View._add('collapsed', 'pricing'); App.applyCollapse();
+      const before = document.getElementById('card-pricing').classList.contains('sec-collapsed');
+      const orig = Element.prototype.scrollIntoView; let scrolledTo = null;
+      Element.prototype.scrollIntoView = function () { scrolledTo = this.id; };
+      try { [...document.querySelectorAll('#alerts .alert[data-kind="unpriced"] button')].find(b => b.textContent === 'Set prices').click(); }
+      finally { Element.prototype.scrollIntoView = orig; }
+      const after = document.getElementById('card-pricing').classList.contains('sec-collapsed');
+      LS.set('dismissedAlerts', {}); Store.sources = {};
+      return { before, after, collapsed: View.isCollapsed('pricing'), scrolledTo };
+    });
+    ok('unpriced: "Set prices" expands a collapsed price list and scrolls to it', sp.before && !sp.after && !sp.collapsed && sp.scrolledTo === 'pricing-title', JSON.stringify(sp));
   } finally {
     await page.close();
   }

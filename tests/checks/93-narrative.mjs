@@ -51,6 +51,26 @@ export async function run({ browser, ok }) {
     });
     ok('narrative: budget sentence qualifies scope when filtered',
       /across all platforms/i.test(scoped.drilled) && !/across all platforms/i.test(scoped.undrilled), JSON.stringify(scoped));
+
+    // Plan 6 (v6-unpriced): the list-price sentence must disclose the share that is only a fallback-row guess
+    const unp = await page.evaluate(() => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      App.filters.range = '30'; App._drill = null; App.filters.hiddenPlatforms = new Set();
+      Store.setSource('anthropic', [{ d: '2026-08-10', platform: 'Anthropic API', model: 'claude-sonnet-5', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 1 }], {});   // $2
+      Store.setSource('codex', [{ d: '2026-08-10', platform: 'OpenAI Codex CLI', model: 'gpt-6-astra', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 1 }], {});         // $3 at the fallback row
+      App._render();
+      const withUn = document.getElementById('narrative').textContent;
+      delete Store.sources.codex;
+      Store.setSource('ollama', [{ d: '2026-08-10', platform: 'Ollama', model: 'llama-mystery', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 1 }], {});   // local: $0, not a guess
+      App._render();
+      const without = document.getElementById('narrative').textContent;
+      Store.sources = {};
+      return { withUn, without };
+    });
+    ok('narrative: list-price sentence discloses the fallback-guessed share',
+      /worth about \$5\.00 at API list prices — \$3\.00 of that is guessed at the fallback rate for 1 unpriced model\./.test(unp.withUn), unp.withUn);
+    ok('narrative: no fallback qualifier without unpriced rows (a local unknown model is $0, not a guess)',
+      /worth about \$2\.00 at API list prices\./.test(unp.without) && !/guessed/.test(unp.without), unp.without);
   } finally {
     await page.close();
   }
