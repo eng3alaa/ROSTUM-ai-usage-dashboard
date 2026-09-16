@@ -11,7 +11,8 @@ Every number on the page is labeled with where it came from and how trustworthy 
 1. Double-click `AI Usage Dashboard.html`. It opens as a `file://` page — no server needed.
 2. Use **Chrome or Edge** for the full experience. Only the folder picker needs the File System Access API; dropping files works everywhere. In other browsers the folder buttons fall back to the classic folder chooser automatically. ZIP imports and Bedrock signing rely on `DecompressionStream` and WebCrypto, which current Chromium browsers provide on `file://` pages.
 3. In the **accounts hub** at the top, click **Connect** on a card and follow its instructions. The fastest wins:
-   - **Claude Code / Desktop** — pick your `.claude` folder. Exact tokens for every session.
+   - **Local collector (automatic)** — the fastest path for every coding tool and local runner that writes logs: run `node docs/tools/ai-usage-collector.mjs` once and every tool it finds on this machine connects by itself, no folder picking (see [Automatic mode](#automatic-mode)).
+   - **Claude Code / Desktop** — pick your `.claude` folder (or let the collector find it). Exact tokens for every session.
    - **Anthropic API / OpenAI API** — paste an Admin key: exact usage plus what you were actually billed.
    - Any coding tool that writes logs (Codex CLI, Copilot CLI, Cline, Continue, Gemini CLI, Roo, Aider, Junie) — pick its log folder.
 4. Folder choices, imported data and settings are remembered in the browser's storage for this file; API keys only if you tick **Remember key on this computer**, and cloud tokens never. Re-open the page any time; folder sources re-scan on demand (or on a timer with **Auto re-scan**).
@@ -20,13 +21,91 @@ The page is a single static file. Copy it anywhere, keep it on a USB stick, or o
 
 ---
 
+<a id="automatic-mode"></a>
+## 1b. Automatic mode: the local collector
+
+A `file://` page cannot read your disk on its own, which is why every folder-based card asks for a folder pick. The **local collector** removes that step. It is an optional, zero-dependency Node script (Node 20 or newer) that finds the standard log folders of the AI tools installed on this machine and serves them, read-only, to the dashboard on `127.0.0.1`. Without it nothing changes; with it, every tool it finds shows up connected and stays current by itself.
+
+**Start it**
+
+```bash
+node docs/tools/ai-usage-collector.mjs
+```
+
+It prints one line per tool (found or not, file count, size, watch mode), then the token and a ready-made URL:
+
+```
+Token: <64 hex characters>
+Open the dashboard: http://127.0.0.1:11436/?token=<token>
+listening on http://127.0.0.1:11436
+```
+
+The token is created on the first run and kept in `~/.ai-usage/collector.token` (`%USERPROFILE%\.ai-usage\collector.token` on Windows); later runs reuse it. Leave the collector running in that terminal; Ctrl+C stops it.
+
+**Use it — two ways**
+
+1. **Open the printed URL.** The collector serves the dashboard itself, so page and collector share one origin. The token is taken from the URL into the **Local collector (automatic)** card (first card in Coding tools) and removed from the address bar; click **Validate & connect** on that card — nothing to paste.
+2. **Keep your `file://` copy.** Open the **Local collector (automatic)** card, paste the token from the terminal (or from the token file), tick **Remember token on this computer** if you want it kept, and click **Validate & connect**. The Collector URL field defaults to `http://127.0.0.1:11436`; if you started the collector with `--port`, change it to the printed URL.
+
+Either way, each tool the collector finds connects under its own card — Claude Code / Desktop, OpenAI Codex CLI, GitHub Copilot CLI and so on — labelled **N files · via collector**, with exactly the rows, project rows and re-scan cache a folder pick would produce. The collector card shows `N tools · M files · checked <time>` and a table of every tool it looked for: root folder, file count (or *not found* / *found, nothing to read*) and the newest change.
+
+**What it discovers**
+
+| Tool id | Card | Folder(s) looked for |
+|---|---|---|
+| `local` | Claude Code / Desktop | `~/.claude` (`CLAUDE_CONFIG_DIR` when set) |
+| `codex` | OpenAI Codex CLI | `~/.codex/sessions` and `~/.codex/archived_sessions` (`CODEX_HOME` when set) — only those two; the rest of `~/.codex` is never read |
+| `copilot-cli` | GitHub Copilot CLI (logs) | `~/.copilot` |
+| `gemini-cli` | Gemini CLI | `~/.gemini` (`GEMINI_CLI_HOME` when set) |
+| `continue` | Continue.dev | `~/.continue` |
+| `cline` | Cline (VS Code) | `globalStorage/saoudrizwan.claude-dev` under the user folder of VS Code, VS Code Insiders, Cursor, Windsurf or VSCodium — the first that exists |
+| `roo` | Roo Code (VS Code) | `…/globalStorage/rooveterinaryinc.roo-cline` and `…/globalStorage/kilocode.kilo-code`, same editors |
+| `junie` | JetBrains AI Assistant / Junie | `~/.junie` plus every `matterhorn` folder under the JetBrains cache (`%LOCALAPPDATA%\JetBrains`, `~/Library/Caches/JetBrains`, `~/.cache/JetBrains`) |
+| `lmstudio` | LM Studio | `~/.lmstudio/conversations` or `~/.cache/lm-studio/conversations` |
+| `ollama` | Ollama | `~/.ai-usage` (the usage logger's folder, §9) and the desktop app folder (`%LOCALAPPDATA%\Ollama`, `~/Library/Application Support/Ollama`, `~/.ollama`) |
+| `jan` | Jan | `%APPDATA%\Jan\data`, `~/Library/Application Support/Jan/data` or `~/.local/share/Jan/data` |
+| `aider`, `tgwebui` | Aider, text-generation-webui | no fixed folder — only with `--root` |
+
+A tool is *found* when its folder exists. *Found, nothing to read* means the folder is there but holds no file the card's parser recognises — normal for `ollama` when `~/.ai-usage` holds only the token file, or for a tool that has not logged anything yet.
+
+Flags: `--port <n>` (or `COLLECTOR_PORT`; default 11436; `0` picks a free port and prints it), `--root <id>=<path>` (use that folder for a tool instead of auto-discovery; repeatable; the only way to add `aider` or `tgwebui`), `--no-<id>` (skip a tool, e.g. `--no-ollama`), `--html <path>` (which dashboard file to serve at `/`), `--help`.
+
+**Automatic refresh**
+
+- The collector watches every found folder (`fs.watch`); a change marks that tool for a re-walk on its next status request. Where recursive watching is unavailable (some network shares, old kernels) that tool is re-walked when its counts are older than 30 s instead — the startup table says `watch polling`.
+- While the collector card is connected, the dashboard asks it for status **every 60 s** (skipped while the tab is hidden) and re-reads only the tools whose file count or newest change moved; unchanged files hit the scan cache, so a tick with nothing new costs one small request. **Refresh all** runs one such check now; a tool card's **Re-scan** / **Sync** goes through the collector while it feeds that card.
+- After a reload the watch resumes by itself only if the token was remembered; otherwise the card says *Reconnect* and the tools' stored data stays on screen until you paste the token again.
+- **Disconnect** on the collector card forgets the token and stops the watch; the tools keep their entries and data (their cards keep the *via collector* label until the next folder pick or Clear stored data).
+
+**Security**
+
+- Binds `127.0.0.1` only; nothing is reachable from other machines.
+- Every `/api/*` request needs the token (`Authorization: Bearer …`, or `?token=`), otherwise `401`. Without it any web page open in your browser could read the machine's AI transcripts through the port; the origin is deliberately not the gate (a `file://` page and a sandboxed iframe both have a `null` origin).
+- Read-only, and only inside the discovered roots (or the `--root` folders): paths with `..`, absolute paths and symbolic links are refused; the walk skips `node_modules`, `.git` and `checkpoints`; the token file is never listed or served.
+- The collector logs one line per request (method, path, status, bytes) — never file contents, never the token. The page sends the token only to the Collector URL on the card, as a header — never in a request URL, never into the page's HTML — and stores it only with **Remember token on this computer**.
+- What lands in the browser is exactly a folder pick's result: aggregated tokens per day / platform / model, no message text.
+
+**Two copies, two storages.** The page the collector serves (`http://127.0.0.1:11436`) and your `file://` copy are different origins, so each keeps its own browser storage: folder choices, imports, remembered keys and settings do not carry over between them. Pick one and stick with it (or export a CSV backup before switching).
+
+**Troubleshooting**
+
+| Symptom | What to do |
+|---|---|
+| Card says *Not running at http://127.0.0.1:11436* | Start it: `node docs/tools/ai-usage-collector.mjs` (Node 20+). If you used `--port`, put that URL in the card's Collector URL field. |
+| *Token rejected* | Copy the token from the terminal, or from `~/.ai-usage/collector.token`, and paste it again. Deleting that file makes the next start mint a new one. |
+| A tool is listed *found, nothing to read* | The folder exists but none of its files match what the card parses (§3 says what each tool must write) — the tool has not logged yet, or it logs elsewhere: point the collector there with `--root <id>=<path>`. |
+| `port 11436 is already in use` | Another collector (or something else) has the port: stop it, or start with `--port <n>` and change the card's Collector URL. |
+| Files change on disk but the dashboard lags | Ticks run every 60 s while the tab is visible; **Refresh all** checks now. Under `watch polling` the collector itself re-walks at most every 30 s. |
+
+---
+
 ## 2. The accounts hub
 
-Cards are grouped the way you use them (46 cards):
+Cards are grouped the way you use them (47 cards):
 
 | Group | Cards (as titled in the app) |
 |---|---|
-| Coding tools | Claude Code / Desktop, GitHub Copilot, OpenAI Codex CLI, Gemini CLI, GitHub Copilot CLI (logs), Continue.dev, Cline (VS Code), Roo Code (VS Code), Aider, JetBrains AI Assistant / Junie, Amazon Q / Kiro, Windsurf (Codeium) |
+| Coding tools | Local collector (automatic), Claude Code / Desktop, GitHub Copilot, OpenAI Codex CLI, Gemini CLI, GitHub Copilot CLI (logs), Continue.dev, Cline (VS Code), Roo Code (VS Code), Aider, JetBrains AI Assistant / Junie, Amazon Q / Kiro, Windsurf (Codeium) |
 | Chat apps | Claude Enterprise (org analytics), ChatGPT (web + desktop), Claude.ai (web + desktop), Grok (grok.com / X), Microsoft Copilot (consumer), Perplexity (app), Meta AI, DeepSeek chat, Imports |
 | Local runners | LM Studio, Ollama, LocalAI, vLLM, llama.cpp (llama-server), GPT4All, Jan, text-generation-webui |
 | API vendors | Anthropic API, OpenAI API, Gemini (Google AI), OpenRouter, Groq, Replicate, Mistral (La Plateforme), Cohere, Together AI, Hugging Face (Inference Providers), xAI API (Grok models), Perplexity API (Sonar), Fireworks AI, DeepSeek API |
@@ -60,9 +139,11 @@ Every card carries the full instructions (paths, what to paste, what the numbers
 
 ### Coding tools
 
+Every folder-based row below can also be fed by the **local collector** (§1b) — then you provide nothing (Aider needs a `--root`): the tool's card connects by itself with the label *via collector*.
+
 | Card | You provide | Quality | Notes |
 |---|---|---|---|
-| Claude Code / Desktop | the `.claude` folder (`%USERPROFILE%\.claude` / `~/.claude`) | exact (no badge) | Per-message input, output, cache-write and cache-read tokens from `projects/**/*.jsonl`; projects table; re-scan only reads changed files. |
+| Claude Code / Desktop | the `.claude` folder (`%USERPROFILE%\.claude` / `~/.claude`) — or nothing, with the local collector running | exact (no badge) | Per-message input, output, cache-write and cache-read tokens from `projects/**/*.jsonl`; projects table; re-scan only reads changed files. |
 | GitHub Copilot | a GitHub PAT | best-effort usage | GitHub's billing usage for Copilot: premium-request counts and net billed amounts — never tokens. |
 | OpenAI Codex CLI | `~/.codex` (sessions + archived_sessions) | exact | Per-turn usage from `rollout-*.jsonl`; resumed sessions and repeated snapshots never double count. |
 | Gemini CLI | `~/.gemini` or `~/.gemini/tmp` | exact | `chats/session-*.json`. The CLI prunes sessions after 30 days / 50 files by default — a re-scan counts only what is still on disk. |
@@ -183,6 +264,7 @@ Each major section header has a **▾** to collapse it; collapses are remembered
 - The page makes network requests only when you click Validate / Fetch / Sync (or enable auto-refresh), and only to the vendor whose key you pasted.
 - API keys are kept in the browser's storage **only if you tick "Remember key on this computer"**. Cloud tokens and secrets (Azure, Vertex, Bedrock) are never stored.
 - Folder access uses the browser's folder picker; files are read locally and never uploaded. Only aggregated rows (day, platform, model, token counts) are stored, not message text.
+- With the local collector (§1b) the files are read by that Node process on this machine and fetched by the page from `127.0.0.1` over a token-gated, read-only API — still nothing leaves the machine, and the same aggregated rows are all that is stored.
 - **Clear stored data…** (Data sources section) wipes everything the page remembered. Disconnect asks whether to keep or delete a source's data.
 - If the browser's storage is full the page says so in a banner; export a CSV backup, then clear.
 
@@ -199,7 +281,10 @@ Each major section header has a **▾** to collapse it; collapses are remembered
 | Azure / Vertex "token expired" | Tokens last about an hour — mint a new one with the printed CLI command and paste it again. |
 | Bedrock "AccessDenied" | The IAM key needs `cloudwatch:GetMetricData`, `cloudwatch:ListMetrics` and `ce:GetCostAndUsage` (read-only). |
 | Anthropic / OpenAI fetch fails with a network or CORS error | Use the PowerShell fallback on the card and drop the resulting JSON on Imports. |
-| Folder picker does nothing | Use Chrome or Edge, or the card's "classic folder chooser" link. |
+| Folder picker does nothing | Use Chrome or Edge, or the card's "classic folder chooser" link — or skip pickers altogether with the local collector (§1b). |
+| Local collector card says "Not running at …" | Start it: `node docs/tools/ai-usage-collector.mjs`; with `--port <n>`, put that URL in the card's Collector URL field. |
+| Local collector card says "Token rejected" | Paste the token the collector printed (also in `~/.ai-usage/collector.token`). |
+| Collector table shows a tool as "found, nothing to read" | The folder exists but holds nothing the card parses yet; if the tool logs elsewhere, add `--root <id>=<path>`. |
 | Numbers changed after updating the file | Parsers improve between versions; the first re-scan after an update re-reads files once (scan cache version bump). |
 | "browser storage is full" banner | Export CSV, then Clear stored data; large multi-year imports are compacted to daily rows after 90 days. |
 
@@ -213,7 +298,7 @@ Ollama keeps no usage history, so exact per-request counts exist only inside eac
 node docs/tools/ollama-usage-logger.mjs
 ```
 
-Then set `OLLAMA_HOST=127.0.0.1:11435` (or `base_url=http://127.0.0.1:11435/v1` for OpenAI SDKs) and pick the logger's folder (`~/.ai-usage` by default) in the Ollama card. Environment: `LOG_PORT`, `OLLAMA_URL`, `USAGE_LOG`. Counts are read from the last 64 KB of each response, so a stream of any size is logged as cheaply as a small one. OpenAI-style streaming clients must set `stream_options.include_usage`, or the server sends no usage object — the proxy then logs nothing and prints a warning. Nothing is ever estimated.
+Then set `OLLAMA_HOST=127.0.0.1:11435` (or `base_url=http://127.0.0.1:11435/v1` for OpenAI SDKs) and pick the logger's folder (`~/.ai-usage` by default) in the Ollama card — or run the local collector (§1b), which finds `~/.ai-usage` by itself. Environment: `LOG_PORT`, `OLLAMA_URL`, `USAGE_LOG`. Counts are read from the last 64 KB of each response, so a stream of any size is logged as cheaply as a small one. OpenAI-style streaming clients must set `stream_options.include_usage`, or the server sends no usage object — the proxy then logs nothing and prints a warning. Nothing is ever estimated.
 
 ---
 
@@ -221,4 +306,5 @@ Then set `OLLAMA_HOST=127.0.0.1:11435` (or `base_url=http://127.0.0.1:11435/v1` 
 
 - Everything lives in `AI Usage Dashboard.html` (vanilla JS, no build step). Adding a platform is one entry in the `CONNECTORS` registry plus one parser, fetcher or validator function; cards, hub groups, the budgets editor and the platform list derive from the registry.
 - Tests: `node tests/run.mjs` runs the headless suite against the real page in Chrome; `ONLY=87,94 node tests/run.mjs` runs only the check files whose names contain one of the comma-separated tokens. Fixtures are generated by `tests/fixtures/gen.mjs`; `node tests/tools/screenshots.mjs` renders light / dark / print / Manage-modal screenshots into `tests/artifacts/`.
+- The local collector: `tests/tools/collector.test.mjs` is a plain Node test of `docs/tools/ai-usage-collector.mjs` (no browser; spawns it against a temp HOME seeded with the fixtures; runs alone with `node tests/tools/collector.test.mjs`). `tests/checks/89c-collector.mjs` relays it into the suite and adds the end-to-end block — a real collector plus the real page over HTTP, both the `file://` page (CORS / Private Network Access to `127.0.0.1` in real Chrome) and the collector-served `/?token=` page, plus a tick re-scan after a file is written; `87f-collector.mjs` covers the page side with a stubbed `fetch`.
 - Design notes, plans and review records are under `docs/superpowers/` (start with `HANDOFF-2026-08-19.md`).

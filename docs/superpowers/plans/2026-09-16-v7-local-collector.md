@@ -44,3 +44,15 @@
 | 4 | **End-to-end + docs**: real collector process against a temp HOME + the real page fetching over HTTP in headless Chrome (CORS/PNA for `file://` → `127.0.0.1` proven, not stubbed); README section "Automatic mode: the local collector" + the Claude Code card copy ("or run the local collector — no folder picking"); HANDOFF/spec status. | `tests/checks/89c-collector.mjs` (E2E block), `README.md`, `docs/superpowers/HANDOFF-2026-08-19.md`, `docs/superpowers/specs/2026-08-16-every-llm-and-view-design.md` (v7 note) | E2E: rows land for `local` and `codex` from the live collector; the collector-served page at `/?token=…` connects without pasting. |
 
 Task 1 and Task 2 touch disjoint files and run in parallel; Task 3 follows Task 2; Task 4 follows 1 and 3. The controller runs the integration review + merge decision after Task 4.
+
+---
+
+## Status
+
+Implemented on `v7-collector` (2026-09-16, strict TDD, one commit per task): T1 1aa9787 (collector script + Node test, relayed by 89c) · T2 f2aa3b3 (`RemoteFile`, `matchConnectorFiles`, `App.scanLocalFiles`, the collector card, `App.connectCollector`; 87f) · T4a 612d610 (change-driven walks — `fs.watch` per root, dirty-only re-walk, 30 s polling fallback, non-blocking walk; codex roots narrowed to sessions/ + archived_sessions/) · T3 a4981ff (automatic mode — 60 s status watch on the cached status, hidden-tab skip, per-tool change detection, `rescanViaCollector` Re-scan routing, `_restoreCollectorWatch`) · T4b c14e075 (end-to-end in 89c: a real collector against a temp HOME + the real page over HTTP — the `file://` page reaches 127.0.0.1 in headless Chrome with **no** PNA flag; the collector-served `/?token=` page pre-fills, strips the URL and connects on one real click of Validate & connect; a rollout written to disk → one `_collectorTick` re-reads codex only) + the docs commit (README §1b "Automatic mode: the local collector", Claude Code card pointer, HANDOFF / spec status).
+
+Suite 429/429 (375 at v6); HTML 524 KB; 0 control bytes; 47 registry entries.
+
+Deviations from the design, both surfaced by the E2E: (1) `_prefillCollectorToken` also sets the card's Collector URL to `location.origin` on an http(s) page — the collector served that page, so its origin is the collector; without it a collector on `--port <n>` needs the URL edited by hand (the registry default is 11436); (2) the collector answers `/favicon.ico` with 204 (the served page requests it and logged a 404 in the console). Also noted: with the token directory `~/.ai-usage` present, the Ollama root is always *found* — *found, nothing to read* until the usage logger writes there (documented in the README).
+
+Next: integration review + merge decision (controller).
