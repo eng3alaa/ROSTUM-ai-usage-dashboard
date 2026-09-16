@@ -20,6 +20,16 @@
  * Tool ids = the dashboard's connector ids: local (Claude Code / Desktop), codex, copilot-cli, gemini-cli, continue, cline, roo,
  *           junie, lmstudio, ollama, jan, aider, tgwebui.
  *
+ * Discovery is per tool folder, not per home: codex reads ~/.codex/sessions and ~/.codex/archived_sessions only (the rest of ~/.codex is
+ * tens of thousands of unrelated files). A tool with two roots prefixes every path with the root's folder name ("sessions/2026/…",
+ * "archived_sessions/rollout-…"); with a single root paths are relative to it — the dashboard's Codex parser matches rollout-*.jsonl
+ * anywhere in the path, so both shapes land.
+ *
+ * Change-driven, not timed: each found root is watched (fs.watch recursive). A change marks the tool dirty (2 s debounce) and the next
+ * /api/status re-walks ONLY the dirty tools — a clean tool costs nothing per poll, whatever the poll interval. Where recursive fs.watch is
+ * unavailable the tool falls back to a re-walk when its cache is older than 30 s (status: watch 'polling'). ?refresh=1 re-walks everything.
+ * The walk is async and yields (batched stats, setImmediate every ~500 entries), so /api/file streams are served during a walk.
+ *
  * Security — the token is the gate, not the origin:
  *   - 127.0.0.1 only. Every /api/* request must carry  Authorization: Bearer <token>  (or ?token=<token>) or it gets 401.
  *     The token lives in ~/.ai-usage/collector.token (32 random bytes, hex; created on first run, mode 0600 where the OS honours it).
@@ -33,8 +43,11 @@
  *   - One stdout line per request (method, path, status, bytes) — never file contents, never the token.
  *
  * API (JSON unless noted; the page applies each connector's own patterns / exclude / siblings — the collector never duplicates the registry):
- *   GET /api/status[?refresh=1]     { version, home, os, startedAt, tools: [{ id, name, roots, candidates, found, disabled?, files, bytes, newestMtime, scannedAt }] }
- *                                   counts come from a cached walk of every found root, refreshed at most every 30 s (refresh=1 forces one)
+ *   GET /api/status[?refresh=1]     { version, home, os, startedAt, tools: [{ id, name, roots, candidates, found, disabled?, files, bytes, newestMtime, scannedAt, walkMs, watch }] }
+ *                                   counts come from the last walk of every found root; a tool is re-walked when its watcher saw a change
+ *                                   (watch: 'fs'), when its cache is older than 30 s (watch: 'polling' — no recursive fs.watch there), when
+ *                                   its root set changed, or on refresh=1 (all tools). walkMs = that walk's duration; watch is null when not found.
+ *                                   files / newestMtime move whenever a file is added or modified, so the page's change detection works.
  *   GET /api/list?tool=<id>         { tool, name, root, roots, scannedAt, files: [{ path, size, mtime }] } — ALL regular files, paths relative,
  *                                   forward slashes; when a tool has more than one root each path is prefixed with that root's folder name
  *   GET /api/file?tool=<id>&path=<rel>   the file bytes, streamed, with Content-Length + Last-Modified (404 when missing)
@@ -80,7 +93,10 @@ const isDir = (d) => { try { return fs.statSync(d).isDirectory(); } catch { retu
 // groups: [[candidate, candidate…], …] — per group the FIRST existing directory is a root; a function computes groups at refresh time
 const TABLE = [
   { id: 'local',       name: 'Claude Code / Desktop',           groups: [[env('CLAUDE_CONFIG_DIR') || path.join(HOME, '.claude')]] },
-  { id: 'codex',       name: 'OpenAI Codex CLI',                groups: [[env('CODEX_HOME') || path.join(HOME, '.codex')]] },
+  // codex: only sessions/ and archived_sessions/ (each its own root) — the rest of ~/.codex (cache/, browser/, …) is tens of thousands of
+  // unrelated files. With both present the two-root rule prefixes paths "sessions/…" / "archived_sessions/…"; with one, paths are relative
+  // to it ("2026/09/16/rollout-*.jsonl") — the dashboard's Codex parser matches rollout-*.jsonl anywhere in the path, so both shapes work.
+  { id: 'codex',       name: 'OpenAI Codex CLI',                groups: [[path.join(env('CODEX_HOME') || path.join(HOME, '.codex'), 'sessions')], [path.join(env('CODEX_HOME') || path.join(HOME, '.codex'), 'archived_sessions')]] },
   { id: 'copilot-cli', name: 'GitHub Copilot CLI (logs)',       groups: [[path.join(HOME, '.copilot')]] },
   { id: 'gemini-cli',  name: 'Gemini CLI',                      groups: [[env('GEMINI_CLI_HOME') || path.join(HOME, '.gemini')]] },
   { id: 'continue',    name: 'Continue.dev',                    groups: [[path.join(HOME, '.continue')]] },
@@ -145,11 +161,19 @@ function authorized(req, url) {
   return given.length === TOKEN_BUF.length && crypto.timingSafeEqual(given, TOKEN_BUF);
 }
 
-// ---- roots + cached walk --------------------------------------------------------------------------------------------------------------------
+// ---- roots + change-driven walk ------------------------------------------------------------------------------------------------------------
+// Each found root is watched with fs.watch({ recursive: true }); an event marks the tool dirty (2 s debounce: the first event arms a timer,
+// later ones in the window are ignored, so a stream of writes never postpones it) and the NEXT /api/status (or /api/list, /api/file of that
+// tool) re-walks only dirty tools. Where recursive fs.watch is unavailable (an old kernel, a network share, the inotify limit) the tool
+// falls back to the TTL: re-walk when the cache is older than TTL_MS (status says watch: 'polling'). A root set that changed (a folder
+// created or removed after start) is re-walked and re-watched — that check is a few stat calls per status.
 const SKIP_DIRS = new Set(['node_modules', '.git', 'checkpoints']);
-const CACHE_MS = 30000;
-const state = new Map();   // id → { roots: [{ dir, label }], candidates: [dir…], found, files: [{ path, size, mtime }], bytes, newestMtime, scannedAt, walking: Promise|null }
-for (const t of TABLE) state.set(t.id, { roots: [], candidates: [], found: false, files: [], bytes: 0, newestMtime: null, scannedAt: null, walking: null });
+const TTL_MS = 30000;       // polling fallback only
+const DEBOUNCE_MS = 2000;
+const STAT_BATCH = 64;      // stats per Promise.all (the thread pool overlaps them: ~4× faster than one at a time on Windows)
+const YIELD_EVERY = 500;    // entries between explicit setImmediate yields, so /api/file streams stay responsive during a walk
+const state = new Map();   // id → { roots: [{ dir, label }], candidates: [dir…], found, files: [{ path, size, mtime }], bytes, newestMtime, scannedAt, walkMs, walking: Promise|null, dirty, dirtyTimer, watch: 'fs'|'polling'|null, watchers: [FSWatcher], watchDirs: [dir…] }
+for (const t of TABLE) state.set(t.id, { roots: [], candidates: [], found: false, files: [], bytes: 0, newestMtime: null, scannedAt: null, walkMs: null, walking: null, dirty: true, dirtyTimer: null, watch: null, watchers: [], watchDirs: [] });
 
 // the roots of a tool right now: --root overrides the table; every group contributes its first existing directory
 function resolveRoots(t) {
@@ -162,49 +186,105 @@ function resolveRoots(t) {
   return { roots, candidates };
 }
 
-// recursive walk of one root: regular files only, no symlinks, skip dirs by name; paths relative with forward slashes
+// recursive walk of one root: regular files only, no symlinks, skip dirs by name; paths relative with forward slashes. Async and
+// non-blocking: one readdir per directory, stats in parallel batches, an explicit yield every YIELD_EVERY entries.
 async function walkRoot(dir, prefix) {
-  const files = []; let bytes = 0, newest = 0;
+  const files = []; let bytes = 0, newest = 0, sinceYield = 0;
   const stack = [''];
   while (stack.length) {
     const rel = stack.pop();
     const abs = rel ? path.join(dir, rel) : dir;
     let ents; try { ents = await fsp.readdir(abs, { withFileTypes: true }); } catch { continue; }   // vanished / unreadable dir: skipped, never fatal
+    const names = [];
     for (const e of ents) {
       if (e.isSymbolicLink()) continue;
-      const r = rel ? rel + '/' + e.name : e.name;
-      if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) stack.push(r); continue; }
+      if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) stack.push(rel ? rel + '/' + e.name : e.name); continue; }
       if (!e.isFile()) continue;
-      const full = path.join(abs, e.name);
-      if (samePath(full, TOKEN_FILE)) continue;   // the token file is never listed or served
-      let st; try { st = await fsp.stat(full); } catch { continue; }
-      const mtime = Math.round(st.mtimeMs);
-      files.push({ path: prefix + r, size: st.size, mtime });
-      bytes += st.size; if (mtime > newest) newest = mtime;
+      if (samePath(path.join(abs, e.name), TOKEN_FILE)) continue;   // the token file is never listed or served
+      names.push(e.name);
+    }
+    for (let i = 0; i < names.length; i += STAT_BATCH) {
+      const slice = names.slice(i, i + STAT_BATCH);
+      const sts = await Promise.all(slice.map((n) => fsp.stat(path.join(abs, n)).catch(() => null)));   // vanished mid-walk: skipped
+      for (let j = 0; j < slice.length; j++) {
+        const st = sts[j]; if (!st) continue;
+        const mtime = Math.round(st.mtimeMs);
+        files.push({ path: prefix + (rel ? rel + '/' + slice[j] : slice[j]), size: st.size, mtime });
+        bytes += st.size; if (mtime > newest) newest = mtime;
+      }
+      sinceYield += slice.length;
+      if (sinceYield >= YIELD_EVERY) { sinceYield = 0; await new Promise((r) => setImmediate(r)); }
     }
   }
   return { files, bytes, newest };
 }
 const samePath = (a, b) => (PLAT === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
 
+// fs.watch per root. A tool is 'fs' when every root has a live recursive watcher, 'polling' when any could not be armed (or died), null when
+// it has no roots. Re-armed only when the root set changes.
+function closeWatchers(s) { for (const w of s.watchers) { try { w.close(); } catch { /* already closed */ } } s.watchers = []; s.watchDirs = []; }
+function markDirty(t, s) {
+  if (s.dirty || s.dirtyTimer) return;   // already pending / already dirty: nothing to add (and no log spam while a tool writes continuously)
+  s.dirtyTimer = setTimeout(() => { s.dirtyTimer = null; s.dirty = true; console.log(`${hhmmss()} ${t.id}: change detected — re-walk on the next /api/status`); }, DEBOUNCE_MS);
+  s.dirtyTimer.unref();
+}
+function armWatchers(t, s, roots) {
+  const dirs = roots.map((r) => r.dir);
+  if (s.watch !== null && dirs.join('\0') === s.watchDirs.join('\0')) return;   // same roots as last time: keep the watchers (and a 'polling' verdict)
+  closeWatchers(s);
+  s.watchDirs = dirs;
+  let armed = 0;
+  for (const dir of dirs) {
+    try {
+      const w = fs.watch(dir, { recursive: true, persistent: false }, () => markDirty(t, s));
+      w.on('error', (e) => {   // the root vanished (Windows: EPERM) or the watcher died: this tool falls back to the TTL until its roots change
+        try { w.close(); } catch { /* ignore */ }
+        s.watchers = s.watchers.filter((x) => x !== w);
+        if (s.watch !== 'polling') console.error(`ai-usage-collector: ${t.id}: watcher on ${dir} stopped (${e && e.message || e}) — falling back to a ${TTL_MS / 1000} s re-walk`);
+        s.watch = 'polling'; s.dirty = true;
+      });
+      s.watchers.push(w); armed++;
+    } catch (e) {
+      console.error(`ai-usage-collector: ${t.id}: fs.watch unavailable for ${dir} (${e && e.message || e}) — falling back to a ${TTL_MS / 1000} s re-walk`);
+    }
+  }
+  s.watch = dirs.length ? (armed === dirs.length ? 'fs' : 'polling') : null;
+}
+const rootsChanged = (t, s) => resolveRoots(t).roots.map((r) => r.dir).join('\0') !== s.roots.map((r) => r.dir).join('\0');
+
 async function refreshTool(t) {
   const s = state.get(t.id);
   if (s.walking) return s.walking;
   s.walking = (async () => {
     try {
-      if (opts.disabled.has(t.id)) { Object.assign(s, { roots: [], candidates: [], found: false, files: [], bytes: 0, newestMtime: null, scannedAt: Date.now() }); return; }
+      // events that arrived before this point describe changes already on disk — this walk sees them, so the pending mark is dropped;
+      // an event DURING the walk arms a fresh timer and the next status re-walks
+      if (s.dirtyTimer) { clearTimeout(s.dirtyTimer); s.dirtyTimer = null; }
+      s.dirty = false;
+      const t0 = Date.now();
+      if (opts.disabled.has(t.id)) { closeWatchers(s); Object.assign(s, { roots: [], candidates: [], found: false, files: [], bytes: 0, newestMtime: null, scannedAt: Date.now(), walkMs: 0, watch: null }); return; }
       const { roots, candidates } = resolveRoots(t);
+      armWatchers(t, s, roots);
       const multi = roots.length > 1;
       let files = [], bytes = 0, newest = 0;
       for (const r of roots) { const w = await walkRoot(r.dir, multi ? r.label + '/' : ''); files = files.concat(w.files); bytes += w.bytes; if (w.newest > newest) newest = w.newest; }
       files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-      Object.assign(s, { roots, candidates, found: roots.length > 0, files, bytes, newestMtime: files.length ? newest : null, scannedAt: Date.now() });
+      Object.assign(s, { roots, candidates, found: roots.length > 0, files, bytes, newestMtime: files.length ? newest : null, scannedAt: Date.now(), walkMs: Date.now() - t0 });
     } finally { s.walking = null; }
   })();
   return s.walking;
 }
-const ensureFresh = (t, force) => { const s = state.get(t.id); return (force || s.scannedAt === null || Date.now() - s.scannedAt > CACHE_MS) ? refreshTool(t) : Promise.resolve(); };
-const toolStatus = (t) => { const s = state.get(t.id); return { id: t.id, name: t.name, roots: s.roots.map((r) => r.dir), candidates: s.candidates, found: s.found, ...(opts.disabled.has(t.id) ? { disabled: true } : {}), files: s.files.length, bytes: s.bytes, newestMtime: s.newestMtime, scannedAt: s.scannedAt }; };
+// re-walk when: forced, never walked, a walk is already in flight (join it), the root set changed, the tool is dirty, or — polling fallback only — the cache is older than the TTL
+function ensureFresh(t, force) {
+  const s = state.get(t.id);
+  if (force || s.scannedAt === null) return refreshTool(t);
+  if (s.walking) return s.walking;
+  if (opts.disabled.has(t.id)) return Promise.resolve();
+  if (rootsChanged(t, s) || s.dirty) return refreshTool(t);
+  if (s.watch === 'polling' && Date.now() - s.scannedAt > TTL_MS) return refreshTool(t);
+  return Promise.resolve();
+}
+const toolStatus = (t) => { const s = state.get(t.id); return { id: t.id, name: t.name, roots: s.roots.map((r) => r.dir), candidates: s.candidates, found: s.found, ...(opts.disabled.has(t.id) ? { disabled: true } : {}), files: s.files.length, bytes: s.bytes, newestMtime: s.newestMtime, scannedAt: s.scannedAt, walkMs: s.walkMs, watch: s.found ? s.watch : null }; };
 
 // /api/file path → { abs } or { status, error }: relative, forward slashes, no "." / ".." segments, inside the root, a regular file, no symlink on the way
 async function resolveFile(t, relIn) {
@@ -314,17 +394,22 @@ const portNum = parseInt(opts.port, 10);
 if (Number.isNaN(portNum) || portNum < 0 || portNum > 65535) { console.error(`ai-usage-collector: invalid port "${opts.port}"`); process.exit(2); }
 
 // ---- banner ---------------------------------------------------------------------------------------------------------------------------------
-server.listen(portNum, '127.0.0.1', () => {
+// The port is bound first, then every tool is walked once (a request arriving meanwhile simply joins that walk), then the table prints
+// with each tool's file count, size, watch mode and walk time — so "listening on" is the last line and everything above it is measured.
+const fmtBytes = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : n < 1073741824 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1073741824).toFixed(2)} GB`;
+server.listen(portNum, '127.0.0.1', async () => {
   PORT_BOUND = server.address().port;
   const base = `http://127.0.0.1:${PORT_BOUND}`;
   const pad = (s, n) => (s + ' '.repeat(n)).slice(0, Math.max(n, s.length));
   console.log(`ai-usage-collector v${VERSION} · ${PLAT} · home ${HOME}`);
+  try { await Promise.all(TABLE.map((t) => refreshTool(t))); } catch (e) { console.error('ai-usage-collector: initial walk failed — ' + (e && e.message || e)); }
   for (const t of TABLE) {
+    const s = state.get(t.id);
     if (opts.disabled.has(t.id)) { console.log(`  ${pad(t.id, 12)} ${pad(t.name, 32)} disabled (--no-${t.id})`); continue; }
-    const { roots, candidates } = resolveRoots(t);
-    if (roots.length) console.log(`  ${pad(t.id, 12)} ${pad(t.name, 32)} found      ${roots.map((r) => r.dir).join(' + ')}`);
-    else console.log(`  ${pad(t.id, 12)} ${pad(t.name, 32)} not found  ${candidates.length ? '(looked in ' + candidates.join(', ') + ')' : `(no fixed folder — pass --root ${t.id}=<path>)`}`);
+    if (s.found) console.log(`  ${pad(t.id, 12)} ${pad(t.name, 32)} found      ${s.files.length} file${s.files.length === 1 ? '' : 's'} · ${fmtBytes(s.bytes)} · watch ${s.watch} · walk ${s.walkMs} ms · ${s.roots.map((r) => r.dir).join(' + ')}`);
+    else console.log(`  ${pad(t.id, 12)} ${pad(t.name, 32)} not found  ${s.candidates.length ? '(looked in ' + s.candidates.join(', ') + ')' : `(no fixed folder — pass --root ${t.id}=<path>)`}`);
   }
+  if ([...state.values()].some((s) => s.watch === 'polling')) console.log('  (watch polling = recursive fs.watch is unavailable there; that tool is re-walked when its cache is older than 30 s)');
   console.log(`Dashboard file: ${HTML_PATH}${fs.existsSync(HTML_PATH) ? '' : '  (MISSING — GET / will answer 404; pass --html <path>)'}`);
   console.log(`Token ${TOKEN_CREATED ? 'created' : 'read from'} ${TOKEN_FILE}`);
   console.log(`Token: ${TOKEN}`);
@@ -332,6 +417,6 @@ server.listen(portNum, '127.0.0.1', () => {
   console.log('  (or paste the token into the "Local collector" card of your file:// copy of the page)');
   console.log(`listening on ${base}`);
 });
-const shutdown = () => { server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 1000).unref(); };
+const shutdown = () => { for (const s of state.values()) closeWatchers(s); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 1000).unref(); };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
