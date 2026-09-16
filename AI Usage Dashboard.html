@@ -160,6 +160,10 @@ input[type="date"], input[type="text"], input[type="password"], input[type="sear
 .src .note.reason { font-weight: 600; color: var(--ink-2); }
 .src textarea { font: inherit; font-size: 12.5px; color: var(--ink); background: var(--page); border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px; flex: 1; min-width: 120px; resize: vertical; }
 .src .row label.field { font-size: 12px; color: var(--ink-2); min-width: 96px; }
+.src table.collector-tools { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+.src table.collector-tools:empty { display: none; }
+.src table.collector-tools th, .src table.collector-tools td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.src table.collector-tools th { color: var(--ink-2); font-weight: 600; }
 .acct { background: var(--surface-1); border: 1px solid var(--border); border-left: 3px solid var(--acct-brand, var(--border));
         border-radius: 8px; padding: 10px 12px; cursor: pointer; }
 .acct:hover { border-color: var(--baseline); border-left-color: var(--acct-brand, var(--baseline)); }
@@ -1160,8 +1164,19 @@ const Budgets = {
  * key-driver fields (4b): kind api-key|admin-key|cloud-token · fetch 'globalFnName' (async (key, fields, {days}) → {label, detail, rows?, billed?, meta?}) · keyLS 'key:<id>'
  *                    · keyLabel · keyHint (placeholder) · fields [{id,label,placeholder,type text|password|textarea,secret?}] (inputs '<id>-f-<field>'; non-secret values persist to
  *                    LS 'field:<id>:<field>', secrets follow the Remember rule) · sessionOnly (no Remember; key + secrets never persisted) · srcIds must include the entry's own id
+ * collector fields (v7): kind 'collector' · baseUrl (the helper's URL) · keyLS/keyLabel/keyHint (the token — the shared key UI, Remember opt-in) · platform null + srcIds []
+ *                    (owns no rows: every tool it finds lands under that tool's own connector via scanFiles / scanLocalFiles with { fromCollector: true }) — App.connectCollector;
+ *                    it is the FIRST entry so it renders first in the Coding tools group
  * ================================================================= */
 const CONNECTORS = [
+  // ---- v7: local collector (automatic folder sources) — first entry = first card in the Coding group; owns no rows (platform null, srcIds []) ----
+  { id: 'collector', platform: null, name: 'Local collector (automatic)', category: 'coding', kind: 'collector',
+    statusEl: 'collector-status', brand: '#2f855a', mark: 'Lc', srcIds: [],
+    baseUrl: 'http://127.0.0.1:11436', keyLS: 'key:collector', keyLabel: 'Collector token', keyHint: 'printed by: node docs/tools/ai-usage-collector.mjs',
+    quality: 'exact',
+    qualityNote: 'Exact — the same log files the folder pickers read, found automatically. The collector is a small Node helper you run on this machine (node docs/tools/ai-usage-collector.mjs, no dependencies): it discovers the standard log folders of the coding tools and local runners installed here (Claude Code, Codex CLI, Copilot CLI, Gemini CLI, Continue, Cline, Roo, Junie, LM Studio, Ollama, Jan) and serves them to this page on 127.0.0.1 only. Every request is gated by the token it prints — without a token any web page open in your browser could read those transcripts through the port — and nothing leaves this machine. Each tool it finds shows up connected under its own card ("via collector") with exactly the rows a folder pick would land; no folder picker is needed and the tools stay current while it runs. The page the collector serves itself (http://127.0.0.1:11436/?token=…) keeps its own browser storage, separate from this file:// copy — data, keys and view settings are not shared between the two.',
+    paths: ['start: node docs/tools/ai-usage-collector.mjs (Node 20+; --port, --root <tool>=<path>, --no-<tool>)', 'token: ~/.ai-usage/collector.token (created on first run; printed with a ready-made ?token= URL)'],
+    links: { docs: 'README.md#automatic-mode' } },
   { id: 'local',      platform: 'Claude Code/Desktop', name: 'Claude Code / Desktop', category: 'coding', kind: 'folder',
     statusEl: 'local-status',    brand: '#d97748', mark: 'CC', srcIds: ['local', 'local-import'],
     patterns: [/\.jsonl$/i], exclude: /\/(todos|statsig)\//, parser: 'parseClaudeLogs' },
@@ -1801,6 +1816,59 @@ async function collectFilesFromHandle(dirHandle, patterns, path = '', out = [], 
   }
   for (const [name, h] of dirs) await collectFilesFromHandle(h, patterns, path + name + '/', out, depth + 1);
   return out;
+}
+
+/** v7: which files of a connector this page reads, from a FLAT listing of relative paths (forward slashes) — the collector's /api/list, or any
+ *  pre-walked tree. Same rules as the walkers + parseFolderCached: patterns ∪ siblings select, `exclude` (tested against '/' + path) drops,
+ *  and a skip-dir segment anywhere on the path drops (GENERIC_SKIP_DIRS; the Claude Code entry uses its own walker's SKIP_DIRS). Pure —
+ *  entries come back unchanged ({ path, size, mtime, … }) so the caller can wrap them (RemoteFile) or count them. */
+function matchConnectorFiles(c, entries) {
+  const pats = (c.patterns || []).concat(c.siblings || []);
+  const skip = c.kind === 'folder' ? SKIP_DIRS : GENERIC_SKIP_DIRS;
+  return (entries || []).filter(e => e && typeof e.path === 'string' && pats.some(re => re.test(e.path))
+    && !(c.exclude && c.exclude.test('/' + e.path)) && !e.path.split('/').slice(0, -1).some(seg => skip.test(seg)));
+}
+
+/** v7: page-side shim over the collector's GET <base>/api/file?tool=<id>&path=<rel> — exactly the File members the parsers and the ScanCache
+ *  signature use (name, size, lastModified, webkitRelativePath, stream(), text(), arrayBuffer()), so a collector-fed scan IS a folder scan:
+ *  same parser, same cache keys (path + size + lastModified → unchanged files stay cache hits). Nothing is fetched until a reader asks:
+ *  stream() is a ReadableStream (highWaterMark 0) whose first pull opens the request and then pumps the response body chunk by chunk —
+ *  readLines never holds a whole log in memory. An HTTP error rejects with its status ("HTTP 404 Not Found reading <path> …"), which
+ *  parseFolderCached counts as one unreadable file and moves on. The token travels in the Authorization header only — never in the URL. */
+class RemoteFile {
+  constructor(base, token, tool, entry) {
+    const rel = String(entry.path);
+    this.name = rel.split('/').pop();
+    this.size = +entry.size || 0;
+    this.lastModified = +entry.mtime || 0;
+    this.webkitRelativePath = rel;
+    this.tool = tool;
+    this._url = String(base).replace(/\/+$/, '') + '/api/file?tool=' + encodeURIComponent(tool) + '&path=' + encodeURIComponent(rel);
+    this._headers = { Authorization: 'Bearer ' + token };
+  }
+  async _open() {
+    const r = await fetch(this._url, { headers: this._headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}${r.statusText ? ' ' + r.statusText : ''} reading ${this.webkitRelativePath} from the collector`);
+    return r;
+  }
+  stream() {
+    const self = this;
+    let reader = null;
+    return new ReadableStream({
+      async pull(ctrl) {
+        if (!reader) {
+          const r = await self._open();
+          if (!r.body) { ctrl.enqueue(new Uint8Array(await r.arrayBuffer())); ctrl.close(); return; }   // a body-less Response (some stubs / opaque answers): one chunk
+          reader = r.body.getReader();
+        }
+        const { done, value } = await reader.read();
+        if (done) ctrl.close(); else ctrl.enqueue(value);
+      },
+      cancel(reason) { return reader ? reader.cancel(reason) : undefined; },
+    }, { highWaterMark: 0 });
+  }
+  async text() { return (await this._open()).text(); }
+  async arrayBuffer() { return (await this._open()).arrayBuffer(); }
 }
 
 /** Generic incremental scan: per-file aggregates cached by (connectorId, path, size, lastModified).
@@ -4993,6 +5061,7 @@ const App = {
       if (!hasKey) { this.openConnectorModal(id); return; }   // no key anywhere — surface the card, not a silent no-op/network call
       if (inp && !inp.value.trim()) { const saved = LS.get(c.keyLS, null); if (saved) inp.value = saved; }
     }
+    if (c && c.kind === 'collector') return this.connectCollector(c);   // v7 (the keyLS block above surfaced the card when no token exists anywhere and pre-filled a remembered one)
     if (c && c.fetch) return this.connectKey(c);   // Wave-2 key driver (the keyLS block above already opened the modal when no key exists anywhere and pre-filled a remembered key)
     const fn = c && c.fetchMethod && this[c.fetchMethod];
     if (typeof fn === 'function') return fn.call(this);
@@ -5003,7 +5072,7 @@ const App = {
     if (c.keyLS) LS.del(c.keyLS);
     const keyInput = document.getElementById(id + '-key'); if (keyInput) keyInput.value = '';
     for (const f of c.fields || []) { LS.del('field:' + id + ':' + f.id); const fe = $(id + '-f-' + f.id); if (fe) fe.value = ''; }   // key-driver extra fields: stored values + inputs
-    if (c.fetch) { const rem = $('remember-' + id); if (rem) rem.checked = false; }
+    if (c.fetch || c.kind === 'collector') { const rem = $('remember-' + id); if (rem) rem.checked = false; }
     delete Store.connectors[id];
     // an in-flight scan / fetch / server validation for this connector must NOT commit after the disconnect and resurrect it
     this._gen[id] = (this._gen[id] || 0) + 1; this._gen[id + ':server'] = (this._gen[id + ':server'] || 0) + 1;
@@ -5017,6 +5086,10 @@ const App = {
       delete this._dirHandles[id]; IDB.del('dir:' + id);   // unconditional: a handle may be persisted in IDB without being restored into memory (denied permission, early disconnect)
       const rs = $(id + '-rescan'); if (rs) rs.hidden = true;
       this._setInitialStatus(c, true);   // dual-driver cards: reset the folder line too (same noun as ensureSourceCard)
+    }
+    if (c.kind === 'collector') {   // v7: the collector owns no rows — only its token (input / Remember / LS, cleared above), its entry and its tools table go; the tools keep their entries AND their data (no prompt)
+      this._renderCollectorTools($('collector-tools'), []);
+      Store.persist(); this.render(); return;
     }
     if (confirm(`Also delete ${c.name}'s stored usage data? OK = delete, Cancel = keep the data.`)) {
       for (const sid of c.srcIds) delete Store.sources[sid];
@@ -5444,6 +5517,32 @@ const App = {
     }
   },
 
+  /** Claude Code landing path shared by the classic folder chooser (#folder-fallback) and the collector (v7): files = [{ path, file }] →
+   *  parseClaudeLogsCached → Store.projects + Store.setSource('local') + the connector entry ('N log files', + ' · via collector' when
+   *  opts.fromCollector). Own gen slot (_gen.local, shared with scanHandle): a disconnect / clear-data / newer scan while parsing means this
+   *  call commits nothing. Returns true when rows landed; an empty list is a no-op. */
+  async scanLocalFiles(files, opts = {}) {
+    if (!files || !files.length) return;
+    const status = $('local-status'), prog = $('scan-progress');
+    const gen = ++this._gen.local;
+    prog.hidden = false; prog.value = 0; prog.max = 1;
+    status.textContent = 'Scanning…';
+    try {
+      const res = await parseClaudeLogsCached(files, (d, t) => { prog.max = t; prog.value = d; }, ScanCache);
+      if (gen !== this._gen.local) return;   // superseded (disconnect, Clear stored data, a newer scan)
+      Store.projects = res.projects;
+      Store.setSource('local', res.rows, res.meta);
+      Store.setConnector('local', { label: res.meta.files + ' log files' + (opts.fromCollector ? ' · via collector' : ''), lastSync: Date.now(), err: null });
+      status.textContent = '';
+      status.appendChild(el('span', { class: 'ok', text: '● Loaded. ' }));
+      status.appendChild(document.createTextNode(`${res.meta.files} log files · ${fmtInt(res.meta.msgs)} messages` + (opts.fromCollector ? ' · via collector' : ' (one-time load — pick again to refresh)')));
+      this.render();
+      return true;
+    } catch (err) {
+      if (gen !== this._gen.local) return;
+      status.textContent = 'Scan failed: ' + (err.message || err);
+    } finally { prog.hidden = true; }
+  },
   /* =================== generic folder-log / local-server connectors =================== */
   /** Renders the hidden source card for a registry entry (statusEl target + Manage-modal body). Idempotent. */
   ensureSourceCard(c) {
@@ -5455,20 +5554,25 @@ const App = {
     ];
     if (c.kind === 'link-only' && c.reason) kids.push(el('div', { class: 'note reason', text: 'Why there is no data path: ' + c.reason }));
     if (c.paths && c.paths.length) {
-      const p = el('div', { class: 'note' }, (c.kind === 'link-only' || c.kind === 'export-file' || c.fetch) ? 'Where to look: ' : 'Where the files live: ');
+      const p = el('div', { class: 'note' }, c.kind === 'collector' ? 'How to run it: ' : (c.kind === 'link-only' || c.kind === 'export-file' || c.fetch) ? 'Where to look: ' : 'Where the files live: ');
       c.paths.forEach((s, i) => { if (i) p.appendChild(document.createTextNode(' · ')); p.appendChild(el('code', { text: s })); });
       kids.push(p);
     }
     // key-driver cards (api-key / admin-key / cloud-token entries with `fetch`): key input '<id>-key' + optional extra `fields` ('<id>-f-<field>')
     // + Remember opt-in ('remember-<id>', absent for sessionOnly). Saved values are restored through the .value PROPERTY, never the value
     // attribute, so a key never appears in outerHTML (95-ui-misc's key-leak rule).
-    if (c.fetch) {
+    // v7 collector card: the base URL row comes first; the token row below is the shared key UI (password input, Remember opt-in) with
+    // Validate & connect routed to connectCollector instead of connectKey
+    if (c.kind === 'collector') kids.push(el('div', { class: 'row' },
+      el('label', { class: 'field', for: c.id + '-url', text: 'Collector URL' }),
+      el('input', { type: 'text', id: c.id + '-url', value: LS.get('url:' + c.id, null) || c.baseUrl, 'aria-label': c.name + ' URL', spellcheck: 'false' })));
+    if (c.fetch || c.kind === 'collector') {
       const keyEl = el('input', { type: 'password', id: c.id + '-key', placeholder: c.keyHint || '', autocomplete: 'off', spellcheck: 'false', 'aria-label': c.keyLabel || (c.name + ' key') });
       if (!c.sessionOnly) { const savedKey = LS.get(c.keyLS, null); if (savedKey) keyEl.value = savedKey; }   // sessionOnly: nothing is ever saved, so nothing to restore
       kids.push(el('div', { class: 'row' },
         el('label', { class: 'field', for: c.id + '-key', text: c.keyLabel || 'Key' }),
         keyEl,
-        el('button', { class: 'btn primary', id: c.id + '-validate', text: 'Validate & connect', onclick: () => this.connectKey(c) })));
+        el('button', { class: 'btn primary', id: c.id + '-validate', text: 'Validate & connect', onclick: () => c.kind === 'collector' ? this.connectCollector(c) : this.connectKey(c) })));
       for (const f of c.fields || []) {
         const fid = c.id + '-f-' + f.id, lsKey = 'field:' + c.id + ':' + f.id;
         const inp = f.type === 'textarea'
@@ -5493,7 +5597,7 @@ const App = {
             for (const f of c.fields || []) { if (!fieldIsSecret(f)) continue; const fe = $(c.id + '-f-' + f.id); if (fe && fe.value.trim()) LS.set('field:' + c.id + ':' + f.id, fe.value.trim()); }
           }
         });
-        kids.push(el('div', { class: 'row' }, el('label', { class: 'inline' }, cb, ' Remember key on this computer')));
+        kids.push(el('div', { class: 'row' }, el('label', { class: 'inline' }, cb, c.kind === 'collector' ? ' Remember token on this computer' : ' Remember key on this computer')));
       }
     }
     // dual-driver cards (server validate + usage-log folder) get TWO status lines: '<id>-status' for the server (right under the
@@ -5505,7 +5609,7 @@ const App = {
       kids.push(el('div', { class: 'row' }, el('button', { class: 'btn primary', id: c.id + '-import', text: 'Import file…', onclick: () => this.openImportsFor(c) })));
       kids.push(el('div', { class: 'note', text: 'Looking for: ' + (c.hint || 'your data export') + '. Files are read in your browser only; the rows land under Imports and show on this card.' }));
     }
-    if (c.baseUrl) {
+    if (c.baseUrl && c.kind !== 'collector') {   // the collector card rendered its URL row above (no server-validate button)
       kids.push(el('div', { class: 'row' },
         el('input', { type: 'text', id: c.id + '-url', value: LS.get('url:' + c.id, null) || c.baseUrl, 'aria-label': c.name + ' server URL', spellcheck: 'false' }),
         el('button', { class: 'btn primary', id: c.id + '-validate', text: 'Validate & connect', onclick: () => this.connectServer(c) })));
@@ -5526,6 +5630,9 @@ const App = {
       if (dual) kids.push(this._setInitialStatus(c, true, el('div', { class: 'status', id: c.id + '-scan-status' })));
     }
     if (!dual) kids.push(statusEl);
+    if (c.kind === 'collector') kids.push(   // v7: what the collector does, in one line, then the tools table connectCollector fills (tool · root · files · last change)
+      el('div', { class: 'note', text: 'Files are read through the collector on this machine only (127.0.0.1): the token is sent to the URL above and nowhere else, and every tool it finds connects under its own card with "via collector". Run it with: node docs/tools/ai-usage-collector.mjs — it prints the token.' }),
+      el('table', { id: 'collector-tools', class: 'collector-tools' }));
     const L = c.links || {}, ln = [];
     if (L.get) ln.push(el('a', { href: L.get, target: '_blank', rel: 'noopener', text: 'Get it' }));
     if (L.docs) ln.push(el('a', { href: L.docs, target: '_blank', rel: 'noopener', text: 'Where the numbers come from' }));
@@ -5550,7 +5657,8 @@ const App = {
   },
   /** Single scan entry point for folder-log connectors (folder pick, classic chooser, tests, Imports drop). files: [{path, file}];
    *  opts.fromDrop: the files came from the Imports dropzone — no ScanCache prune (a drop is a scan of just those files: it REPLACES the
-   *  connector's rows like a re-scan does — merging would double count against a later re-scan). Returns true when the rows were replaced. */
+   *  connector's rows like a re-scan does — merging would double count against a later re-scan). opts.fromCollector (v7): the files came through the
+   *  local collector (RemoteFile shims) — the entry's filesLabel and the status line end in ' · via collector'. Returns true when the rows were replaced. */
   async scanFiles(c, files, opts = {}) {
     const status = this._scanStatusEl(c.id), prog = $(c.id + '-progress');
     const gen = this._gen[c.id] = (this._gen[c.id] || 0) + 1;   // scan slot only — connectServer has its own (c.id + ':server'), so the two never supersede each other
@@ -5563,7 +5671,7 @@ const App = {
       if (!res.meta.files) { status.textContent = `No matching files found — expected ${c.hint || 'log files'}.`; return; }
       if (res.projects && res.projects.length) Store.projectsBy[c.id] = res.projects; else delete Store.projectsBy[c.id];   // Projects table rows (persisted by setSource's persist below); a re-scan that finds none clears the stale set
       Store.setSource(c.id, res.rows, { files: res.meta.files, msgs: res.meta.msgs, lines: res.meta.lines, badLines: res.meta.badLines });
-      const filesLabel = `${res.meta.files} file${res.meta.files === 1 ? '' : 's'}`;
+      const filesLabel = `${res.meta.files} file${res.meta.files === 1 ? '' : 's'}` + (opts.fromCollector ? ' · via collector' : '');
       // per-half errors (dual-driver cards): this driver owns scanErr, connectServer owns serverErr; hub err = serverErr || scanErr
       // merged from the previous entry, so a CORS-blocked server keeps its hint even when the folder scan settles last
       Store.setConnector(c.id, { filesLabel, label: this._dualLabel(c.id, { filesLabel }), lastSync: Date.now(), scanErr: null, err: (Store.connectors[c.id] || {}).serverErr || null });
@@ -5573,7 +5681,8 @@ const App = {
       const nf = res.meta.files, nm = res.meta.msgs;
       status.appendChild(document.createTextNode(`${nf} file${nf === 1 ? '' : 's'} · ${fmtInt(nm)} message${nm === 1 ? '' : 's'} · scanned ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
         + (res.meta.badLines ? ` · ${fmtInt(res.meta.badLines)} unreadable line(s) skipped` : '')
-        + (res.meta.badFiles ? ` · ${fmtInt(res.meta.badFiles)} file(s) unreadable` : '')));
+        + (res.meta.badFiles ? ` · ${fmtInt(res.meta.badFiles)} file(s) unreadable` : '')
+        + (opts.fromCollector ? ' · via collector' : '')));
       this.render();
       return true;   // rows / filesLabel replaced (the Imports note reads this)
     } catch (e) {
@@ -5754,6 +5863,115 @@ const App = {
     }
   },
 
+  /* =================== v7: local collector (automatic folder sources) =================== */
+  /** Connects to the collector (docs/tools/ai-usage-collector.mjs) and lands every tool it found through the SAME path a folder pick uses:
+   *  GET /api/status → for each found tool whose id is a registered folder connector (kind folder / folder-log, or a local-server entry with
+   *  patterns): GET /api/list, the connector's own patterns / exclude / siblings (matchConnectorFiles), RemoteFile shims, then
+   *  scanFiles(connector, files, { fromCollector: true }) — scanLocalFiles for Claude Code — so rows, project rows, cache signatures and the
+   *  tool's card are exactly a folder pick's ('N files · via collector'). The collector owns no rows (platform null, srcIds []): its own entry is
+   *  'N tools · M files' and its card lists tool · root · files · last change. Token: the card's '<id>-key' (Remember opt-in like every key
+   *  card; a ?token= in the page URL pre-fills it once — _prefillCollectorToken); sent as 'Authorization: Bearer' to the card's base URL only,
+   *  never written into the DOM or a URL. Honest errors: unreachable → "Not running at <base> — start it with: …" and NO entry (connectServer's
+   *  unreachable rule — a stale entry is deleted); 401 → "Token rejected — copy the token the collector printed" (attention); a found tool
+   *  with zero matching files is listed as "found, nothing to read" and gets no entry. Own gen slot this._gen[c.id]: a superseded call
+   *  (disconnect, clear-data, a newer connect) commits nothing and clears only its own placeholder (the fetchGemini rule). */
+  async connectCollector(c) {
+    const status = $(c.id + '-status'), table = $('collector-tools');
+    const gen = this._gen[c.id] = (this._gen[c.id] || 0) + 1;
+    const urlEl = $(c.id + '-url');
+    const base = ((urlEl && urlEl.value.trim()) || c.baseUrl).replace(/\/+$/, '');
+    const keyEl = $(c.id + '-key');
+    const token = keyEl ? keyEl.value.trim() : '';
+    if (!token) { status.textContent = `Paste the ${c.keyLabel || 'token'} first (${c.keyHint || 'see the card'}).`; return; }
+    LS.set('url:' + c.id, base);
+    const rem = $('remember-' + c.id);
+    if (rem && rem.checked) LS.set(c.keyLS, token);   // Remember opt-in — the only write of the token to storage
+    status.textContent = 'Checking ' + base + '…'; status.dataset.gen = String(gen);
+    const superseded = () => { if (gen !== this._gen[c.id]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return true; } return false; };
+    const api = async (path) => {
+      const r = await fetch(base + path, { headers: { Authorization: 'Bearer ' + token } });
+      if (r.status === 401) { const e = new Error('Token rejected — copy the token the collector printed'); e.status = 401; throw e; }
+      if (!r.ok) { const e = new Error(`Collector answered HTTP ${r.status} for ${path}`); e.status = r.status; throw e; }
+      return r.json();
+    };
+    let st;
+    try { st = await api('/api/status'); }
+    catch (e) {
+      if (superseded()) return;
+      status.textContent = ''; status.dataset.gen = '';
+      if (e && e.status) {   // a real HTTP answer (401 / 5xx): attention, the entry carries the collector's own message
+        const err = String(e.message || e).slice(0, 80);
+        Store.setConnector(c.id, { err });
+        status.appendChild(el('span', { class: 'err', text: 'Rejected: ' }));
+        status.appendChild(document.createTextNode(e.message || String(e)));
+      } else {   // network failure = not running → truly off: no entry at all (a stale one goes too); the tools' own data is untouched
+        delete Store.connectors[c.id]; Store.persist();
+        status.textContent = `Not running at ${base} — start it with: node docs/tools/ai-usage-collector.mjs`;
+      }
+      this.render();
+      return;
+    }
+    if (superseded()) return;
+    const summary = [];   // one table row per reported tool: { name, root, files, newest }
+    let nTools = 0, nFiles = 0;
+    for (const t of (Array.isArray(st && st.tools) ? st.tools : [])) {
+      if (!t || typeof t.id !== 'string') continue;
+      const conn = connectorById(t.id);
+      const readable = !!(conn && conn.patterns && (conn.kind === 'folder' || conn.kind === 'folder-log' || conn.kind === 'local-server'));
+      const row = { name: (conn && conn.name) || String(t.name || t.id), root: Array.isArray(t.roots) ? t.roots.map(String).join(' · ') : '', files: '',
+        newest: t.newestMtime ? new Date(t.newestMtime).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '' };
+      summary.push(row);
+      if (!t.found) { row.files = 'not found'; continue; }
+      if (!readable) { row.files = 'found — no reader on this page'; continue; }
+      status.textContent = `Reading ${conn.name} through the collector…`;
+      let files;
+      try {
+        const list = await api('/api/list?tool=' + encodeURIComponent(t.id));
+        files = matchConnectorFiles(conn, Array.isArray(list && list.files) ? list.files : []).map(f => ({ path: f.path, file: new RemoteFile(base, token, t.id, f) }));
+      } catch (e) { if (superseded()) return; row.files = 'error: ' + String(e.message || e).slice(0, 60); continue; }
+      if (superseded()) return;
+      if (!files.length) { row.files = 'found, nothing to read'; continue; }
+      const landed = t.id === 'local' ? await this.scanLocalFiles(files, { fromCollector: true }) : await this.scanFiles(conn, files, { fromCollector: true });
+      if (superseded()) return;
+      if (landed !== true) { row.files = `${files.length} file${files.length === 1 ? '' : 's'} — scan failed, see the tool's card`; continue; }   // the tool's own status line carries the reason; it is not counted as read
+      nTools++; nFiles += files.length;
+      row.files = `${files.length} file${files.length === 1 ? '' : 's'}`;
+    }
+    const zero = summary.filter(r => r.files === 'found, nothing to read').length;
+    const label = `${nTools} tool${nTools === 1 ? '' : 's'} · ${nFiles} file${nFiles === 1 ? '' : 's'}`;
+    Store.setConnector(c.id, { label, lastSync: Date.now(), err: null });
+    status.textContent = ''; status.dataset.gen = '';
+    status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
+    status.appendChild(document.createTextNode(label + (zero ? ` · ${zero} found, nothing to read` : '') + ` · checked ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`));
+    this._renderCollectorTools(table, summary);
+    this.render();
+    return true;
+  },
+  /** The collector card's tools table (tool · root · files · last change) — textContent only; an empty list clears it. */
+  _renderCollectorTools(table, rows) {
+    if (!table) return;
+    clear(table);
+    if (!rows || !rows.length) return;
+    table.appendChild(el('thead', {}, el('tr', {}, el('th', { text: 'Tool' }), el('th', { text: 'Root' }), el('th', { text: 'Files' }), el('th', { text: 'Last change' }))));
+    const tbody = el('tbody');
+    for (const r of rows) tbody.appendChild(el('tr', {}, el('td', { text: r.name }), el('td', { text: r.root }), el('td', { text: r.files }), el('td', { text: r.newest })));
+    table.appendChild(tbody);
+  },
+  /** v7: a ?token=<t> in the page URL (the collector prints http://127.0.0.1:11436/?token=… and serves this page there) pre-fills the collector
+   *  card's token input ONCE and is removed from the address bar (history.replaceState) so it is never bookmarked, shared or shown; nothing
+   *  connects by itself — Validate & connect (or Sync) stays the user's click, and nothing is remembered without the opt-in. Returns true when a
+   *  token was taken from the URL. Called from init. */
+  _prefillCollectorToken() {
+    let tok = null;
+    try {
+      const u = new URL(location.href);
+      tok = u.searchParams.get('token');
+      if (tok !== null) { u.searchParams.delete('token'); history.replaceState(null, '', u.href); }
+    } catch {}
+    if (!tok) return false;
+    const inp = $('collector-key'); if (inp) inp.value = tok;
+    return true;
+  },
   /* =================== metrics-poll driver (vLLM / llama.cpp: cumulative /metrics counters → today's rows) =================== */
   _pollTimers: {},   // connectorId → setInterval handle. Never persisted: a fresh page starts no poll until Validate / Sync / Refresh (no auto-fetch on load)
   /** Start (or restart) polling for a local-server entry that names a `poll` fn. Called by connectServer after a successful validate; idempotent.
@@ -6314,6 +6532,14 @@ const App = {
     if (this.dirHandle) jobs.push(this.rescan());
     for (const [id, h] of Object.entries(this._dirHandles)) if (h) jobs.push(this.rescanFolder(id));
     for (const c of CONNECTORS) if (c.kind === 'local-server' && Store.connectors[c.id]) jobs.push(this.connectServer(c));
+    // v7: the collector re-runs while it is connected and a token is at hand — the input, else the remembered token (restored into the input); never from nothing
+    for (const c of CONNECTORS) {
+      if (c.kind !== 'collector' || !Store.connectors[c.id]) continue;
+      const inp = $(c.id + '-key'), tok = (inp && inp.value.trim()) || LS.get(c.keyLS, null);
+      if (!tok) continue;
+      if (inp && !inp.value.trim()) inp.value = tok;
+      jobs.push(this.connectCollector(c));
+    }
     // key-driver cards: a remembered key (input pre-filled from LS at init) re-fetches; sessionOnly cards only while the input still holds a token
     for (const c of CONNECTORS) {
       if (!c.fetch) continue;
@@ -6355,7 +6581,8 @@ const App = {
     this.wireCollapsibles();
     this.wireInsightHides();
     this.wireLegacyToggle();
-    for (const c of CONNECTORS) if (c.kind === 'folder-log' || c.kind === 'local-server' || c.kind === 'link-only' || c.kind === 'export-file' || c.fetch) this.ensureSourceCard(c);
+    for (const c of CONNECTORS) if (c.kind === 'folder-log' || c.kind === 'local-server' || c.kind === 'link-only' || c.kind === 'export-file' || c.kind === 'collector' || c.fetch) this.ensureSourceCard(c);
+    this._prefillCollectorToken();   // v7: ?token= from the collector's ready-made URL → the token input, then off the address bar (no auto-connect)
     this._hubQuery = $('hub-search').value || '';   // the browser may restore the box's text across a reload — start in sync with it, not empty
     $('hub-search').addEventListener('input', () => { this._hubQuery = $('hub-search').value; this.renderHub(); });
 
@@ -6415,25 +6642,7 @@ const App = {
     $('pick-claude-folder').addEventListener('click', () => this.pickFolder());
     $('rescan-local').addEventListener('click', () => this.rescan());
     $('fallback-link').addEventListener('click', (e) => { e.preventDefault(); $('folder-fallback').click(); });
-    $('folder-fallback').addEventListener('change', async (e) => {
-      const files = [...e.target.files].map(f => ({ path: f.webkitRelativePath || f.name, file: f }));
-      if (!files.length) return;
-      const status = $('local-status'), prog = $('scan-progress');
-      prog.hidden = false; prog.value = 0; prog.max = 1;
-      status.textContent = 'Scanning…';
-      try {
-        const res = await parseClaudeLogsCached(files, (d, t) => { prog.max = t; prog.value = d; }, ScanCache);
-        Store.projects = res.projects;
-        Store.setSource('local', res.rows, res.meta);
-        Store.setConnector('local', { label: res.meta.files + ' log files', lastSync: Date.now(), err: null });
-        status.textContent = '';
-        status.appendChild(el('span', { class: 'ok', text: '● Loaded. ' }));
-        status.appendChild(document.createTextNode(`${res.meta.files} log files · ${fmtInt(res.meta.msgs)} messages (one-time load — pick again to refresh)`));
-        this.render();
-      } catch (err) {
-        status.textContent = 'Scan failed: ' + (err.message || err);
-      } finally { prog.hidden = true; }
-    });
+    $('folder-fallback').addEventListener('change', (e) => this.scanLocalFiles([...e.target.files].map(f => ({ path: f.webkitRelativePath || f.name, file: f }))));   // one landing path with the collector (v7): App.scanLocalFiles
 
     // API sources
     $('fetch-anthropic').addEventListener('click', () => this.fetchAnthropic());

@@ -150,7 +150,7 @@ export async function run({ browser, ok }) {
         if (c.parser && typeof globalThis[c.parser] !== 'function') problems.push(pre + 'parser fn missing: ' + c.parser);
         if (c.validate && typeof globalThis[c.validate] !== 'function') problems.push(pre + 'validate fn missing: ' + c.validate);
         if (c.poll && typeof globalThis[c.poll] !== 'function') problems.push(pre + 'poll fn missing: ' + c.poll);
-        if (!c.platform) problems.push(pre + 'no platform');
+        if (!c.platform && c.kind !== 'collector') problems.push(pre + 'no platform');   // v7: the collector owns no rows — platform null by design (its tools land under their own connectors)
         if (!c.brand || !c.mark || !c.name) problems.push(pre + 'brand/mark/name missing');
         try { Store.connectorStatus(c); } catch (e) { problems.push(pre + 'connectorStatus threw'); }
       }
