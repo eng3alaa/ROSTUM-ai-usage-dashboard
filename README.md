@@ -75,7 +75,7 @@ Flags: `--port <n>` (or `COLLECTOR_PORT`; default 11436; `0` picks a free port a
 - The collector watches every found folder (`fs.watch`); a change marks that tool for a re-walk on its next status request. Where recursive watching is unavailable (some network shares, old kernels) that tool is re-walked when its counts are older than 30 s instead — the startup table says `watch polling`.
 - While the collector card is connected, the dashboard asks it for status **every 60 s** (skipped while the tab is hidden) and re-reads only the tools whose file count or newest change moved; unchanged files hit the scan cache, so a tick with nothing new costs one small request. **Refresh all** runs one such check now; a tool card's **Re-scan** / **Sync** goes through the collector while it feeds that card.
 - After a reload the watch resumes by itself only if the token was remembered; otherwise the card says *Reconnect* and the tools' stored data stays on screen until you paste the token again.
-- **Disconnect** on the collector card forgets the token and stops the watch; the tools keep their entries and data (their cards keep the *via collector* label until the next folder pick or Clear stored data).
+- **Disconnect** on the collector card forgets the token and stops the watch; the tools keep their entries and data (their cards keep the *via collector* label until the next folder pick or Clear stored data). Disconnecting a tool's own card while the collector feeds it takes that tool out of the collector's reads (its row in the table says *disconnected*) until you click **Validate & connect** on the collector card again.
 
 **Security**
 
