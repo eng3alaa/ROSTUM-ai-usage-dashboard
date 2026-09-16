@@ -6,10 +6,13 @@
 // archived_sessions/ only) and a 2 MB file under ~/.gemini for the streaming-during-walk check; the collector runs as a child
 // process with HOME / USERPROFILE / APPDATA / LOCALAPPDATA all pointing at that dir and COLLECTOR_PORT=0 (the bound port is parsed
 // from its "listening on" line). Asserts: token gate (401), CORS/PNA on every answer (OPTIONS 204), /api/status discovery + the
-// change-driven walk (fs.watch per root → a plain /api/status counts a new file within 5 s; a clean tool is never re-walked;
+// change-driven walk (fs.watch per root → a plain /api/status counts a new file within 8 s; a clean tool is never re-walked;
 // ?refresh=1 forces one), /api/list relative forward-slash paths (multi-root prefixes), /api/file byte-exact streaming — also while
 // a forced walk is in flight — traversal guard (400), 404s, GET / serves the dashboard, the request log never carries the token,
 // the startup banner (per-tool counts + watch mode), --no-<id> / --root (single and multi-root).
+// Plan 7 review fixes: the token file is never served even through ollama (whose root is ~/.ai-usage) (M2); query values are sanitised in the
+// request log (m1); /api/file never triggers a dirty re-walk (m5); hardening headers, Host allow-list → 421, a 404 for / that names no path (m7);
+// GET /README.md served (m8).
 // Windows-safe: 127.0.0.1 only, every wait ≤ 10 s (35 s only on a platform without recursive fs.watch), every child is killed in
 // finally, the temp HOME is deleted afterwards.
 import http from 'node:http';
@@ -34,6 +37,8 @@ const CODEX_PATHS = [
   'sessions/2026/08/12/rollout-2026-08-12T09-00-00-oss.jsonl',
   'sessions/2026/08/12/rollout-2026-08-12T10-00-00-named.jsonl',
 ];
+
+const TTL_MS = 30000;   // the collector's polling-fallback TTL (review m5 waits it out where fs.watch is unavailable)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const request = (port, method, p, headers = {}) => new Promise((resolve, reject) => {
@@ -123,6 +128,13 @@ export async function run() {
     add('collector: /api/* without a token → 401 JSON (with CORS headers); a wrong token → 401; ?token= works like the Bearer header',
       noTok.status === 401 && isJsonCT(noTok) && asJson(noTok) && asJson(noTok).error && corsOk(noTok) && badTok.status === 401 && qTok.status === 200,
       `no token ${noTok.status} ${noTok.body.toString().slice(0, 200)} · wrong ${badTok.status} · ?token= ${qTok.status}`);
+    // review m1: the request log echoes tool / path / refresh — an unauthenticated request must not be able to forge a log line through them
+    await API('/api/file?tool=codex&path=' + encodeURIComponent('\nINJECTED 200 0\n'), false);
+    await sleep(150);
+    const injLines = a.out.split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => l.includes('INJECTED'));
+    add('collector (review m1): control characters in a logged query value become "?" — an unauthenticated GET with path=%0AINJECTED%20200%200%0A yields ONE stdout line "GET /api/file?tool=codex&path=?INJECTED 200 0? 401 <bytes>" (no forged line, no raw newline before the status)',
+      injLines.length === 1 && /^\d\d:\d\d:\d\d GET \/api\/file\?tool=codex&path=\?INJECTED 200 0\? 401 \d+$/.test(injLines[0]) && !a.out.split('\n').some((l) => /^INJECTED/.test(l)),
+      JSON.stringify(injLines));
 
     const st = await API('/api/status');
     const sj = asJson(st) || {};
@@ -159,6 +171,14 @@ export async function run() {
     add('collector: /api/file streams the rollout byte-exact with Content-Length + Last-Modified — the "sessions/…" and the "archived_sessions/…" path alike',
       ff.status === 200 && ff.body.equals(want) && +ff.headers['content-length'] === want.length && !Number.isNaN(Date.parse(ff.headers['last-modified'] || '')) && corsOk(ff) && fa.status === 200 && fa.body.equals(want),
       `status ${ff.status} · ${ff.body.length}/${want.length} bytes · cl=${ff.headers['content-length']} lm=${ff.headers['last-modified']} · archived ${fa.status} ${fa.body.length}`);
+    // review M2: ollama's first root IS ~/.ai-usage (the token dir the collector creates itself), so a plain relative path reaches the token file
+    const tokViaOllama = await API('/api/file?tool=ollama&path=collector.token');
+    const tokViaOllamaUpper = await API('/api/file?tool=ollama&path=COLLECTOR.TOKEN');
+    const ollamaList = asJson(await API('/api/list?tool=ollama')) || {};
+    add('collector (review M2): the token file is never served — GET /api/file?tool=ollama&path=collector.token → 404 JSON without the token (ollama is found with root ~/.ai-usage; the upper-case spelling answers 404 too), and /api/list?tool=ollama does not list it',
+      tool('ollama').found === true && (tool('ollama').roots || []).some((r) => /\.ai-usage$/.test(r)) && tokViaOllama.status === 404 && isJsonCT(tokViaOllama) && !tokViaOllama.body.includes(token)
+        && tokViaOllamaUpper.status === 404 && !tokViaOllamaUpper.body.includes(token) && !(ollamaList.files || []).some((f) => /collector\.token$/i.test(f.path)),
+      `status ${tokViaOllama.status}/${tokViaOllamaUpper.status} · body ${tokViaOllama.body.toString().slice(0, 120)} · ollama found=${tool('ollama').found} roots=${JSON.stringify(tool('ollama').roots)} list=${JSON.stringify((ollamaList.files || []).map((f) => f.path))}`);
 
     const trav = await API('/api/file?tool=codex&path=' + encodeURIComponent('../.ai-usage/collector.token'));
     const abs = await API('/api/file?tool=codex&path=' + encodeURIComponent(tokenFile));
@@ -186,17 +206,34 @@ export async function run() {
     add('collector: GET / → 200 text/html serving AI Usage Dashboard.html (contains "<title>AI Usage")',
       page.status === 200 && /^text\/html/i.test(page.headers['content-type'] || '') && page.body.toString('utf8').includes('<title>AI Usage'),
       `status ${page.status} ct=${page.headers['content-type']} ${page.body.length} bytes`);
+    // review m7: hardening headers on every answer; Host allow-list (DNS rebinding: a name resolving to 127.0.0.1 must reach neither the API nor the page)
+    const hardened = (r) => r.headers['x-frame-options'] === 'DENY' && r.headers['x-content-type-options'] === 'nosniff';
+    const evil = await request(a.port, 'GET', '/api/status', { ...auth, host: 'evil.test' });
+    const evilPort = await request(a.port, 'GET', '/', { host: 'evil.test:' + a.port });
+    const evilOpt = await request(a.port, 'OPTIONS', '/api/status', { host: '127.0.0.1.evil.test' });
+    const hostLh = await request(a.port, 'GET', '/', { host: 'localhost:' + a.port });
+    const hostV6 = await request(a.port, 'GET', '/', { host: '[::1]:' + a.port });
+    const hostBare = await request(a.port, 'GET', '/', { host: '127.0.0.1' });
+    add('collector (review m7): every response carries X-Frame-Options: DENY and X-Content-Type-Options: nosniff (status, 401, GET /, /api/file, OPTIONS); a Host outside 127.0.0.1 / localhost / [::1] (with or without :port) → 421 JSON even with a valid token (GET, OPTIONS and GET / alike); those three hosts are accepted',
+      [st, noTok, page, ff, opt].every(hardened) && evil.status === 421 && isJsonCT(evil) && hardened(evil) && !evil.body.includes(token) && evilPort.status === 421 && evilOpt.status === 421
+        && hostLh.status === 200 && hostV6.status === 200 && hostBare.status === 200,
+      `headers=${JSON.stringify([st, noTok, page, ff, opt].map((r) => [r.headers['x-frame-options'], r.headers['x-content-type-options']]))} · evil ${evil.status} ${evil.body.toString().slice(0, 100)} · evil:port ${evilPort.status} · OPTIONS ${evilOpt.status} · localhost ${hostLh.status} · [::1] ${hostV6.status} · bare ${hostBare.status}`);
+    // review m8: the registry's docs link (README.md#automatic-mode) is relative to the page, so the served page needs the README served too
+    const readme = await request(a.port, 'GET', '/README.md');
+    add('collector (review m8): GET /README.md → 200 text/markdown serving the repo README (the served page\'s "Where the numbers come from" link README.md#automatic-mode resolves), no token needed, hardened headers, Content-Length set',
+      readme.status === 200 && /^text\/markdown/i.test(readme.headers['content-type'] || '') && readme.body.toString('utf8').includes('automatic-mode') && +readme.headers['content-length'] === readme.body.length && hardened(readme),
+      `status ${readme.status} ct=${readme.headers['content-type']} ${readme.body.length} bytes`);
 
     // ---------------------------------------------------------------- change-driven walk (fs.watch per root; polling fallback) ----------------------------------------------------------------
     const before = tool('codex');
     const added = path.join(HOME, '.codex', 'sessions', '2026', '09', '16');
     fs.mkdirSync(added, { recursive: true });
     fs.writeFileSync(path.join(added, 'rollout-2026-09-16T10-00-00-new.jsonl'), '{"type":"session_meta"}\n');
-    const t0 = Date.now(), deadline = t0 + (before.watch === 'polling' ? 35000 : 5000);   // fs.watch: ≤ 5 s; a platform without recursive watch falls back to the 30 s TTL
+    const t0 = Date.now(), deadline = t0 + (before.watch === 'polling' ? 35000 : 8000);   // fs.watch: ≤ 8 s (the E2E's wait); a platform without recursive watch falls back to the 30 s TTL
     let seen = null, polls = 0;
     while (Date.now() < deadline) { polls++; const s = toolOf(asJson(await API('/api/status')), 'codex'); if (s.files === 6) { seen = s; break; } await sleep(200); }
     const afterList = asJson(await API('/api/list?tool=codex')) || {};
-    add('collector: change-driven walk — a rollout added under ~/.codex/sessions is counted by a plain /api/status (no refresh) within 5 s under watch=fs (within the 30 s TTL under watch=polling): files 5 → 6, newer newestMtime + scannedAt, and /api/list lists it',
+    add('collector: change-driven walk — a rollout added under ~/.codex/sessions is counted by a plain /api/status (no refresh) within 8 s under watch=fs (within the 30 s TTL under watch=polling): files 5 → 6, newer newestMtime + scannedAt, and /api/list lists it',
       seen !== null && seen.newestMtime > before.newestMtime && seen.scannedAt > before.scannedAt && ['fs', 'polling'].includes(seen.watch) && seen.watch === before.watch
         && (afterList.files || []).some((f) => f.path === 'sessions/2026/09/16/rollout-2026-09-16T10-00-00-new.jsonl'),
       `watch=${before.watch} seen=${JSON.stringify(seen)} after ${Date.now() - t0} ms / ${polls} polls · before=${JSON.stringify({ files: before.files, newestMtime: before.newestMtime, scannedAt: before.scannedAt })} · list=${(afterList.files || []).length}`);
@@ -207,6 +244,24 @@ export async function run() {
     const same = (id) => toolOf(c1, id).scannedAt === toolOf(c2, id).scannedAt && toolOf(c1, id).walkMs === toolOf(c2, id).walkMs && typeof toolOf(c1, id).scannedAt === 'number' && typeof toolOf(c1, id).walkMs === 'number';
     add('collector: a clean tool is not re-walked — two plain /api/status calls 1 s apart return the same scannedAt and walkMs for codex, local and copilot-cli',
       ['codex', 'local', 'copilot-cli'].every(same), JSON.stringify({ c1: toolOf(c1, 'codex'), c2: toolOf(c2, 'codex') }).slice(0, 600));
+
+    // review m5: /api/file waits for the first walk (or one in flight) only — a dirty tool is re-walked by the next /api/status, never by a file request
+    const gem0 = toolOf(c2, 'gemini-cli');
+    const mark = a.out.length;   // only a "change detected" line logged AFTER the touch counts (a freshly seeded root fires one spurious event ~2 s after start)
+    fs.writeFileSync(path.join(HOME, '.gemini', 'tmp', 'touched.jsonl'), '{"touched":1}\n');
+    if (gem0.watch === 'polling') await sleep(Math.max(0, TTL_MS + 1500 - (Date.now() - gem0.scannedAt)));   // no watcher there: the tool is stale once its cache is older than the TTL
+    else { const dl = Date.now() + 8000; while (Date.now() < dl && !/gemini-cli: change detected/.test(a.out.slice(mark))) await sleep(100); }
+    const dirtySeen = gem0.watch === 'polling' || /gemini-cli: change detected/.test(a.out.slice(mark));
+    const bigBytes = fs.readFileSync(path.join(HOME, '.gemini', ...BIG_FILE.split('/')));
+    const tFile0 = Date.now();
+    const dirtyFile = await API('/api/file?tool=gemini-cli&path=' + encodeURIComponent(BIG_FILE));
+    const tFile1 = Date.now();
+    await sleep(100);
+    const tStatus = Date.now();
+    const gem1 = toolOf(asJson(await API('/api/status')), 'gemini-cli');
+    add('collector (review m5): a dirty tool (a file touched under ~/.gemini: watcher fired / TTL elapsed) is NOT re-walked by GET /api/file — the 2 MB file streams byte-exact (200) and the re-walk happens on the NEXT /api/status (scannedAt later than that request was sent, never inside the file request window; files 1 → 2)',
+      dirtySeen && dirtyFile.status === 200 && dirtyFile.body.equals(bigBytes) && typeof gem1.scannedAt === 'number' && gem1.scannedAt >= tStatus && !(gem1.scannedAt >= tFile0 && gem1.scannedAt <= tFile1) && gem1.files === 2,
+      `watch=${gem0.watch} dirtySeen=${dirtySeen} file ${dirtyFile.status} ${dirtyFile.body.length} bytes · window [${tFile0}, ${tFile1}] · status sent ${tStatus} · gemini ${JSON.stringify(gem1)}`);
 
     const wantBig = fs.readFileSync(path.join(HOME, '.gemini', ...BIG_FILE.split('/')));
     const [rs, rf] = await Promise.all([API('/api/status?refresh=1'), API('/api/file?tool=gemini-cli&path=' + encodeURIComponent(BIG_FILE))]);
@@ -224,9 +279,15 @@ export async function run() {
     await a.stop();
 
     // ---------------------------------------------------------------- flags: --no-<id>, --root (single + multi-root) ----------------------------------------------------------------
-    b = await start(['--no-codex', '--root', `cline=${path.join(HOME, '.claude')}`, '--root', `aider=${path.join(HOME, '.codex')}`, '--root', `aider=${path.join(HOME, '.copilot')}`]);
+    b = await start(['--no-codex', '--root', `cline=${path.join(HOME, '.claude')}`, '--root', `aider=${path.join(HOME, '.codex')}`, '--root', `aider=${path.join(HOME, '.copilot')}`, '--html', path.join(HOME, 'missing-dashboard.html')]);
     add('collector: starts with --no-codex and --root flags', b.port > 0, b.io());
     if (!b.port) return summary();
+    // review m7: the 404 for a missing dashboard file must not disclose the absolute path (the banner on the terminal still names it)
+    const root404 = await request(b.port, 'GET', '/');
+    const body404 = root404.body.toString('utf8');
+    add('collector (review m7): --html <missing file> → GET / answers 404 "AI Usage Dashboard.html not found — pass --html <path>" naming neither the path nor a drive letter (the startup banner on the terminal still says MISSING with the path)',
+      root404.status === 404 && /AI Usage Dashboard\.html not found — pass --html <path>/.test(body404) && !body404.includes(HOME) && !/[A-Za-z]:[\/]/.test(body404) && !/missing-dashboard/.test(body404) && /MISSING/.test(b.out) && b.out.includes('missing-dashboard.html'),
+      `status ${root404.status} · body ${body404.slice(0, 200)}`);
     const tok2 = fs.readFileSync(tokenFile, 'utf8').trim();
     const B = (p) => request(b.port, 'GET', p, { authorization: 'Bearer ' + tok2 });
     const s2 = asJson(await B('/api/status')) || {};

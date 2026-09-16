@@ -6,6 +6,9 @@ import { openDashboard, OUT } from '../lib/harness.mjs';
 // existing fixture texts (Claude jsonl + Codex rollouts + Copilot CLI events); every request's Authorization header is recorded.
 // Expected totals are the folder-scan numbers already asserted in 10-baseline (sess-aaa 110/25/50/220/2) and 87-folder-logs
 // (codex abc 200/200/130/3, resumed 700/300/150/4, oss session local:1; copilot-cli 2150/100/900/500/5).
+// Plan 7 review fixes (blocks "review …"): _viaCollector needs a LANDED read (M1); refreshAll leaves collector-fed handles to the tick (m2); a tool
+// disconnected while collector-fed stays out until the collector is reconnected (m3); the restored watch ticks at once (m4 — the stub is installed
+// with evaluateOnNewDocument before the (w7) reload); a non-JSON 2xx is "Unexpected response … is this the collector?" and no entry (m9).
 const read = (...p) => fs.readFileSync(path.join(OUT, ...p), 'utf8');
 const BASE = 'http://127.0.0.1:11436';
 const NOT_RUNNING = 'Not running at http://127.0.0.1:11436 — start it with: node docs/tools/ai-usage-collector.mjs';
@@ -36,8 +39,9 @@ export async function run({ browser, ok }) {
       // cline: absent → reported as not found
     };
 
-    // one stub factory per page: serves the fixture tree for a given token, records every request { path, auth }
-    await page.evaluate(() => {
+    // one stub factory per page: serves the fixture tree for a given token, records every request { path, auth }. installStub is a plain function so the
+    // (w7) reload can register it with evaluateOnNewDocument too (review m4: the restore-time tick must meet the stub, not the real 127.0.0.1)
+    const installStub = () => {
       window.__collectorStub = (fx, opts = {}) => {
         const reqs = [];
         const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json' } });
@@ -50,6 +54,7 @@ export async function run({ browser, ok }) {
           const auth = h ? (typeof h.get === 'function' ? h.get('Authorization') : (h.Authorization || h.authorization || null)) : null;
           reqs.push({ path: u.pathname + u.search, auth, origin: u.origin });
           if (opts.down) throw new TypeError('Failed to fetch');
+          if (opts.html) return new Response('<!doctype html><title>Something else</title><p>not the collector</p>', { status: 200, headers: { 'Content-Type': 'text/html' } });   // review m9: a 2xx that is not JSON
           if (!u.pathname.startsWith('/api/')) return new Response('nope', { status: 404 });
           if (opts.reject401 || auth !== 'Bearer ' + opts.token) return json({ error: 'unauthorized' }, 401);
           if (u.pathname === '/api/status') return json({ version: '7', home: '/home/t', os: 'test', startedAt: 1, tools: Object.entries(meta).map(([id, m]) => {
@@ -72,7 +77,8 @@ export async function run({ browser, ok }) {
         return reqs;
       };
       window.__sum = (rows) => rows.reduce((a, r) => ({ in: a.in + (r.in || 0), cw: a.cw + (r.cw || 0), cr: a.cr + (r.cr || 0), out: a.out + (r.out || 0), msgs: a.msgs + (r.msgs || 0) }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
-    });
+    };
+    await page.evaluate(installStub);
     const eq = (a, b) => !!a && !!b && a.in === b.in && a.cw === b.cw && a.cr === b.cr && a.out === b.out && a.msgs === b.msgs;
     const is = (t, i, cw, cr, o, m) => !!t && t.in === i && t.cw === cw && t.cr === cr && t.out === o && t.msgs === m;
 
@@ -467,31 +473,161 @@ export async function run({ browser, ok }) {
       && JSON.stringify(w6.after.click.folder) === JSON.stringify(['codex']) && w6.after.click.via.length === 0
       && w6.after.tick.ret === undefined && w6.after.tick.scans.length === 0 && w6.after.tick.reqs.length === 0 && !w6.after.tick.entry && !w6.after.tick.timer && w6.after.tick.statusText === 'Not connected.', JSON.stringify(w6.after));
 
-    // (w7) restore on init: a restored collector entry + a remembered token → the watch starts at init (no request until the first tick); without a token → Reconnect guidance, no watch
+    // ================= Plan 7 review fixes =================
+    // (review M1) _viaCollector needs a LANDED read: a tool the collector found but could not read (ollama — ~/.ai-usage holds only the token file the collector itself
+    // created; a tool whose list failed) keeps its own folder handle's Re-scan / Sync (rescanFolder / scanHandle), never hijacked to rescanViaCollector
+    const r1 = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {};
+      const origVia = App.rescanViaCollector, origFolder = App.rescanFolder, origServer = App.connectServer, origHandle = App.scanHandle;
+      const savedHandles = App._dirHandles, savedDir = App.dirHandle;
+      const via = [], folder = [], server = [], handle = [];
+      App.rescanViaCollector = async function (id) { via.push(id); }; App.rescanFolder = async function (id) { folder.push(id); }; App.connectServer = async function (c) { server.push(c.id); }; App.scanHandle = async function () { handle.push('local'); };
+      try {
+        Store.setConnector('collector', { label: '1 tool · 4 files', lastSync: Date.now(), err: null });
+        const granted = () => ({ queryPermission: async () => 'granted', requestPermission: async () => 'granted' });
+        App._collectorSnap = { codex: { files: 4, newestMtime: 1, matched: 4, landed: true, note: '4 files' }, ollama: { files: 1, newestMtime: 1, matched: 0, landed: false, note: 'found, nothing to read' },
+          local: { files: 3, newestMtime: 1, matched: 0, landed: false, note: 'found, nothing to read' }, cline: { files: -1, newestMtime: -1, matched: 0, landed: false, note: 'error: x' } };
+        App._dirHandles = { ollama: granted(), codex: granted(), cline: granted() }; App.dirHandle = granted();
+        const out = { buttons: { ollama: !!document.getElementById('ollama-rescan'), codex: !!document.getElementById('codex-rescan') },
+          via: { codex: App._viaCollector('codex'), ollama: App._viaCollector('ollama'), local: App._viaCollector('local'), cline: App._viaCollector('cline'), absent: App._viaCollector('roo') } };
+        await App.syncConnector('ollama'); await App.syncConnector('codex'); await App.syncConnector('local'); await App.syncConnector('cline');
+        document.getElementById('ollama-rescan').click(); document.getElementById('codex-rescan').click(); document.getElementById('cline-rescan').click();
+        await new Promise(r => setTimeout(r, 5));
+        out.routes = { via: via.slice(), folder: folder.slice(), server: server.slice(), handle: handle.slice() };
+        delete Store.connectors.collector;
+        out.viaOff = App._viaCollector('codex');
+        return out;
+      } finally { App.rescanViaCollector = origVia; App.rescanFolder = origFolder; App.connectServer = origServer; App.scanHandle = origHandle; App._dirHandles = savedHandles; App.dirHandle = savedDir; App._collectorSnap = {}; Store.connectors = {}; }
+    });
+    ok('review M1: _viaCollector(id) is true only for a tool whose collector read LANDED (codex) — false for ollama "found, nothing to read", local "found, nothing to read", cline "error: …" (retry sentinel), an absent tool, and once the collector entry is gone; so Sync / Re-scan on ollama, local and cline with a folder handle go to rescanFolder (+ connectServer for ollama) / scanHandle, and only codex goes to rescanViaCollector',
+      r1.buttons.ollama && r1.buttons.codex && r1.via.codex === true && r1.via.ollama === false && r1.via.local === false && r1.via.cline === false && r1.via.absent === false && r1.viaOff === false
+      && JSON.stringify(r1.routes.via) === JSON.stringify(['codex', 'codex']) && JSON.stringify(r1.routes.folder) === JSON.stringify(['ollama', 'cline', 'ollama', 'cline']) && JSON.stringify(r1.routes.server) === JSON.stringify(['ollama']) && JSON.stringify(r1.routes.handle) === JSON.stringify(['local']),
+      JSON.stringify(r1));
+
+    // (review m2) Refresh all leaves a collector-fed tool's folder handle alone — the collector tick re-reads what changed; a handle the collector does not feed is re-scanned as before
+    const r2 = await page.evaluate(async () => {
+      Store.sources = {}; Store.connectors = {};
+      const origFolder = App.rescanFolder, origRescan = App.rescan, origTick = App._collectorTick, origServer = App.connectServer, origKey = App.connectKey;
+      const savedHandles = App._dirHandles, savedDir = App.dirHandle;
+      const folder = [], ticks = [], rescans = [];
+      App.rescanFolder = async function (id) { folder.push(id); }; App.rescan = async function () { rescans.push('local'); }; App._collectorTick = async function (c) { ticks.push(c.id); }; App.connectServer = async function () {}; App.connectKey = async function () {};
+      try {
+        Store.setConnector('collector', { label: '2 tools · 6 files', lastSync: Date.now(), err: null });
+        document.getElementById('collector-key').value = 'tok-abc';
+        App._collectorSnap = { codex: { files: 4, newestMtime: 1, matched: 4, landed: true, note: '4 files' }, local: { files: 2, newestMtime: 1, matched: 2, landed: true, note: '2 files' }, ollama: { files: 1, newestMtime: 1, matched: 0, landed: false, note: 'found, nothing to read' } };
+        App._dirHandles = { codex: {}, ollama: {}, cline: {} }; App.dirHandle = {};
+        await App.refreshAll();
+        return { folder: folder.slice(), ticks: ticks.slice(), rescans: rescans.slice() };
+      } finally { App.rescanFolder = origFolder; App.rescan = origRescan; App._collectorTick = origTick; App.connectServer = origServer; App.connectKey = origKey; App._dirHandles = savedHandles; App.dirHandle = savedDir; App._collectorSnap = {}; Store.connectors = {}; document.getElementById('collector-key').value = ''; }
+    });
+    ok('review m2: refreshAll with handles for codex, ollama, cline + the Claude Code handle while the collector feeds codex and local → ONE collector tick, rescanFolder only for ollama (not landed) and cline (not the collector\'s), never for codex; rescan() (Claude Code) not called',
+      JSON.stringify(r2.ticks) === JSON.stringify(['collector']) && JSON.stringify(r2.folder) === JSON.stringify(['ollama', 'cline']) && r2.rescans.length === 0, JSON.stringify(r2));
+
+    // (review m9) something else answers 200 at the URL (HTML): not "Not running", not "Rejected" — an honest "is this the collector?" and no entry; on a tick the same text as the entry's err
+    const r9 = await page.evaluate(async (fx) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {};
+      const c = connectorById('collector');
+      const origFetch = window.fetch;
+      const opts = { token: 'tok-abc', html: true };
+      const reqs = window.__collectorStub(fx, opts);
+      try {
+        document.getElementById('collector-key').value = 'tok-abc'; document.getElementById('remember-collector').checked = false;
+        Store.setConnector('collector', { label: 'stale entry', lastSync: Date.now(), err: null });
+        const ret = await App.connectCollector(c);
+        const out = { ret, statusText: document.getElementById('collector-status').textContent, entry: Store.connectors.collector, status: Store.connectorStatus(c), landed: Object.keys(Store.sources), watch: !!App._pollTimers.collector,
+          lists: reqs.filter(r => /\/api\/list/.test(r.path)).length, persisted: !!(((JSON.parse(localStorage.getItem('aiusage:data') || '{}')).connectors || {}).collector) };
+        opts.html = false;
+        await App.connectCollector(c);   // a good connect, then the thing at the URL changes
+        opts.html = true;
+        await App._collectorTick(c);
+        out.tick = { err: Store.connectors.collector.err, status: Store.connectorStatus(c), statusText: document.getElementById('collector-status').textContent, codexRows: ((Store.sources.codex || {}).rows || []).length, timer: !!App._pollTimers.collector };
+        return out;
+      } finally { window.fetch = origFetch; if (App.stopCollectorWatch) App.stopCollectorWatch(c); }
+    }, fx);
+    ok('review m9: a 200 that is not JSON → connectCollector: status line "Unexpected response from http://127.0.0.1:11436 — is this the collector?", NO entry (the stale one deleted, not persisted), off, nothing lands, no list, no watch; a tick meeting it → err "Unexpected response from … — is this the collector?" (warn, entry + the tools\' data kept, watch alive)',
+      r9.ret === undefined && r9.statusText === 'Unexpected response from http://127.0.0.1:11436 — is this the collector?' && r9.entry === undefined && r9.status === 'off' && r9.landed.length === 0 && r9.lists === 0 && r9.watch === false && !r9.persisted
+      && r9.tick && r9.tick.err === 'Unexpected response from http://127.0.0.1:11436 — is this the collector?' && r9.tick.status === 'warn' && /Unexpected response/.test(r9.tick.statusText) && r9.tick.codexRows > 0 && r9.tick.timer, JSON.stringify(r9));
+
+    // (review m3) a tool disconnected while the collector feeds it leaves the snapshot AND stays out of the collector's reads (an otherwise unchanged tick would re-land it,
+    // deleted data included) until Validate & connect on the collector card; the collector's label / line / table follow the disconnect at once
+    const r3 = await page.evaluate(async (fx) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {};
+      const c = connectorById('collector');
+      const origFetch = window.fetch, origConfirm = window.confirm, origScan = App.scanFiles;
+      const opts = { token: 'tok-abc', mtime: {} };
+      window.__collectorStub(fx, opts);
+      const scans = []; App.scanFiles = function (cc, files, o) { scans.push(cc.id); return origScan.call(this, cc, files, o); };
+      window.confirm = () => true;   // "Also delete codex's stored usage data?" → OK
+      const cell = () => (([...document.querySelectorAll('#collector-tools tbody tr')].find(tr => /Codex/.test(tr.children[0].textContent)) || { children: [{}, {}, { textContent: null }] }).children[2].textContent);
+      try {
+        document.getElementById('collector-key').value = 'tok-abc'; document.getElementById('remember-collector').checked = false;
+        await App.connectCollector(c);
+        const before = { label: Store.connectors.collector.label, snap: Object.keys(App._collectorSnap).sort(), codexRows: Store.sources.codex.rows.length, lastSync: Store.connectors.collector.lastSync, cell: cell() };
+        await new Promise(r => setTimeout(r, 5));
+        App.disconnectConnector('codex');
+        const after = { snap: Object.keys(App._collectorSnap).sort(), excluded: [...(App._collectorExcluded || [])], persisted: (Store.connectors.collector || {}).excluded, label: Store.connectors.collector.label, err: Store.connectors.collector.err,
+          lastSync: Store.connectors.collector.lastSync, statusText: document.getElementById('collector-status').textContent, codexEntry: !!Store.connectors.codex, codexRows: ((Store.sources.codex || {}).rows || []).length, codexProjects: !!Store.projectsBy.codex,
+          cell: cell(), via: App._viaCollector('codex'), timer: !!App._pollTimers.collector, rescanHidden: document.getElementById('codex-rescan').hidden, codexStatus: document.getElementById('codex-status').textContent };
+        scans.length = 0; opts.mtime.codex = 1756000000000;   // codex changed on disk → the tick must NOT re-land it
+        const tick = await App._collectorTick(c);
+        const afterTick = { ret: tick, scans: scans.slice(), codexEntry: !!Store.connectors.codex, codexRows: ((Store.sources.codex || {}).rows || []).length, label: Store.connectors.collector.label, cell: cell(), snap: Object.keys(App._collectorSnap).sort(), excluded: [...(App._collectorExcluded || [])] };
+        scans.length = 0;
+        const re = await App.connectCollector(c);   // Validate & connect (hub Sync on the collector card is the same call): the exclusion is cleared, codex is read again
+        const reconnected = { ret: re, scans: scans.slice().sort(), codexEntry: !!Store.connectors.codex, codexRows: ((Store.sources.codex || {}).rows || []).length, excluded: [...(App._collectorExcluded || [])], persisted: Store.connectors.collector.excluded, label: Store.connectors.collector.label, cell: cell() };
+        return { before, after, afterTick, reconnected, note: [...document.querySelectorAll('#src-collector .note')].map(n => n.textContent).join(' ') };
+      } finally { window.fetch = origFetch; window.confirm = origConfirm; App.scanFiles = origScan; if (App.stopCollectorWatch) App.stopCollectorWatch(c); }
+    }, fx);
+    ok('review m3: disconnect codex (delete its data) while collector-fed → codex leaves the snapshot (App._collectorExcluded has it; persisted as excluded on the collector entry), its entry / rows / project rows gone, Re-scan hidden, _viaCollector false; the collector label drops to "2 tools · 4 files" (line + table row "disconnected", lastSync / err untouched, watch alive); the card copy says "Disconnected tools stay out until you reconnect the collector"',
+      r3.before.label === '3 tools · 8 files' && JSON.stringify(r3.before.snap) === JSON.stringify(['codex', 'continue', 'copilot-cli', 'local']) && r3.before.codexRows > 0 && r3.before.cell === '4 files'
+      && JSON.stringify(r3.after.snap) === JSON.stringify(['continue', 'copilot-cli', 'local']) && JSON.stringify(r3.after.excluded) === JSON.stringify(['codex']) && JSON.stringify(r3.after.persisted) === JSON.stringify(['codex'])
+      && r3.after.label === '2 tools · 4 files' && r3.after.err === null && r3.after.lastSync === r3.before.lastSync && /2 tools/.test(r3.after.statusText) && /4 files/.test(r3.after.statusText) && /1 disconnected/.test(r3.after.statusText) && /watching for changes/.test(r3.after.statusText)
+      && !r3.after.codexEntry && r3.after.codexRows === 0 && !r3.after.codexProjects && r3.after.cell === 'disconnected' && r3.after.via === false && r3.after.timer && r3.after.rescanHidden === true && r3.after.codexStatus === 'Not connected.'
+      && /Disconnected tools stay out until you reconnect the collector/.test(r3.note), JSON.stringify({ before: r3.before, after: r3.after, note: r3.note }));
+    ok('review m3: a later tick with codex changed on disk does NOT re-land it (no scanFiles, no entry, no rows; label stays "2 tools · 4 files", row "disconnected"); Validate & connect on the collector clears the exclusion (in memory and on the entry) and reads codex again ("3 tools · 8 files", "4 files")',
+      r3.afterTick.ret === true && r3.afterTick.scans.length === 0 && !r3.afterTick.codexEntry && r3.afterTick.codexRows === 0 && r3.afterTick.label === '2 tools · 4 files' && r3.afterTick.cell === 'disconnected' && JSON.stringify(r3.afterTick.snap) === JSON.stringify(['continue', 'copilot-cli', 'local']) && JSON.stringify(r3.afterTick.excluded) === JSON.stringify(['codex'])
+      && r3.reconnected.ret === true && r3.reconnected.scans.includes('codex') && r3.reconnected.codexEntry && r3.reconnected.codexRows > 0 && r3.reconnected.excluded.length === 0 && JSON.stringify(r3.reconnected.persisted) === JSON.stringify([]) && r3.reconnected.label === '3 tools · 8 files' && r3.reconnected.cell === '4 files',
+      JSON.stringify({ afterTick: r3.afterTick, reconnected: r3.reconnected }));
+
+    // (w7) restore on init — review m4: a restored collector entry + a remembered token → the watch starts at init AND one tick runs at once (the stub is registered with
+    // evaluateOnNewDocument so it is in place before the page's own scripts run), so the snapshot is populated right away and Sync on a collector-fed tool routes to the
+    // collector instead of opening the folder picker for up to 60 s; without a token → Reconnect guidance, no watch, no tick
     await page.evaluate(() => {
       Store.sources = {}; Store.connectors = {}; Store.setConnector('collector', { label: '3 tools · 8 files', lastSync: Date.now() - 60000, err: null });
       LS.set('key:collector', 'tok-abc'); LS.set('url:collector', 'http://127.0.0.1:11436');
     });
+    await page.evaluateOnNewDocument(installStub);
+    await page.evaluateOnNewDocument((fx) => { window.__restoreReqs = window.__collectorStub(fx, { token: 'tok-abc' }); }, fx);
     await page.reload({ waitUntil: 'load' });
+    let ticked = true;
+    try { await page.waitForFunction(() => Object.keys(App._collectorSnap || {}).length >= 3 && /checked/.test(document.getElementById('collector-status').textContent), { timeout: 15000 }); } catch { ticked = false; }
     const w7 = await page.evaluate(async () => {
-      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));   // let the batched first render (and _syncStatusLine) run
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));   // let the batched render run
+      const origVia = App.rescanViaCollector, origFolder = App.rescanFolder, via = [], folder = [];
+      App.rescanViaCollector = async function (id) { via.push(id); }; App.rescanFolder = async function (id) { folder.push(id); };
+      try { await App.syncConnector('codex'); } finally { App.rescanViaCollector = origVia; App.rescanFolder = origFolder; }
       return { timer: !!(App._pollTimers && App._pollTimers.collector), entry: !!Store.connectors.collector, status: Store.connectorStatus(connectorById('collector')), statusText: document.getElementById('collector-status').textContent,
         key: document.getElementById('collector-key').value, rem: document.getElementById('remember-collector').checked, tokenInDom: document.documentElement.outerHTML.includes('tok-abc'),
-        hubActions: [...document.querySelectorAll('#accounts-hub .acct[data-connector="collector"] .acct-actions button')].map(b => b.textContent) };
+        hubActions: [...document.querySelectorAll('#accounts-hub .acct[data-connector="collector"] .acct-actions button')].map(b => b.textContent),
+        snap: Object.fromEntries(Object.entries(App._collectorSnap || {}).map(([k, v]) => [k, v.landed])), labels: { local: (Store.connectors.local || {}).label, codex: (Store.connectors.codex || {}).label, 'copilot-cli': (Store.connectors['copilot-cli'] || {}).label },
+        codexRows: ((Store.sources.codex || {}).rows || []).length, reqs: (window.__restoreReqs || []).map(r => r.path), via: via.slice(), folder: folder.slice(), codexRescan: (document.getElementById('codex-rescan') || {}).hidden };
     });
-    ok('watch (w7): reload with a restored collector entry AND a remembered token → the watch is running right after init (App._pollTimers.collector), line "● Connected (stored data …) · watching for changes every 60 s", token restored into the input (Remember checked), never in the DOM; hub Manage / Sync / Disconnect',
-      w7.timer && w7.entry && w7.status === 'ok' && /Connected/.test(w7.statusText) && /stored data/.test(w7.statusText) && /watching for changes every 60 s/.test(w7.statusText) && w7.key === 'tok-abc' && w7.rem === true && !w7.tokenInDom
-      && JSON.stringify(w7.hubActions) === JSON.stringify(['Manage', 'Sync', 'Disconnect']), JSON.stringify(w7));
+    ok('watch (w7 · review m4): reload with a restored collector entry AND a remembered token → the watch is running right after init AND one tick ran at once (GET /api/status, 4 lists, then only the files the ScanCache does not hold): snapshot local / codex / copilot-cli landed, "via collector" labels, codex rows present, line "● Connected. 3 tools · 8 files · checked … · watching for changes every 60 s"; token restored into the input (Remember checked), never in the DOM; hub Manage / Sync / Disconnect; Sync on codex goes through the collector (no folder picker), its Re-scan shown',
+      ticked && w7.timer && w7.entry && w7.status === 'ok' && /Connected/.test(w7.statusText) && /3 tools · 8 files/.test(w7.statusText) && /checked/.test(w7.statusText) && /watching for changes every 60 s/.test(w7.statusText) && w7.key === 'tok-abc' && w7.rem === true && !w7.tokenInDom
+      && JSON.stringify(w7.hubActions) === JSON.stringify(['Manage', 'Sync', 'Disconnect']) && w7.snap.local === true && w7.snap.codex === true && w7.snap['copilot-cli'] === true
+      && w7.labels.local === '2 log files · via collector' && w7.labels.codex === '4 files · via collector' && w7.labels['copilot-cli'] === '2 files · via collector' && w7.codexRows > 0
+      && w7.reqs[0] === '/api/status' && w7.reqs.filter(p => /^\/api\/list/.test(p)).length === 4 && w7.reqs.filter(p => /^\/api\/file/.test(p)).length <= 8 && w7.reqs.filter(p => /^\/api\/file/.test(p)).every(p => /tool=(codex|local|copilot-cli)&/.test(p))   // the ScanCache (IDB) survives the reload: only files it does not hold are fetched
+      && JSON.stringify(w7.via) === JSON.stringify(['codex']) && w7.folder.length === 0 && w7.codexRescan === false,
+      `ticked=${ticked} ` + JSON.stringify(w7));
     await page.evaluate(() => { LS.del('key:collector'); });
     await page.reload({ waitUntil: 'load' });
     const w8 = await page.evaluate(async () => {
       await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
-      const out = { timer: !!(App._pollTimers && App._pollTimers.collector), entry: !!Store.connectors.collector, statusText: document.getElementById('collector-status').textContent, key: document.getElementById('collector-key').value };
+      const out = { timer: !!(App._pollTimers && App._pollTimers.collector), entry: !!Store.connectors.collector, statusText: document.getElementById('collector-status').textContent, key: document.getElementById('collector-key').value, reqs: (window.__restoreReqs || []).length };
       Store.connectors = {}; Store.persist();
       return out;
     });
-    ok('watch (w8): reload with a restored entry but NO remembered token → no watch, the card says "Reconnect: paste the collector token and click Validate & connect …" (the entry and the tools\' stored data stay)',
-      !w8.timer && w8.entry && /^Reconnect: paste the collector token and click Validate & connect/.test(w8.statusText) && w8.key === '', JSON.stringify(w8));
+    ok('watch (w8): reload with a restored entry but NO remembered token → no watch, no tick (no request), the card says "Reconnect: paste the collector token and click Validate & connect …" (the entry and the tools\' stored data stay)',
+      !w8.timer && w8.entry && /^Reconnect: paste the collector token and click Validate & connect/.test(w8.statusText) && w8.key === '' && w8.reqs === 0, JSON.stringify(w8));
 
     ok('collector: no page errors during the collector checks', errors.length === 0, errors.join(' | '));
   } finally {

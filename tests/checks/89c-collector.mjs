@@ -8,7 +8,8 @@
 // Chrome. (a) the file:// dashboard (openDashboard) connects to http://127.0.0.1:<port> — CORS + Chrome's Private Network Access for
 // file:// → loopback proven in a real browser (a PNA block is recorded verbatim and retried ONLY for this block in a browser launched
 // with the PNA features disabled — the assertions never weaken); local + codex + copilot-cli totals equal the folder-scan numbers of
-// 10-baseline / 87-folder-logs and a direct parse of the same texts. (b) the collector-served page (GET /?token=…) pre-fills the token,
+// 10-baseline / 87-folder-logs and a direct parse of the same texts; (a0) asserts the default launch itself, so a Chrome that starts enforcing
+// PNA for file:// → loopback fails the suite instead of hiding behind the retry. (b) the collector-served page (GET /?token=…) pre-fills the token,
 // strips it from the address bar, defaults the card's URL to its own origin, and connects on a real click of Validate & connect.
 // (c) a rollout written under the temp HOME is picked up by ONE App._collectorTick on the file:// page: codex alone is re-read (+1 file,
 // +1 session, +40 in / +7 out), local / copilot-cli untouched. Collector killed and the temp HOME deleted in finally.
@@ -94,10 +95,10 @@ async function runE2E({ browser, ok }) {
   const brief = (s) => JSON.stringify(s && { protocol: s.protocol, local: s.local, aaa: s.localAaa, refLocal: s.refLocal, localFiles: s.localFiles, codex: s.codex, abc: s.codexAbc, resumed: s.codexResumed, refCodex: s.refCodex, codexFiles: s.codexFiles, oss: s.codexOssLocal,
     copilot: s.copilot, copilotFiles: s.copilotFiles, labels: s.labels, err: s.collectorErr, status: s.status, text: s.statusText, watch: s.watch, remembered: s.remembered, tokenInDom: s.tokenInDom, rows: s.tableRows });
 
-  seedHome(HOME);
   let col = null, page = null, page2 = null, alt = null;
   const closeQuietly = async (p) => { if (p) { try { await p.close(); } catch { /* already closed */ } } };
   try {
+    seedHome(HOME);   // inside the try: a seeding failure still reaches the finally (temp HOME removed) — review m10
     col = await start([], HOME);
     const token = (/^Token: ([0-9a-f]{64})$/m.exec(col.out) || [])[1] || '';
     const port = col.port;
@@ -123,6 +124,10 @@ async function runE2E({ browser, ok }) {
     };
     let a = await connectFileDashboard(browser);
     page = a.pg;
+    // review m6: the flagged retry below is a diagnostic, not a fallback — a Chrome that starts enforcing Private Network Access for file:// → loopback must FAIL the suite here
+    ok('collector e2e (a0): default-launch Chrome (no PNA flags) reaches the collector from the file:// page — connectCollector returned true, no failed request, no page error',
+      a.ret === true && a.failed.length === 0 && a.errors.length === 0,
+      `ret=${a.ret} status="${a.snap && a.snap.statusText}" requestfailed=${JSON.stringify(a.failed)} errors=${JSON.stringify(a.errors)}`);
     let pna = 'no flag needed';
     if (a.ret !== true) {   // a PNA / CORS block shows as a failed fetch → "Not running at …": record it verbatim, retry once with the PNA features off (this block only)
       pna = `default launch FAILED (status "${a.snap.statusText}" · requestfailed: ${a.failed.join(' | ') || 'none'} · console/page errors: ${a.errors.join(' | ') || 'none'}) → retried with --disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults`;

@@ -5090,11 +5090,19 @@ const App = {
     }
     if (c.kind === 'collector') {   // v7: the collector owns no rows — only its token (input / Remember / LS, cleared above), its entry and its tools table go; the tools keep their entries AND their data (no prompt)
       this.stopCollectorWatch(c);   // T3: automatic mode ends with the entry (a tick never re-creates it; an in-flight tick commits nothing)
-      const fed = Object.keys(this._collectorSnap); this._collectorSnap = {}; this._collectorSummary = [];
+      const fed = Object.keys(this._collectorSnap); this._collectorSnap = {}; this._collectorSummary = []; this._collectorExcluded = new Set();   // the exclusion list went with the entry (review m3)
       for (const tid of fed) { const rs = $(tid + '-rescan'); if (rs) rs.hidden = !this._dirHandles[tid]; }   // the tools' Re-scan buttons back to the folder-handle rule
       if (fed.includes('local')) $('rescan-local').hidden = !this.dirHandle;
       this._renderCollectorTools($('collector-tools'), []);
       Store.persist(); this.render(); return;
+    }
+    if (Store.connectors.collector && this._collectorReadable(c)) {   // v7 (review m3): disconnected while the collector feeds it → out of the collector's snapshot AND its reads (an otherwise
+      delete this._collectorSnap[id]; this._collectorExcluded.add(id);   // unchanged tick would re-land it, deleted data included) until Validate & connect on the collector card; persisted on its entry
+      const cc = connectorById('collector');
+      if (this._collectorSummary.length) {   // a walk happened on this page: the collector's label / line / table follow now (quiet: nothing was checked)
+        const summary = this._collectorSummary.map(x => ({ ...x })), row = summary.find(x => x.id === id); if (row) row.files = 'disconnected';
+        this._collectorCommit(cc, { ...this._collectorSnap }, summary, { quiet: true });
+      } else Store.setConnector(cc.id, { excluded: [...this._collectorExcluded] });   // restored entry, no walk yet (or none that landed): just remember the exclusion
     }
     if (confirm(`Also delete ${c.name}'s stored usage data? OK = delete, Cancel = keep the data.`)) {
       for (const sid of c.srcIds) delete Store.sources[sid];
@@ -5637,7 +5645,7 @@ const App = {
     }
     if (!dual) kids.push(statusEl);
     if (c.kind === 'collector') kids.push(   // v7: what the collector does, in one line, then the tools table connectCollector fills (tool · root · files · last change)
-      el('div', { class: 'note', text: 'Files are read through the collector on this machine only (127.0.0.1): the token is sent to the URL above and nowhere else, and every tool it finds connects under its own card with "via collector". Run it with: node docs/tools/ai-usage-collector.mjs — it prints the token.' }),
+      el('div', { class: 'note', text: 'Files are read through the collector on this machine only (127.0.0.1): the token is sent to the URL above and nowhere else, and every tool it finds connects under its own card with "via collector". Run it with: node docs/tools/ai-usage-collector.mjs — it prints the token. Disconnected tools stay out until you reconnect the collector (Validate & connect reads every found tool again).' }),
       el('table', { id: 'collector-tools', class: 'collector-tools' }));
     const L = c.links || {}, ln = [];
     if (L.get) ln.push(el('a', { href: L.get, target: '_blank', rel: 'noopener', text: 'Get it' }));
@@ -5902,7 +5910,10 @@ const App = {
     catch (e) {
       if (superseded()) return;
       status.textContent = ''; status.dataset.gen = '';
-      if (e && e.status) {   // a real HTTP answer (401 / 5xx): attention, the entry carries the collector's own message
+      if (e && e.notJson) {   // a 2xx that is not JSON: something else answers at that URL (review m9) — like "not running": no entry (a stale one goes too)
+        delete Store.connectors[c.id]; Store.persist();
+        status.textContent = this._collectorErrText(e, base);
+      } else if (e && e.status) {   // a real HTTP answer (401 / 5xx): attention, the entry carries the collector's own message
         const err = String(e.message || e).slice(0, 80);
         Store.setConnector(c.id, { err });
         status.appendChild(el('span', { class: 'err', text: 'Rejected: ' }));
@@ -5915,6 +5926,7 @@ const App = {
       return;
     }
     if (superseded()) return;
+    this._collectorExcluded = new Set();   // Validate & connect reads every found tool again — a tool disconnected earlier is back in (review m3)
     const walked = await this._collectorWalk(c, st, { api, base, token, full: true, stale: superseded });
     if (!walked) return;   // superseded mid-walk: its own placeholder is already cleared, nothing committed
     this.startCollectorWatch(c);   // automatic mode from here on (no immediate tick — everything was just read)
@@ -5949,8 +5961,10 @@ const App = {
   },
   /* =================== v7 T3: automatic mode — the collector's status watch =================== */
   _collectorSnap: {},      // toolId → { files, newestMtime, matched, landed, note } from the last /api/status walk: the change detector (files / newestMtime) AND the
-                           // "this tool is the collector's" test (_viaCollector → Re-scan routing). Only found tools this page can read are in it. Never persisted.
+                           // "this tool is the collector's" test (_viaCollector → Re-scan routing, landed only). Only found tools this page can read are in it. Never persisted.
   _collectorSummary: [],   // the tools-table rows of the last walk ({ id, name, root, files, newest }) — rescanViaCollector updates one row in place
+  _collectorExcluded: new Set(),   // tool ids disconnected while the collector fed them (review m3): out of every walk until Validate & connect on the collector card
+                                   // (connectCollector clears it); mirrored as `excluded` on the collector entry so a reload honours it (_restoreCollectorWatch reads it back)
   /** GET <base><path> with the bearer token → JSON. 401 → Error('Token rejected — …', status 401); any other non-2xx → Error(status). The one request
    *  path of connectCollector, _collectorTick and rescanViaCollector: the token travels as a header to the card's base URL only. */
   _collectorApi(base, token) {
@@ -5958,7 +5972,8 @@ const App = {
       const r = await fetch(base + path, { headers: { Authorization: 'Bearer ' + token } });
       if (r.status === 401) { const e = new Error('Token rejected — copy the token the collector printed'); e.status = 401; throw e; }
       if (!r.ok) { const e = new Error(`Collector answered HTTP ${r.status} for ${path}`); e.status = r.status; throw e; }
-      return r.json();
+      try { return await r.json(); }
+      catch { const e = new Error('unexpected response (not JSON)'); e.status = r.status; e.notJson = true; throw e; }   // a 2xx that is not JSON: something else answers at that URL (review m9) — never mistaken for "not running"
     };
   },
   /** Token + base URL as the watch reads them: the card's input, else the remembered token (refreshAll's rule — never from nothing); the URL input, else the stored URL, else the registry default. */
@@ -5967,9 +5982,20 @@ const App = {
     return { token: (keyEl && keyEl.value.trim()) || LS.get(c.keyLS, null) || '', base: ((urlEl && urlEl.value.trim()) || LS.get('url:' + c.id, null) || c.baseUrl).replace(/\/+$/, '') };
   },
   _collectorEverySec(c) { return Math.round((c.pollEvery || 60000) / 1000); },
-  /** True while the collector is connected and its last walk had this tool: the tool's Re-scan (card button, hub Sync, Claude Code's rescan()) goes through
-   *  the collector instead of the folder handle / picker. Off again the moment the collector is disconnected (snapshot cleared) or the tool vanished from its status. */
-  _viaCollector(id) { return !!(Store.connectors.collector && this._collectorSnap[id]); },
+  /** True while the collector is connected and its last read of this tool LANDED rows: the tool's Re-scan (card button, hub Sync, Claude Code's rescan()) goes
+   *  through the collector instead of the folder handle / picker. A tool the collector found but could not read ('found, nothing to read' — guaranteed for ollama,
+   *  whose ~/.ai-usage root the collector itself creates for the token; a failed list; a scan that failed) keeps its own handle / picker (review M1). Off again the
+   *  moment the collector is disconnected (snapshot cleared), the tool is disconnected (excluded) or it vanished from the collector's status. */
+  _viaCollector(id) { const s = this._collectorSnap[id]; return !!(Store.connectors.collector && s && s.landed); },
+  /** A tool the collector can feed on this page: a registered folder-reading connector (patterns) — folder (Claude Code), folder-log or a dual-driver local-server. */
+  _collectorReadable(conn) { return !!(conn && conn.patterns && (conn.kind === 'folder' || conn.kind === 'folder-log' || conn.kind === 'local-server')); },
+  /** The collector's error text for a failed request: a 2xx that is not JSON (something else answers at that URL), a real HTTP answer (401 / 5xx: its own message),
+   *  else a network failure = not running. */
+  _collectorErrText(e, base) {
+    if (e && e.notJson) return `Unexpected response from ${base} — is this the collector?`;
+    if (e && e.status) return String(e.message || e).slice(0, 80);
+    return `Not running at ${base} — start it with: node docs/tools/ai-usage-collector.mjs`;
+  },
   /** Reads ONE tool through the collector — exactly the path a folder pick takes: GET /api/list → the connector's own patterns / exclude / siblings
    *  (matchConnectorFiles) → RemoteFile shims → scanFiles(conn, files, { fromCollector: true }) (scanLocalFiles for Claude Code), so rows, project rows,
    *  cache signatures and the tool's card are a folder pick's. o = { api, base, token, stale }; status = the collector's line for the "Reading …" placeholder.
@@ -6001,11 +6027,12 @@ const App = {
     for (const t of (Array.isArray(st && st.tools) ? st.tools : [])) {
       if (!t || typeof t.id !== 'string') continue;
       const conn = connectorById(t.id);
-      const readable = !!(conn && conn.patterns && (conn.kind === 'folder' || conn.kind === 'folder-log' || conn.kind === 'local-server'));
+      const readable = this._collectorReadable(conn);
       const row = { id: t.id, name: (conn && conn.name) || String(t.name || t.id), root: Array.isArray(t.roots) ? t.roots.map(String).join(' · ') : '', files: '',
         newest: t.newestMtime ? new Date(t.newestMtime).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '' };
       summary.push(row);
       if (!t.found) { row.files = 'not found'; continue; }
+      if (this._collectorExcluded.has(t.id)) { row.files = 'disconnected'; continue; }   // disconnected on this page while the collector fed it: out until Validate & connect (review m3)
       if (!readable) { row.files = 'found — no reader on this page'; continue; }
       const cur = { files: +t.files || 0, newestMtime: +t.newestMtime || 0 }, prev = o.full ? null : this._collectorSnap[t.id];
       if (prev && prev.files === cur.files && prev.newestMtime === cur.newestMtime) { snap[t.id] = prev; row.files = prev.note; continue; }   // unchanged since the last status
@@ -6019,19 +6046,22 @@ const App = {
   /** Commits a walk (connect, tick or single-tool re-scan): snapshot + table rows, the entry ('N tools · M files' over the tools that landed, err cleared),
    *  the status line ('● Connected. N tools · M files [· Z found, nothing to read] · checked <time>' + ' · watching for changes every N s' while the watch
    *  runs), the tools table, one render. */
-  _collectorCommit(c, snap, summary) {
+  _collectorCommit(c, snap, summary, o = {}) {
     for (const tid of Object.keys(this._collectorSnap)) if (!snap[tid]) { const rs = $(tid === 'local' ? 'rescan-local' : tid + '-rescan'); if (rs) rs.hidden = !(tid === 'local' ? this.dirHandle : this._dirHandles[tid]); }   // a tool that left the collector's status: its Re-scan back to the folder-handle rule
     this._collectorSnap = snap; this._collectorSummary = summary;
     let nTools = 0, nFiles = 0;
     for (const s of Object.values(snap)) if (s.landed) { nTools++; nFiles += s.matched; }
-    const zero = summary.filter(r => r.files === 'found, nothing to read').length;
+    const zero = summary.filter(r => r.files === 'found, nothing to read').length, outN = summary.filter(r => r.files === 'disconnected').length;
     const label = `${nTools} tool${nTools === 1 ? '' : 's'} · ${nFiles} file${nFiles === 1 ? '' : 's'}`;
-    Store.setConnector(c.id, { label, lastSync: Date.now(), err: null });
+    const prev = Store.connectors[c.id] || {};
+    // o.quiet (a tool disconnected on this page, review m3): nothing was checked — label, table and exclusion follow, lastSync / err stay, an error line stays
+    Store.setConnector(c.id, o.quiet ? { label, excluded: [...this._collectorExcluded] } : { label, lastSync: Date.now(), err: null, excluded: [...this._collectorExcluded] });
     const status = $(c.id + '-status');
-    if (status) {
+    if (status && !(o.quiet && prev.err)) {
+      const at = o.quiet && prev.lastSync ? new Date(prev.lastSync) : new Date();
       status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
-      status.appendChild(document.createTextNode(label + (zero ? ` · ${zero} found, nothing to read` : '') + ` · checked ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+      status.appendChild(document.createTextNode(label + (zero ? ` · ${zero} found, nothing to read` : '') + (outN ? ` · ${outN} disconnected` : '') + ` · checked ${at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
         + (this._pollTimers[c.id] ? ` · watching for changes every ${this._collectorEverySec(c)} s` : '')));
     }
     this._renderCollectorTools($('collector-tools'), summary);
@@ -6072,7 +6102,7 @@ const App = {
     try { st = await api('/api/status'); }
     catch (e) {
       if (stale()) return;
-      const err = (e && e.status) ? String(e.message || e).slice(0, 80) : `Not running at ${base} — start it with: node docs/tools/ai-usage-collector.mjs`;
+      const err = this._collectorErrText(e, base);
       Store.setConnector(c.id, { err });   // attention; the entry, the tools' entries and their data stay — the next good tick clears it
       if (status && !status.dataset.gen) {
         status.textContent = '';
@@ -6122,13 +6152,16 @@ const App = {
     for (const c of CONNECTORS) {
       if (c.kind !== 'collector' || !Store.connectors[c.id]) continue;
       const st = Store.connectors[c.id], s = $(c.id + '-status');
+      this._collectorExcluded = new Set(Array.isArray(st.excluded) ? st.excluded.filter(x => typeof x === 'string') : []);   // tools disconnected while collector-fed stay out across a reload (review m3)
       const when = st.lastSync ? new Date(st.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
       if (!LS.get(c.keyLS, null)) { if (s) s.textContent = `Reconnect: paste the collector token and click Validate & connect to resume watching${when ? ' — stored data from ' + when + ' is shown' : ''}.`; continue; }
       this.startCollectorWatch(c);
-      if (!s || st.err) continue;
-      s.textContent = '';
-      s.appendChild(el('span', { class: 'ok', text: '● Connected' }));
-      s.appendChild(document.createTextNode(` (stored data${when ? ' · synced ' + when : ''}) · watching for changes every ${this._collectorEverySec(c)} s`));
+      if (s && !st.err) {
+        s.textContent = '';
+        s.appendChild(el('span', { class: 'ok', text: '● Connected' }));
+        s.appendChild(document.createTextNode(` (stored data${when ? ' · synced ' + when : ''}) · watching for changes every ${this._collectorEverySec(c)} s`));
+      }
+      this._collectorTick(c);   // review m4: read what changed NOW (idempotent; skipped in a hidden tab) — otherwise the snapshot stays empty for a full interval and a collector-fed tool's Sync would open the folder picker meanwhile
     }
   },
   /* =================== metrics-poll driver (vLLM / llama.cpp: cumulative /metrics counters → today's rows) =================== */
@@ -6689,8 +6722,9 @@ const App = {
 
   async refreshAll() {
     const jobs = [];
-    if (this.dirHandle) jobs.push(this.rescan());
-    for (const [id, h] of Object.entries(this._dirHandles)) if (h) jobs.push(this.rescanFolder(id));
+    // v7 (review m2): a handle the collector feeds is left to the collector tick below — re-scanning it here would run a second read of the same tool beside the tick
+    if (this.dirHandle && !this._viaCollector('local')) jobs.push(this.rescan());
+    for (const [id, h] of Object.entries(this._dirHandles)) if (h && !this._viaCollector(id)) jobs.push(this.rescanFolder(id));
     for (const c of CONNECTORS) if (c.kind === 'local-server' && Store.connectors[c.id]) jobs.push(this.connectServer(c));
     // v7: a connected collector gets ONE status tick (changed tools only — never a full reconnect; Sync on its card is the full one) while a token is at hand —
     // the input, else the remembered token (restored into the input); never from nothing
@@ -6845,7 +6879,7 @@ const App = {
         for (const k of Object.keys(this._gen)) this._gen[k]++;   // every in-flight scan / fetch bails instead of re-committing the data just cleared
         for (const id of Object.keys(this._pollTimers)) this.stopPoll(id);   // a running /metrics poll would otherwise re-create the source it just cleared (baselines in LS 'poll:*' are kept: they are counters, not usage)
         for (const id of Object.keys(this._dirHandles)) IDB.del('dir:' + id); this._dirHandles = {}; document.querySelectorAll('.src.generic .rescan').forEach(b => { b.hidden = true; });
-        this._collectorSnap = {}; this._collectorSummary = []; this._renderCollectorTools($('collector-tools'), []);   // v7 T3: the watch stopped with the polls above and its entry went with clearAll — snapshot and tools table go too (Validate & connect starts over)
+        this._collectorSnap = {}; this._collectorSummary = []; this._collectorExcluded = new Set(); this._renderCollectorTools($('collector-tools'), []);   // v7 T3: the watch stopped with the polls above and its entry went with clearAll — snapshot, exclusions and tools table go too (Validate & connect starts over)
         $('rescan-local').hidden = true;
         for (const c of CONNECTORS) { this._setInitialStatus(c); this._setInitialStatus(c, true); }   // every status line back to its initial text — never blank: link-only keeps "No data path", key / folder cards "Not connected.", the Claude Code card its tip with the <code> path, dual-driver folder lines their noun (the gen bump above released any in-flight placeholder)
         this.render();

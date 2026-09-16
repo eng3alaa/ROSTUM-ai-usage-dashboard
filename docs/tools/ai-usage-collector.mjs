@@ -39,8 +39,13 @@
  *     Access-Control-Allow-Private-Network: true; OPTIONS → 204 — so a file:// page (Chrome's Private Network Access rules) and
  *     the collector-served page can both call it.
  *   - Read-only. Paths are validated to stay inside the tool's root: "..", absolute paths and symlinks are rejected (400). The
- *     recursive walk follows no symlinks and skips node_modules / .git / checkpoints. The token file itself is never listed or served.
- *   - One stdout line per request (method, path, status, bytes) — never file contents, never the token.
+ *     recursive walk follows no symlinks and skips node_modules / .git / checkpoints. The token file itself is never listed or served —
+ *     not even through ollama, whose first root is ~/.ai-usage where the token lives (404, checked before and after realpath).
+ *   - Host allow-list: only Host 127.0.0.1, localhost or [::1] (with or without the port) is answered; anything else → 421 (a DNS name
+ *     pointing at 127.0.0.1 — rebinding — reaches neither the page nor the API). Every response also carries X-Frame-Options: DENY and
+ *     X-Content-Type-Options: nosniff. The 404 for a missing dashboard file names no path.
+ *   - One stdout line per request (method, path, status, bytes) — never file contents, never the token; control characters in the echoed
+ *     query values (tool / path / refresh) are replaced by "?" and values cut at 200 chars, so a request cannot forge a log line.
  *
  * API (JSON unless noted; the page applies each connector's own patterns / exclude / siblings — the collector never duplicates the registry):
  *   GET /api/status[?refresh=1]     { version, home, os, startedAt, tools: [{ id, name, roots, candidates, found, disabled?, files, bytes, newestMtime, scannedAt, walkMs, watch }] }
@@ -50,8 +55,12 @@
  *                                   files / newestMtime move whenever a file is added or modified, so the page's change detection works.
  *   GET /api/list?tool=<id>         { tool, name, root, roots, scannedAt, files: [{ path, size, mtime }] } — ALL regular files, paths relative,
  *                                   forward slashes; when a tool has more than one root each path is prefixed with that root's folder name
- *   GET /api/file?tool=<id>&path=<rel>   the file bytes, streamed, with Content-Length + Last-Modified (404 when missing)
+ *   GET /api/file?tool=<id>&path=<rel>   the file bytes, streamed, with Content-Length + Last-Modified (404 when missing). Waits only for the
+ *                                   tool's FIRST walk (or one in flight) — it never triggers a dirty re-walk (that is /api/status's job), so a
+ *                                   file streams now even when the tool just changed
  *   GET /                           the dashboard HTML (404 with a hint when the file is not where expected); /favicon.ico → 204
+ *   GET /README.md                  the repo README (text/markdown; 404 when absent) — the served page's "Where the numbers come from" link
+ *                                   is README.md#automatic-mode, relative to the page
  * Node ≥ 20. No dependencies.
  */
 import http from 'node:http';
@@ -155,6 +164,8 @@ function loadToken() {
 }
 const { token: TOKEN, created: TOKEN_CREATED } = loadToken();
 const TOKEN_BUF = Buffer.from(TOKEN);
+const TOKEN_FILE_REAL = (() => { try { return fs.realpathSync(TOKEN_FILE); } catch { return TOKEN_FILE; } })();   // loadToken just made sure it exists
+const isTokenFile = (p) => samePath(p, TOKEN_FILE) || samePath(p, TOKEN_FILE_REAL);   // never listed, never served (ollama's first root IS ~/.ai-usage)
 function authorized(req, url) {
   const m = /^Bearer\s+(\S+)\s*$/i.exec(req.headers.authorization || '');
   const given = Buffer.from(m ? m[1] : (url.searchParams.get('token') || ''));
@@ -200,7 +211,7 @@ async function walkRoot(dir, prefix) {
       if (e.isSymbolicLink()) continue;
       if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) stack.push(rel ? rel + '/' + e.name : e.name); continue; }
       if (!e.isFile()) continue;
-      if (samePath(path.join(abs, e.name), TOKEN_FILE)) continue;   // the token file is never listed or served
+      if (isTokenFile(path.join(abs, e.name))) continue;   // the token file is never listed (resolveFile refuses to serve it too)
       names.push(e.name);
     }
     for (let i = 0; i < names.length; i += STAT_BATCH) {
@@ -300,17 +311,31 @@ async function resolveFile(t, relIn) {
   else { root = s.roots[0].dir; rest = segs; }
   const abs = path.resolve(root, ...rest);
   if (!inside(abs, root)) return { status: 400, error: 'path resolves outside the tool folder' };
+  if (isTokenFile(abs)) return { status: 404, error: 'file not found' };   // the token file is never served: ollama's first root is ~/.ai-usage, where it lives
   let st; try { st = await fsp.lstat(abs); } catch { return { status: 404, error: 'file not found' }; }
   if (st.isSymbolicLink()) return { status: 400, error: 'symbolic links are not served' };
   if (!st.isFile()) return { status: 404, error: 'not a regular file' };
-  try { const [realAbs, realRoot] = await Promise.all([fsp.realpath(abs), fsp.realpath(root)]); if (!inside(realAbs, realRoot)) return { status: 400, error: 'path resolves outside the tool folder (symbolic link)' }; }   // a junction / symlinked parent dir escaping the root
-  catch { return { status: 404, error: 'file not found' }; }
+  try {
+    const [realAbs, realRoot] = await Promise.all([fsp.realpath(abs), fsp.realpath(root)]);
+    if (!inside(realAbs, realRoot)) return { status: 400, error: 'path resolves outside the tool folder (symbolic link)' };   // a junction / symlinked parent dir escaping the root
+    if (isTokenFile(realAbs)) return { status: 404, error: 'file not found' };   // …and no other spelling of it (8.3 short name, case, a junction) either
+  } catch { return { status: 404, error: 'file not found' }; }
   return { abs, st };
+}
+// /api/file: wait for the tool's FIRST walk (its roots are unknown before it) or for one in flight — never trigger a dirty re-walk. A dirty tool is
+// re-walked by the next /api/status or /api/list; a file request meanwhile must stream now, not after a full walk of a large tree (review m5).
+function ensureWalkedOnce(t) {
+  const s = state.get(t.id);
+  if (s.walking) return s.walking;
+  if (s.scannedAt === null) return refreshTool(t);
+  return Promise.resolve();
 }
 const inside = (abs, root) => { const r = path.relative(root, abs); return r !== '' && !r.startsWith('..') && !path.isAbsolute(r); };
 
 // ---- HTTP -----------------------------------------------------------------------------------------------------------------------------------
 const HTML_PATH = opts.html ? path.resolve(opts.html) : path.resolve(SCRIPT_DIR, '..', '..', 'AI Usage Dashboard.html');
+const README_PATH = path.resolve(SCRIPT_DIR, '..', '..', 'README.md');   // the repo README: the served page links README.md#automatic-mode relative to itself
+const HOST_OK = /^(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$/i;      // Host allow-list — a DNS name resolving to 127.0.0.1 (rebinding) gets 421
 const CT = { '.json': 'application/json; charset=utf-8', '.jsonl': 'application/x-ndjson; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.csv': 'text/csv; charset=utf-8', '.html': 'text/html; charset=utf-8' };
 const STARTED_AT = new Date().toISOString();
 const hhmmss = () => new Date().toTimeString().slice(0, 8);
@@ -323,11 +348,15 @@ function cors(res) {
   res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Last-Modified');
   res.setHeader('Access-Control-Max-Age', '600');
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Frame-Options', 'DENY');              // the served page is never framed
+  res.setHeader('X-Content-Type-Options', 'nosniff');    // a served log file is what its Content-Type says, never sniffed into HTML
 }
-// one line per request — path + the tool/path/refresh params only (never the token, never contents)
+// one line per request — path + the tool/path/refresh params only (never the token, never contents). Control characters in a logged value become
+// "?" and a value is cut at 200 chars: an unauthenticated request must not be able to forge a log line (review m1).
+const logSafe = (v) => String(v).replace(/[\u0000-\u001f\u007f]/g, '?').slice(0, 200);
 function logLine(req, url, status, bytes) {
-  const q = ['tool', 'path', 'refresh'].filter((k) => url.searchParams.has(k)).map((k) => `${k}=${url.searchParams.get(k)}`).join('&');
-  console.log(`${hhmmss()} ${req.method} ${url.pathname}${q ? '?' + q : ''} ${status} ${bytes}`);
+  const q = ['tool', 'path', 'refresh'].filter((k) => url.searchParams.has(k)).map((k) => `${k}=${logSafe(url.searchParams.get(k))}`).join('&');
+  console.log(`${hhmmss()} ${logSafe(req.method)} ${logSafe(url.pathname)}${q ? '?' + q : ''} ${status} ${bytes}`);
 }
 function sendJson(res, status, obj) { const body = Buffer.from(JSON.stringify(obj)); res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': body.length }); res.end(body); return body.length; }
 function sendText(res, status, text, type = 'text/plain; charset=utf-8') { const body = Buffer.from(text); res.writeHead(status, { 'Content-Type': type, 'Content-Length': body.length }); res.end(body); return body.length; }
@@ -337,10 +366,16 @@ async function handle(req, res, url) {
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return 0; }
   if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method not allowed' });
   if (p === '/' || p === '/index.html') {
-    let html; try { html = await fsp.readFile(HTML_PATH); } catch { return sendText(res, 404, `AI Usage Dashboard.html not found at ${HTML_PATH}\nRun the collector from the repo (docs/tools/) or pass --html <path to AI Usage Dashboard.html>.\n`); }
+    let html; try { html = await fsp.readFile(HTML_PATH); } catch { return sendText(res, 404, 'AI Usage Dashboard.html not found — pass --html <path> (or run the collector from the repo, docs/tools/). The startup banner on the terminal names the path it looked at.\n'); }   // no path in the body (review m7)
     res.writeHead(200, { 'Content-Type': CT['.html'], 'Content-Length': html.length });
     if (req.method === 'HEAD') { res.end(); return 0; }
     res.end(html); return html.length;
+  }
+  if (p === '/README.md') {   // the served page's docs link (README.md#automatic-mode) is relative to the page (review m8)
+    let md; try { md = await fsp.readFile(README_PATH); } catch { return sendText(res, 404, 'README.md not found next to the collector script (it lives in the repo root).\n'); }
+    res.writeHead(200, { 'Content-Type': CT['.md'], 'Content-Length': md.length });
+    if (req.method === 'HEAD') { res.end(); return 0; }
+    res.end(md); return md.length;
   }
   if (p === '/favicon.ico') { res.writeHead(204); res.end(); return 0; }   // the browser asks for it on the served page — no icon, no 404 in the console
   if (!p.startsWith('/api/')) return sendJson(res, 404, { error: 'not found', hint: 'GET / (dashboard), /api/status, /api/list?tool=<id>, /api/file?tool=<id>&path=<rel>' });
@@ -353,7 +388,7 @@ async function handle(req, res, url) {
   const t = TOOL_BY_ID.get(url.searchParams.get('tool') || '');
   if (p === '/api/list' || p === '/api/file') {
     if (!t) return sendJson(res, 404, { error: 'unknown tool', hint: 'tool ids: ' + TABLE.map((x) => x.id).join(', ') });
-    await ensureFresh(t, refresh);
+    await (p === '/api/file' ? ensureWalkedOnce(t) : ensureFresh(t, refresh));   // a file request never re-walks a dirty tool (review m5)
   }
   if (p === '/api/list') {
     const s = state.get(t.id);
@@ -382,6 +417,10 @@ let PORT_BOUND = 0;
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   cors(res);
+  if (!HOST_OK.test(String(req.headers.host || '').trim())) {   // review m7: DNS rebinding — a name that resolves to 127.0.0.1 is answered with 421 only
+    const n = sendJson(res, 421, { error: 'misdirected request', hint: 'the collector answers only for Host 127.0.0.1, localhost or [::1] (with the port)' });
+    logLine(req, url, 421, n); return;
+  }
   handle(req, res, url)
     .then((bytes) => logLine(req, url, res.statusCode, bytes || 0))
     .catch((e) => { console.error(`ai-usage-collector: ${req.method} ${url.pathname} failed — ${e && e.message || e}`); if (!res.headersSent) sendJson(res, 500, { error: 'internal error' }); else res.destroy(); logLine(req, url, res.statusCode || 500, 0); });
