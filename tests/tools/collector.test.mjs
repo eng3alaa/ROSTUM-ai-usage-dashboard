@@ -22,6 +22,7 @@ const ROOT = path.join(import.meta.dirname, '..', '..');
 const COLLECTOR = path.join(ROOT, 'docs', 'tools', 'ai-usage-collector.mjs');
 const OUT_DIR = path.join(ROOT, 'tests', 'fixtures', 'out');
 const HOME = path.join(OUT_DIR, `collector-home-${process.pid}`);
+const HOME_DEFAULT = HOME;
 const CODEX_FILE = 'sessions/2026/08/10/rollout-2026-08-10T09-00-00-abc.jsonl';
 const CODEX_ARCHIVED = 'archived_sessions/rollout-2026-08-10T09-00-00-abc.jsonl';   // Codex's archived_sessions/ is flat: rollout-*.jsonl directly inside
 const COPILOT_FILE = 'session-state/sess-1/events.jsonl';
@@ -52,9 +53,10 @@ const corsOk = (r) => r.headers['access-control-allow-origin'] === '*'
   && /authorization/i.test(r.headers['access-control-allow-headers'] || '')
   && String(r.headers['access-control-allow-private-network']).toLowerCase() === 'true';
 
-// spawn the collector against the temp HOME; resolves once its "listening on http://127.0.0.1:<port>" line is out (or it exits / 10 s pass)
-async function start(args) {
-  const env = { ...process.env, HOME, USERPROFILE: HOME, APPDATA: HOME, LOCALAPPDATA: HOME, COLLECTOR_PORT: '0' };
+// spawn the collector against a temp HOME (default: this test's); resolves once its "listening on http://127.0.0.1:<port>" line is out (or it exits / 10 s pass).
+// Exported for tests/checks/89c-collector.mjs's end-to-end block (real collector + real page), which seeds its own HOME the same way.
+export async function start(args, home = HOME) {
+  const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home, COLLECTOR_PORT: '0' };
   for (const k of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'GEMINI_CLI_HOME']) delete env[k];   // a developer's own overrides must not leak into the child
   const h = { child: null, port: 0, out: '', err: '', exited: null };
   h.child = spawn(process.execPath, [COLLECTOR, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
@@ -71,7 +73,7 @@ async function start(args) {
   return h;
 }
 
-function seedHome() {
+export function seedHome(HOME = HOME_DEFAULT) {
   fs.rmSync(HOME, { recursive: true, force: true });
   fs.cpSync(path.join(OUT_DIR, 'claude-logs', 'projects'), path.join(HOME, '.claude', 'projects'), { recursive: true });
   fs.cpSync(path.join(OUT_DIR, 'codex', 'sessions'), path.join(HOME, '.codex', 'sessions'), { recursive: true });

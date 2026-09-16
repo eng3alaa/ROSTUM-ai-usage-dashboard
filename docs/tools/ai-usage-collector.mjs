@@ -51,7 +51,7 @@
  *   GET /api/list?tool=<id>         { tool, name, root, roots, scannedAt, files: [{ path, size, mtime }] } — ALL regular files, paths relative,
  *                                   forward slashes; when a tool has more than one root each path is prefixed with that root's folder name
  *   GET /api/file?tool=<id>&path=<rel>   the file bytes, streamed, with Content-Length + Last-Modified (404 when missing)
- *   GET /                           the dashboard HTML (404 with a hint when the file is not where expected)
+ *   GET /                           the dashboard HTML (404 with a hint when the file is not where expected); /favicon.ico → 204
  * Node ≥ 20. No dependencies.
  */
 import http from 'node:http';
@@ -342,6 +342,7 @@ async function handle(req, res, url) {
     if (req.method === 'HEAD') { res.end(); return 0; }
     res.end(html); return html.length;
   }
+  if (p === '/favicon.ico') { res.writeHead(204); res.end(); return 0; }   // the browser asks for it on the served page — no icon, no 404 in the console
   if (!p.startsWith('/api/')) return sendJson(res, 404, { error: 'not found', hint: 'GET / (dashboard), /api/status, /api/list?tool=<id>, /api/file?tool=<id>&path=<rel>' });
   if (!authorized(req, url)) return sendJson(res, 401, { error: 'unauthorized', hint: 'send Authorization: Bearer <token> (or ?token=) — the token is printed when the collector starts and stored in ~/.ai-usage/collector.token' });
   const refresh = url.searchParams.get('refresh') === '1';

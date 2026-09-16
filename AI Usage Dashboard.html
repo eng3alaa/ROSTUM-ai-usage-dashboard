@@ -568,7 +568,7 @@ progress { width: 160px; height: 8px; }
 
     <div class="card src" id="src-local">
       <div class="card-head"><h2>Claude Code / Desktop (local logs)</h2><span class="badge">exact</span></div>
-      <div class="desc">Reads the session logs Claude Code and the desktop app keep in the <b>.claude</b> folder in your user folder (e.g. <code>C:\Users\you\.claude</code>). Exact token counts per model, project and day.</div>
+      <div class="desc">Reads the session logs Claude Code and the desktop app keep in the <b>.claude</b> folder in your user folder (e.g. <code>C:\Users\you\.claude</code>). Exact token counts per model, project and day. Or run the local collector (first card in Coding tools) and skip the folder picker entirely.</div>
       <div class="row">
         <button class="btn primary" id="pick-claude-folder">Choose .claude folder…</button>
         <button class="btn" id="rescan-local" hidden>Re-scan</button>
@@ -5944,6 +5944,7 @@ const App = {
     } catch {}
     if (!tok) return false;
     const inp = $('collector-key'); if (inp) inp.value = tok;
+    if (/^https?:$/.test(location.protocol)) { const u = $('collector-url'); if (u) u.value = location.origin; }   // a ?token= on an http(s) page = the collector served this page: its origin IS the collector (also on --port <n>, where the registry default would miss)
     return true;
   },
   /* =================== v7 T3: automatic mode — the collector's status watch =================== */
