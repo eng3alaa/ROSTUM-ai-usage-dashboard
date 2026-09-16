@@ -69,3 +69,15 @@ Plan 4b (branch v4b-wave2) delivers Wave 2 of the every-LLM spec: link-only + ex
 Plan 4b integration review (2026-09-05/06): 7-lens workflow review + one adversarial verifier per finding — 18 confirmed (2 blockers: Bedrock epoch-second timestamps, Fireworks response wrapper; 13 majors incl. an Azure cost-scope bearer-token exfiltration path; 3 minors), 0 refuted, 12 minor unverified (all but the documented residuals fixed alongside); 10 fix commits + a post-gate follow-up on the branch (298 → 326+ checks). Non-blockers recorded as "Post-4b backlog" in the every-LLM spec.
 
 Plan 5 (branch v5-backlog, 2026-09-10) closes 9 backlog items (4a-1..4a-6, 4b-4, 4b-8, 4b-9) in 9 commits and records 11 as still open; integration review pending.
+
+## Real-data validation — 2026-09-16
+
+The merged v5 page was driven headlessly through its classic folder-chooser path against this machine's real logs (aggregates only; a webkitdirectory input rejects automation-set files, so the harness drops that attribute — the app's change handler is unchanged):
+
+| Source | Input | Result |
+|---|---|---|
+| Claude Code / Desktop | 2,321 .jsonl files, 1.5 GB, 2026-06-06 → 2026-09-16 | 49,239 messages, 250,252 lines, 0 bad lines, 2 unreadable files, 136 projects, 7 model ids (incl. dated `claude-haiku-4-5-20251001`, `claude-opus-4-8`, `claude-sonnet-4-6` — all priced by the normalizer); 24 s |
+| OpenAI Codex CLI | newest 400 of 2,866 rollouts (of 7.2 GB) | 53,875 messages, 322,167 lines, 0 bad lines, 1 unreadable file, 32 projects; 16 s; `cw` = 0 as documented (Codex reports no cache writes) |
+| Ollama desktop db.sqlite | copy of the live db (WAL present) | 11 messages / 6 estimated rows / 3 models, $0; the WAL's newer rows are not read (documented) |
+
+Finding: three real model ids — `gpt-6-astra` (5,730 messages), `codex-auto-review`, `codex` — resolve to the `.*` "Unknown model" price row ($3 / $15) and nothing in the UI says so; the dashboard was guessing silently, against its own rule. Fix: an "unpriced models" notice + breakdown badge + narrative qualifier (Plan 6, branch v6-unpriced).
