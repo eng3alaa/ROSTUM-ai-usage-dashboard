@@ -4,6 +4,8 @@ One HTML file that shows how much you use AI — tokens, messages and the API-eq
 
 Every number on the page is labeled with where it came from and how trustworthy it is. The dashboard never guesses silently.
 
+A styled, printable HTML version of this guide is at [](docs/user-guide.html) (double-click to open; same content, light/dark aware).
+
 ---
 
 ## 1. Quick start
