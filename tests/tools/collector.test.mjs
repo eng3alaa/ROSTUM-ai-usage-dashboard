@@ -12,7 +12,7 @@
 // the startup banner (per-tool counts + watch mode), --no-<id> / --root (single and multi-root).
 // Plan 7 review fixes: the token file is never served even through ollama (whose root is ~/.ai-usage) (M2); query values are sanitised in the
 // request log (m1); /api/file never triggers a dirty re-walk (m5); hardening headers, Host allow-list → 421, a 404 for / that names no path (m7);
-// GET /README.md served (m8).
+// GET /README.md served (m8). Plan 8: GET /docs/user-guide.html served (the Help dialog's "Full user guide" link is relative to the page too).
 // Windows-safe: 127.0.0.1 only, every wait ≤ 10 s (35 s only on a platform without recursive fs.watch), every child is killed in
 // finally, the temp HOME is deleted afterwards.
 import http from 'node:http';
@@ -223,6 +223,11 @@ export async function run() {
     add('collector (review m8): GET /README.md → 200 text/markdown serving the repo README (the served page\'s "Where the numbers come from" link README.md#automatic-mode resolves), no token needed, hardened headers, Content-Length set',
       readme.status === 200 && /^text\/markdown/i.test(readme.headers['content-type'] || '') && readme.body.toString('utf8').includes('automatic-mode') && +readme.headers['content-length'] === readme.body.length && hardened(readme),
       `status ${readme.status} ct=${readme.headers['content-type']} ${readme.body.length} bytes`);
+    // Plan 8: the Help dialog's "Full user guide" link (docs/user-guide.html) is relative to the page too — served like /README.md, no token, hardened headers
+    const guide = await request(a.port, 'GET', '/docs/user-guide.html');
+    add('collector (Plan 8): GET /docs/user-guide.html → 200 text/html serving the repo\'s HTML user guide (contains "AI Usage Monitor Guide"), no token needed, hardened headers, Content-Length set',
+      guide.status === 200 && /^text\/html/i.test(guide.headers['content-type'] || '') && guide.body.toString('utf8').includes('AI Usage Monitor Guide') && +guide.headers['content-length'] === guide.body.length && hardened(guide),
+      `status ${guide.status} ct=${guide.headers['content-type']} ${guide.body.length} bytes`);
 
     // ---------------------------------------------------------------- change-driven walk (fs.watch per root; polling fallback) ----------------------------------------------------------------
     const before = tool('codex');

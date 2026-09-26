@@ -176,12 +176,22 @@ input[type="date"], input[type="text"], input[type="password"], input[type="sear
 .acct-label, .acct-sync { color: var(--ink-2); font-size: 11.5px; margin-top: 4px; min-height: 14px; }
 .acct-stats { font-size: 12px; margin-top: 4px; }
 .acct-actions { display: flex; gap: 6px; margin-top: 8px; }
-#connector-modal { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); color: var(--ink);
+#connector-modal, #help-modal { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); color: var(--ink);
                    max-width: 560px; width: calc(100vw - 48px); padding: 16px; }
-#connector-modal::backdrop { background: rgba(0,0,0,0.45); }
-#connector-modal .modal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-#connector-modal .modal-close { margin-left: auto; }
+#connector-modal::backdrop, #help-modal::backdrop { background: rgba(0,0,0,0.45); }
+#connector-modal .modal-head, #help-modal .modal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+#connector-modal .modal-close, #help-modal .modal-close { margin-left: auto; }
 #connector-modal .card.src { border: 0; padding: 0; background: transparent; }
+/* Plan 8: Help dialog — the connector modal's shell (above) plus a scrollable static body */
+#help-modal { max-width: 620px; }
+#help-modal .help-body { max-height: min(70vh, 680px); overflow-y: auto; font-size: 12.5px; line-height: 1.45; padding-right: 4px; }
+#help-modal h3 { font-size: 12px; font-weight: 650; margin: 12px 0 5px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .05em; } #help-modal h3:first-child { margin-top: 0; }
+#help-modal ol, #help-modal ul { margin: 0; padding-left: 20px; } #help-modal li { margin: 0 0 4px; } #help-modal p { margin: 0 0 6px; }
+#help-modal code, #help-modal kbd { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; background: var(--page); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+#help-modal .help-cmd { display: flex; align-items: center; gap: 8px; margin: 4px 0 2px; flex-wrap: wrap; } #help-modal .help-cmd code { padding: 4px 8px; user-select: all; }
+#help-modal dl { margin: 0; } #help-modal dd { margin: 0; } #help-modal dl.help-legend { display: grid; grid-template-columns: max-content 1fr; gap: 5px 10px; align-items: baseline; }
+#help-modal dl.help-fix dt { font-weight: 600; color: var(--ink-2); margin-top: 5px; } #help-modal dl.help-fix dd { margin-bottom: 2px; }
+#help-modal .dot { display: inline-block; vertical-align: middle; margin: 0 2px 0 4px; }
 #hub-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; min-height: 0; }
 #hub-bar label.inline { font-size: 12px; color: var(--ink-2); display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
 #hub-bar input[type="search"] { min-width: 220px; }
@@ -232,7 +242,7 @@ input[type="date"], input[type="text"], input[type="password"], input[type="sear
 /* ============ Print report ============ */
 .report-meta { font-size: 12px; color: var(--ink-2); margin: 0 0 12px; }
 @media print {
-  .topbar .top-actions, .filterbar, #accounts-hub, #sources, .sources, #card-budgets, #card-pricing, #alerts, #storage-warning, .toggle, .btn, #hub-bar, .acct-hide, .collapse-btn, .insight-hide, #insights-chips, #sources-title, #pricing-title { display: none !important; }
+  .topbar .top-actions, .filterbar, #accounts-hub, #sources, .sources, #card-budgets, #card-pricing, #alerts, #storage-warning, .toggle, .btn, #hub-bar, .acct-hide, .collapse-btn, .insight-hide, #insights-chips, #sources-title, #pricing-title, #help-btn, #help-modal { display: none !important; }
   /* an open <dialog> renders in the top layer, above the normal document flow — hiding its
      ancestors via the print stylesheet does not hide it, so it needs its own rule */
   dialog { display: none !important; }
@@ -399,6 +409,7 @@ progress { width: 160px; height: 8px; }
       <button class="btn small" id="export-csv" title="Download the filtered data as CSV">Export CSV</button>
       <button class="btn small" id="print-report" title="Print / save as PDF">Print report</button>
       <button class="btn small" id="theme-toggle" aria-label="Toggle color theme">◐ Theme</button>
+      <button class="btn small" id="help-btn" aria-haspopup="dialog" aria-controls="help-modal" title="How the dashboard works">? Help</button>
       <button class="btn small primary" id="refresh-all">↻ Refresh</button>
     </div>
   </header>
@@ -440,6 +451,58 @@ progress { width: 160px; height: 8px; }
       <button class="btn small modal-close">Close</button>
     </div>
     <div id="modal-body"></div>
+  </dialog>
+  <!-- Plan 8: Help — static markup (no user data); same .modal-head shell as the connector modal; opened by #help-btn or the ? key -->
+  <dialog id="help-modal" aria-labelledby="help-title">
+    <div class="modal-head">
+      <h2 id="help-title">Help</h2>
+      <button class="btn small modal-close">Close</button>
+    </div>
+    <div class="help-body">
+      <h3>Start here</h3>
+      <ol>
+        <li><b>Fastest:</b> run the local collector, then click <b>Validate &amp; connect</b> on the <b>Local collector (automatic)</b> card (first card in Coding tools). Every coding tool and local runner it finds on this machine connects by itself.
+          <div class="help-cmd"><code id="help-cmd">node docs/tools/ai-usage-collector.mjs</code><button class="btn small" id="help-copy" type="button" title="Copy the command">Copy</button></div></li>
+        <li><b>Exact and billed:</b> paste an Anthropic or OpenAI <b>Admin key</b> on its card under API vendors: exact usage plus what you were actually billed.</li>
+        <li><b>Chat apps:</b> drop your ChatGPT, Claude.ai, Grok or Gemini Takeout export on <b>Imports</b> (or use the chat app's own card: Import file…).</li>
+      </ol>
+      <h3>What the badges mean</h3>
+      <dl class="help-legend">
+        <dt><span class="badge q-exact">exact</span></dt><dd>Token counts come from the tool or vendor itself.</dd>
+        <dt><span class="badge q-estimated">estimated</span></dt><dd>Tokens are estimated from text (about 4 characters per token) because the source keeps no counts; the rows carry an <code>est.</code> mark everywhere they appear.</dd>
+        <dt><span class="badge q-validate">validate-only</span></dt><dd>The card verifies your key, but the vendor offers no usage history to a local page. Spend lives on the vendor's usage page, linked from the card.</dd>
+        <dt><span class="badge q-none">no data</span></dt><dd>No data path from a local page at all; the card says why and links to the vendor's usage page.</dd>
+      </dl>
+      <p><span class="dot ok"></span> connected · <span class="dot warn"></span> needs attention (an error, or the last sync is more than 7 days old) · <span class="dot off"></span> not connected</p>
+      <h3>Where the numbers come from</h3>
+      <ul>
+        <li><b>API-equivalent cost</b> = tokens × the list price for that model (the editable price list). It is what the same usage would cost on the vendor's API: a comparison, not an invoice.</li>
+        <li><b>Actual billed</b> comes only from vendors that report money; the two figures are always shown separately.</li>
+        <li>Rows from estimated sources are marked <code>est.</code> and never mix silently with exact ones.</li>
+        <li>Local runners are $0, and so are coding-tool requests that name a local backend (Continue + Ollama, Codex OSS models and the like).</li>
+        <li>A model the price list does not know is priced at the fallback row and named in a notice above the KPIs: never guessed silently.</li>
+      </ul>
+      <h3>If something looks wrong</h3>
+      <dl class="help-fix">
+        <dt>Local collector card says "Not running at http://127.0.0.1:11436"</dt><dd>Start it: <code>node docs/tools/ai-usage-collector.mjs</code>. With <code>--port</code>, put the printed URL in the card's Collector URL field.</dd>
+        <dt>Local collector card says "Token rejected"</dt><dd>Paste the token the collector printed; it is also in <code>~/.ai-usage/collector.token</code>.</dd>
+        <dt>Ollama card says "likely CORS"</dt><dd>Set <code>OLLAMA_ORIGINS="*"</code> (or your page origin), restart Ollama, validate again.</dd>
+        <dt>Azure / Vertex says "token expired"</dt><dd>Tokens last about an hour: mint a new one with the printed CLI command and paste it again.</dd>
+        <dt>The folder picker does nothing</dt><dd>Use Chrome or Edge, the card's "classic folder chooser" link, or skip pickers altogether with the local collector.</dd>
+        <dt>Numbers changed after an update</dt><dd>Parsers improve between versions; the first re-scan after an update re-reads the files once.</dd>
+      </dl>
+      <h3>Keyboard</h3>
+      <ul>
+        <li><kbd>Esc</kbd> closes any dialog.</li>
+        <li><kbd>Enter</kbd> on a hub card drills down to that platform.</li>
+        <li><b>✕</b> on a card hides it; the "N hidden — show" chip restores them.</li>
+        <li><b>▾</b> on a section header collapses that section.</li>
+        <li><kbd>?</kbd> opens and closes this help (not while typing in a field).</li>
+      </ul>
+      <h3>More</h3>
+      <p><a href="docs/user-guide.html" target="_blank" rel="noopener">Full user guide</a> · <a href="README.md" target="_blank" rel="noopener">README</a></p>
+      <p class="note">These open from the repository folder or from the collector-served page.</p>
+    </div>
   </dialog>
 
   <!-- ================= KPI row ================= -->
@@ -4977,6 +5040,25 @@ const App = {
     if (!dlg.open) dlg.showModal();   // already open → the dialog just swaps content (showModal() again is invalid on an open dialog)
   },
   closeConnectorModal() { $('connector-modal').close(); },   // 'close' event (fires for Close-button AND Escape) does the restore
+  /* ---------- Plan 8: Help dialog — static markup in the HTML; opened by the toolbar button or the `?` key, closed by Close / Esc / a click on the
+   *  backdrop; the dialog's own 'close' event (every path) returns focus to #help-btn the way _focusModalOpener does for the hub ---------- */
+  openHelp() { const d = $('help-modal'); if (!d.open) d.showModal(); },
+  closeHelp() { const d = $('help-modal'); if (d.open) d.close(); },
+  toggleHelp() { if ($('help-modal').open) this.closeHelp(); else this.openHelp(); },
+  /** The `?` shortcut: never while typing (input / textarea / select / contenteditable) and never with a modifier — the key then keeps its own meaning. */
+  _helpKey(e) {
+    if (e.key !== '?' || e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented) return;
+    const t = e.target;
+    if (t && t.nodeType === 1 && (t.closest('input, textarea, select') || t.isContentEditable)) return;
+    e.preventDefault(); this.toggleHelp();
+  },
+  /** Copy the collector command — clipboard API only: without it (or when it refuses) the button simply stays "Copy"; on success it reads "Copied" for 1.5 s. */
+  _copyHelpCommand() {
+    const btn = $('help-copy');
+    let p = null; try { if (navigator.clipboard && navigator.clipboard.writeText) p = navigator.clipboard.writeText($('help-cmd').textContent); } catch (err) { p = null; }
+    if (!p || typeof p.then !== 'function') return;
+    p.then(() => { btn.textContent = 'Copied'; clearTimeout(this._helpCopyTimer); this._helpCopyTimer = setTimeout(() => { btn.textContent = 'Copy'; }, 1500); }, () => {});
+  },
   _restoreModalCard() {
     if (!this._modalHome) return;
     for (const src of [...$('modal-body').children]) {   // EVERY hosted card goes home, not just the first — nothing is ever left orphaned in the dialog
@@ -6889,6 +6971,14 @@ const App = {
     // top actions
     $('export-csv').addEventListener('click', () => this.exportCSV());
     $('print-report').addEventListener('click', () => this.printReport(false));
+    // Plan 8: Help — button, Close, a click on the backdrop (the event target is the dialog itself only outside its content), the native 'close' event
+    // (Close / Esc / backdrop alike) → focus back on the button, the Copy button, and the `?` shortcut on the document
+    $('help-btn').addEventListener('click', () => this.openHelp());
+    $('help-modal').querySelector('.modal-close').addEventListener('click', () => this.closeHelp());
+    $('help-modal').addEventListener('click', (e) => { if (e.target === e.currentTarget) this.closeHelp(); });
+    $('help-modal').addEventListener('close', () => this._focusAfterRender(() => $('help-btn')));
+    $('help-copy').addEventListener('click', () => this._copyHelpCommand());
+    document.addEventListener('keydown', (e) => this._helpKey(e));
     // Ctrl+P / File > Print bypasses the button entirely — only 'beforeprint' fires for
     // every print path, so the report header must be filled from there too.
     window.addEventListener('beforeprint', () => App.printReport(true));

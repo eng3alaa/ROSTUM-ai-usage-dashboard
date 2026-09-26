@@ -335,6 +335,7 @@ const inside = (abs, root) => { const r = path.relative(root, abs); return r !==
 // ---- HTTP -----------------------------------------------------------------------------------------------------------------------------------
 const HTML_PATH = opts.html ? path.resolve(opts.html) : path.resolve(SCRIPT_DIR, '..', '..', 'AI Usage Dashboard.html');
 const README_PATH = path.resolve(SCRIPT_DIR, '..', '..', 'README.md');   // the repo README: the served page links README.md#automatic-mode relative to itself
+const GUIDE_PATH = path.resolve(SCRIPT_DIR, '..', 'user-guide.html');   // docs/user-guide.html: the Help dialog's "Full user guide" link, relative to the page too (Plan 8)
 const HOST_OK = /^(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$/i;      // Host allow-list — a DNS name resolving to 127.0.0.1 (rebinding) gets 421
 const CT = { '.json': 'application/json; charset=utf-8', '.jsonl': 'application/x-ndjson; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.csv': 'text/csv; charset=utf-8', '.html': 'text/html; charset=utf-8' };
 const STARTED_AT = new Date().toISOString();
@@ -376,6 +377,12 @@ async function handle(req, res, url) {
     res.writeHead(200, { 'Content-Type': CT['.md'], 'Content-Length': md.length });
     if (req.method === 'HEAD') { res.end(); return 0; }
     res.end(md); return md.length;
+  }
+  if (p === '/docs/user-guide.html') {   // Plan 8: the Help dialog's "Full user guide" link is relative to the page too — same rule as /README.md
+    let doc; try { doc = await fsp.readFile(GUIDE_PATH); } catch { return sendText(res, 404, 'docs/user-guide.html not found next to the collector script (it lives in the repo\'s docs folder).\n'); }   // no path in the body (review m7)
+    res.writeHead(200, { 'Content-Type': CT['.html'], 'Content-Length': doc.length });
+    if (req.method === 'HEAD') { res.end(); return 0; }
+    res.end(doc); return doc.length;
   }
   if (p === '/favicon.ico') { res.writeHead(204); res.end(); return 0; }   // the browser asks for it on the served page — no icon, no 404 in the console
   if (!p.startsWith('/api/')) return sendJson(res, 404, { error: 'not found', hint: 'GET / (dashboard), /api/status, /api/list?tool=<id>, /api/file?tool=<id>&path=<rel>' });
