@@ -6975,7 +6975,7 @@ const App = {
     // (Close / Esc / backdrop alike) → focus back on the button, the Copy button, and the `?` shortcut on the document
     $('help-btn').addEventListener('click', () => this.openHelp());
     $('help-modal').querySelector('.modal-close').addEventListener('click', () => this.closeHelp());
-    $('help-modal').addEventListener('click', (e) => { if (e.target === e.currentTarget) this.closeHelp(); });
+    $('help-modal').addEventListener('click', (e) => { if (e.target !== e.currentTarget) return; const r = e.currentTarget.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) this.closeHelp(); });   // only a click on the backdrop closes — the dialog's own padding does not
     $('help-modal').addEventListener('close', () => this._focusAfterRender(() => $('help-btn')));
     $('help-copy').addEventListener('click', () => this._copyHelpCommand());
     document.addEventListener('keydown', (e) => this._helpKey(e));
