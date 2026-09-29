@@ -1,0 +1,56 @@
+name: tests
+
+# Runs the headless suite (tests/run.mjs) against the real page in the runner's preinstalled Chrome.
+# windows-latest matches the development environment (CRLF, Chrome at the path tests/lib/harness.mjs looks for).
+# The suite also exercises the local collector end to end (tests/checks/89c-collector.mjs spawns it on 127.0.0.1).
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * 1'   # weekly, so a date-dependent check that goes red on a calendar boundary is noticed
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+
+      - name: Install test dependencies
+        working-directory: tests
+        run: npm ci
+
+      - name: Hygiene (no raw control bytes, size gate)
+        run: |
+          node -e "const b=require('fs').readFileSync('AI Usage Dashboard.html');let n=0;for(const x of b)if(x<9)n++;console.log('control bytes:',n,'bytes:',b.length);if(n||b.length>600*1024)process.exit(1)"
+
+      - name: Run the suite
+        env:
+          CHROME_PATH: C:/Program Files/Google/Chrome/Application/chrome.exe
+        run: node tests/run.mjs
+
+      - name: Upload screenshots and logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts
+          path: |
+            tests/artifacts/
+            tests/fixtures/out/*.log
+          if-no-files-found: ignore
