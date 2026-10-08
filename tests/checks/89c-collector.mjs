@@ -111,7 +111,10 @@ async function runE2E({ browser, ok }) {
     const connectFileDashboard = async (br) => {
       const { page: pg, errors } = await openDashboard(br);
       const failed = [];
-      pg.on('requestfailed', (rq) => failed.push(rq.url() + ' — ' + ((rq.failure() || {}).errorText || '?')));
+      // a cancelled body read is not a failure: the parsers cancel a RemoteFile stream they no longer need (a deduplicated or
+      // cached file), which Chrome reports as net::ERR_ABORTED on that /api/file request — seen on the slower CI runner, never
+      // on a dev box. Every other failure (connect refused, CORS/PNA block, 4xx/5xx) still counts.
+      pg.on('requestfailed', (rq) => { const why = (rq.failure() || {}).errorText || '?'; if (why === 'net::ERR_ABORTED' && rq.url().includes('/api/file?')) return; failed.push(rq.url() + ' — ' + why); });
       const ret = await pg.evaluate(async (base, token) => {
         const c = connectorById('collector');
         document.getElementById('collector-url').value = base;
