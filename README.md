@@ -1,4 +1,4 @@
-# AI Usage & Cost Monitor — user guide
+# ROSTUM - AI Usage & Cost Monitor — user guide
 
 One HTML file that shows how much you use AI — tokens, messages and the API-equivalent cost — across every platform you touch: Claude Code, ChatGPT, Gemini, Copilot, Cursor, local models, cloud endpoints and more. It runs entirely in your browser from `AI Usage Dashboard.html`; nothing is installed and nothing is uploaded anywhere except the API calls you explicitly trigger with your own keys.
 
