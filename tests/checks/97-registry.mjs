@@ -82,16 +82,17 @@ export async function run({ browser, ok }) {
         grok4: L('grok-4-0709'), grok: L('grok'), grokMini: L('grok-3-mini'), grokFast: L('grok-4-fast-non-reasoning'),
         dsReason: L('deepseek-reasoner'), dsR1: L('deepseek-r1-distill-llama'), dsChat: L('deepseek-chat'), dsOr: L('deepseek/deepseek-v4'),
         sonar: L('sonar-pro'), pplx: L('perplexity'), meta: L('meta-ai'), copilot: L('copilot'), chatgpt: L('auto'), gpt4o: L('chatgpt-4o-latest'), unknown: L('zzz-never-heard-of-it'),
-        // costs: Grok 4 = 3 + 15 + 0.75 = 18.75 · DeepSeek chat = 0.27 + 1.10 + 0.07 = 1.44 · Meta AI = 0 · Sonar = 1 + 1 + 0 = 2
+        // costs: grok-4 → retired alias of grok-4.3 (Plan 9, verified 2026-10-15) = 1.25 + 2.5 + 0.2 = 3.95 · DeepSeek chat = 0.27 + 1.10 + 0.07 = 1.44 · Meta AI = 0 · Sonar = 1 + 1 + 0 = 2
         grokCost: Pricing.cost('grok-4', M), dsCost: Pricing.cost('deepseek-chat', M), metaCost: Pricing.cost('meta-ai', M), sonarCost: Pricing.cost('sonar', M),
         lastIsFallback: DEFAULT_PRICES[DEFAULT_PRICES.length - 1].pat === '.*',
       };
     });
-    ok('pricing (4b): Grok 4 / Grok fast-mini / DeepSeek Reasoner / DeepSeek chat / Perplexity Sonar / Meta AI rows resolve (first-match order right; ^copilot$ joins the ChatGPT row; fallback still last)',
-      pr.grok4 === 'Grok 4 (xAI list)' && pr.grok === 'Grok 4 (xAI list)' && pr.grokMini === 'Grok fast/mini' && pr.grokFast === 'Grok fast/mini'
+    // Plan 9 (verified rows, 2026-10-15): grok-4 / grok-4-0709 / grok-4-fast-* are retired aliases of grok-4.3 ($1.25/$2.50, cr 0.20); grok-3-mini and sonar-pro have their own rows.
+    ok('pricing (4b, Plan 9 rows): Grok 4 → grok-4.3 alias / Grok 3 Mini / DeepSeek Reasoner / DeepSeek chat / Sonar Pro + Perplexity Sonar / Meta AI rows resolve (first-match order right; ^copilot$ joins the ChatGPT row; fallback still last)',
+      pr.grok4 === 'Grok 4.3' && pr.grok === 'Grok 4 (xAI list)' && pr.grokMini === 'Grok 3 Mini' && pr.grokFast === 'Grok 4.3'
       && pr.dsReason === 'DeepSeek Reasoner' && pr.dsR1 === 'DeepSeek Reasoner' && pr.dsChat === 'DeepSeek chat (V3 list)' && pr.dsOr === 'DeepSeek chat (V3 list)'
-      && pr.sonar === 'Perplexity Sonar' && pr.pplx === 'Perplexity Sonar' && pr.meta === 'Meta AI (consumer, no API price)' && /ChatGPT/.test(pr.copilot) && pr.copilot === pr.chatgpt && pr.gpt4o === 'GPT-4o' && pr.unknown === 'Unknown model'
-      && Math.abs(pr.grokCost - 18.75) < 1e-9 && Math.abs(pr.dsCost - 1.44) < 1e-9 && pr.metaCost === 0 && Math.abs(pr.sonarCost - 2) < 1e-9 && pr.lastIsFallback, JSON.stringify(pr));
+      && pr.sonar === 'Sonar Pro' && pr.pplx === 'Perplexity Sonar' && pr.meta === 'Meta AI (consumer, no API price)' && /ChatGPT/.test(pr.copilot) && pr.copilot === pr.chatgpt && pr.gpt4o === 'GPT-4o' && pr.unknown === 'Unknown model'
+      && Math.abs(pr.grokCost - 3.95) < 1e-9 && Math.abs(pr.dsCost - 1.44) < 1e-9 && pr.metaCost === 0 && Math.abs(pr.sonarCost - 2) < 1e-9 && pr.lastIsFallback, JSON.stringify(pr));
 
     // Bedrock / Vertex spellings of the same Anthropic models: 'anthropic.' + id + '-v1:0' (Bedrock; us./eu./global. prefixes are the
     // cross-region inference profiles) and id + '@YYYYMMDD' (Vertex). The vendor tails hid the trailing date from normalizeModelId, so
