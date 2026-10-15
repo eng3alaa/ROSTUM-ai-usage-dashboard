@@ -1,0 +1,1932 @@
+{
+  "generated": "2026-10-15",
+  "basis": "research 2026-10-15 + skeptic verification",
+  "platforms": [
+    {
+      "name": "Mistral Le Chat (renamed 'Mistral Vibe' in 2026)",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Admin console: https://admin.mistral.ai/account/export > 'Export' button downloads all your Le Chat/Vibe personal data 'as stored in our servers at the time of your request' (Mistral help article; the URL still says 'le-chat' but the text now says 'Vibe' because Le Chat was renamed Vibe — 'All your conversations, settings, and plans carry over'). Probe 2026-10-15: GET admin.mistral.ai/account/export -> 302 to auth.mistral.ai login, so the page exists behind sign-in. Contents are NOT officially documented; a third-party guide (univik, Mar 2026) shows a JSON export with top-level account{email, created_at, plan}, conversations[{id, created_at, title, model, messages[{role, content}]}], memories, projects — model per conversation (not per message), no per-message timestamps, no token counts. Tokens must be estimated from text. Vibe docs separately say 'you can export your data at any time from Settings for a live copy of what's stored' (Knowledge Base page).",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "https://admin.mistral.ai/account/export (Export button -> JSON; conversations[].model, messages[].role/content)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://help.mistral.ai/en/articles/347623-how-do-i-export-my-data-from-le-chat"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None for chat. Mistral ships no official Le Chat/Vibe desktop app for macOS or Windows (third-party guide, Nov 2025: 'has not released a dedicated desktop app'; Mistral's Vibe page links only iOS/Android store listings). The Vibe page mentions a CLI ('Install the CLI from your terminal') — that is the Vibe coding agent, coding-tool territory with no documented transcript/usage files. Conversations are server-side ('stored on Mistral's servers and tied to your account').",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://mistral.ai/products/vibe/"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "None for chat consumption. La Plateforme admin usage endpoints (GET https://api.mistral.ai/v1/admin/usage etc., already covered in the Mistral (La Plateforme) entry) meter API-key traffic only and do not reflect Le Chat/Vibe subscription usage. Key validation GET https://api.mistral.ai/v1/models: preflight probe 2026-10-15 returned access-control-allow-origin:* with Authorization allowed.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none for chat (api.mistral.ai admin usage = API keys only)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.mistral.ai/admin/admin-api/usage-metrics"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None. No OAuth scope or public API exposes a Le Chat/Vibe account's usage or history; the chat.mistral.ai internal endpoints are cookie-bound and not usable from a file:// page. Third-party exporters (Chrome extensions) work only because they run inside the chat.mistral.ai origin.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://www.llmnesia.com/blog/how-to-export-mistral-conversation-history"
+        }
+      ],
+      "bestMethod": "data-export-file (admin.mistral.ai/account/export JSON) with text-based token estimation using conversations[].model",
+      "dataQuality": "estimated",
+      "confidence": "medium",
+      "notes": "Export exists (official) but its schema is only known from a third-party guide — sniff the JSON (conversations[] with messages[].role/content). No local files, no usage endpoint for the chat product. Note the rename: UI now says 'Vibe'; the help article title still says Le Chat. Sources: https://help.mistral.ai/en/articles/347623-how-do-i-export-my-data-from-le-chat ; https://univik.com/help/export-mistral-chats.html ; https://mistral.ai/products/vibe/ ; https://docs.mistral.ai/vibe/work/knowledge ; https://felloai.com/how-to-download-use-mistral-ai-on-mac/"
+    },
+    {
+      "name": "Qwen Chat (chat.qwen.ai) + Alibaba Model Studio / DashScope",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "None native. chat.qwen.ai has no bulk 'export conversations' control ('does not offer a clear one-click export of your full conversation history on its consumer surface'). The Qwen Chat privacy policy (operator NTH POWER GLOBAL TECH SINGAPORE PTE. LTD., contact privacy@qwen.com or in-app Help Center) has a 'Your rights' section, but the rights text could not be retrieved (page is JS-rendered; redirects to qwen.ai/privacypolicy) — a GDPR/PDPA-style access request by email is the only documented route and its output format is unknown. Third-party extensions export single chats to PDF/TXT/MD/JSON from inside the page.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none (privacy request: privacy@qwen.com)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://chat.qwen.ai/legal-agreement/privacy-policy"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Qwen Chat desktop apps exist for Windows and macOS (qwen.ai/download, 'For Desktop'; Windows build announced Aug 2025 with MCP support), but no local transcript or usage files are documented; history is account-side and rendered in the app. Nothing parseable is known.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none documented",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://qwen.ai/download"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "API side only (Model Studio / DashScope keys do NOT reflect chat.qwen.ai usage). DashScope has no usage/balance endpoint; GET https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models validates a key (preflight probe 2026-10-15: access-control-allow-origin:*, authorization allowed). Usage lives in the Alibaba Cloud console: Expenses and Costs > Billing Details > Product='Alibaba Cloud Model Studio' > 'Export Bill CSV' (Instance ID field is semicolon-separated: 'text_token;llm-xxx;qwen-max;output_token;app' = billingType;workspaceId;model;tokenType;channel — the model is the 3rd field, the token type the 4th (verifier-confirmed order); token quantities are on the Model Usage / Model Monitoring pages, ~1 h lag). Programmatic: BSS OpenAPI DescribeInstanceBill on https://business.aliyuncs.com (BillingCycle YYYY-MM, Granularity DAILY+BillingDate, IsBillingItem=true -> Usage/UsageUnit/PretaxAmount per billable item, 18 months, 10 rps) with an AccessKey-signed (ACS V3) request; the ProductCode value for Model Studio is not stated in the docs (filter by ProductDetail/ProductName instead). CORS probe 2026-10-15: business.aliyuncs.com preflight returns Access-Control-Allow-Origin:* with x-acs-* headers allowed, so it is browser-callable if the page implements ACS signing.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "console CSV: Expenses and Costs > Billing Details (Product=Alibaba Cloud Model Studio) ; API: POST https://business.aliyuncs.com/?Action=DescribeInstanceBill&BillingCycle=YYYY-MM&IsBillingItem=true (AccessKey signature)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://www.alibabacloud.com/help/en/model-studio/bill-query-and-cost-management"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None official. Unofficial: the web app's internal API (chat.qwen.ai/api/v1/chats) answered a preflight from Origin:null with Access-Control-Allow-Origin:null, Allow-Credentials:true, Allow-Headers:* (probe 2026-10-15), i.e. CORS itself would not block a file:// page — but it needs the user's session bearer token, which only the logged-in web app holds; undocumented and may change without notice. Not a realistic connector.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none official (chat.qwen.ai/api/v1/* internal)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://www.llmnesia.com/blog/how-to-export-qwen-conversation-history"
+        }
+      ],
+      "bestMethod": "Chat: none (manual entry). API keys: Model Studio bill CSV import (exact tokens via Instance ID parsing) or BSS DescribeInstanceBill with ACS signing — API usage only, not chat.",
+      "dataQuality": "none",
+      "confidence": "medium",
+      "notes": "Qwen Chat exposes nothing: no export, no local files, no usage endpoint. The only exact path is Alibaba Cloud billing for DashScope API keys, which is a different product. Privacy-policy portability wording unverified (JS page). Sources: https://www.llmnesia.com/blog/how-to-export-qwen-conversation-history ; https://www.alibabacloud.com/help/en/model-studio/bill-query-and-cost-management ; https://help.aliyun.com/en/model-studio/model-usage-statistics ; https://www.alibabacloud.com/help/en/user-center/developer-reference/api-bssopenapi-2017-12-14-describeinstancebill ; https://alternativeto.net/news/2025/8/qwen-chat-desktop-arrives-on-windows-with-mcp-support/"
+    },
+    {
+      "name": "Kimi (kimi.com) + Moonshot API platform",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "None native: 'As of 2026, Kimi AI does not offer a native data export feature' (no JSON/CSV/Markdown). The Kimi privacy policy (v2) grants view/copy/correct/delete rights: account info is editable under Settings, chat content can be copied via the copy button, individual chats deleted; requests for anything else go through the in-app feedback channel or the listed email/postal address with identity verification, answered within 15 working days — no portability/export deliverable is described. Third-party: Firefox 'Kimi Chat Exporter' (MIT) exports one/all chats to Markdown by calling the Kimi API from inside kimi.com.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://www.kimi.com/user/agreement/userPrivacy?version=v2"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Kimi ships a desktop client ('Kimi Work', beta, macOS Apple Silicon and Windows 10+, download at kimi.com) but no local transcript or usage files are documented. Kimi Code CLI (separate coding tool) has /export-md for sessions — not chat usage.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none documented",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://decrypt.co/370954/moonshot-ai-kimi-work-300-agents-desktop"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "Moonshot API platform only (does not reflect kimi.com chat usage). GET https://api.moonshot.ai/v1/users/me/balance (Authorization: Bearer <key>; China host api.moonshot.cn; keys from platform.kimi.ai and platform.kimi.com are not interchangeable -> 401) returns {code:0, data:{available_balance, voucher_balance, cash_balance} (USD), scode, status}. Balance only — no usage endpoint; per-model daily usage/costs are console-only (platform fee-detail page, updated 07:00 next day). POST /v1/tokenizers/estimate-token-count counts tokens for a messages array. CORS probe 2026-10-15 (both hosts): preflight 204 with Access-Control-Allow-Origin:null, Allow-Credentials:true, Allow-Headers authorization,content-type -> callable from file://.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.moonshot.ai/v1/users/me/balance (also api.moonshot.cn)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://platform.kimi.ai/docs/api/balance.md"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None official. The kimi.com web app's internal API (www.kimi.com/api/*) answered a null-origin preflight with Access-Control-Allow-Origin:* and authorization allowed (probe 2026-10-15), but it needs the logged-in user's bearer token and is undocumented — not a supportable connector.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none official",
+          "browserCallable": "yes",
+          "sourceUrl": "https://addons.mozilla.org/firefox/addon/kimi-chat-exporter/"
+        }
+      ],
+      "bestMethod": "Chat: none. Moonshot API key: balance endpoint as a 'connected + credit remaining' check (balance delta approximates spend, never tokens).",
+      "dataQuality": "validate-only",
+      "confidence": "high",
+      "notes": "Kimi chat exposes nothing (no export, no local logs). Moonshot balance is browser-callable and cheap, same pattern as DeepSeek. Sources: https://www.kimi.com/help/kimi-api/api-balance-and-usage ; https://platform.kimi.ai/docs/api/overview.md ; https://aimemory.pro/blog/export-kimi-ai ; https://www.kimi.com/en/help/others/account-deletion"
+    },
+    {
+      "name": "Zhipu ChatGLM (chatglm.cn) / Z.ai chat (chat.z.ai) + GLM API / Coding Plan",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "None. 智谱清言/ChatGLM has no official conversation export ('目前没有官方的对话导出功能'); chat.z.ai likewise has none in its docs (docs.z.ai index lists only Privacy Policy / Terms / FAQ pages, no export or data-download page). Third-party browser extensions export single chats to Markdown from inside the page.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://aimemory.pro/zh/zhipu-qingyan-jiyi-guanli"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None. Web + iOS/Android only; no documented desktop app or local transcript store.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.z.ai/llms.txt"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "API/Coding Plan only (not chat). Z.ai has NO documented balance or usage endpoint (Devpack FAQ: 'view the progress of your quota consumption in the subscription' page z.ai/manage-apikey/subscription; usage deducted in credits). Undocumented monitor endpoints used by community quota tools (opencode-glm-quota): GET https://api.z.ai/api/monitor/usage/quota/limit, /api/monitor/usage/model-usage, /api/monitor/usage/tool-usage (CN: same paths on open.bigmodel.cn) with header 'Authorization: <raw API key>' (no Bearer prefix) + Accept-Language. Field schema UNVERIFIED (verifier 2026-10-15): the shapes below are transcribed from live responses captured by community tools, not from any Z.ai document. quota/limit -> data.level (plan), data.limits[{type:'TOKENS_LIMIT'|'TIME_LIMIT', percentage, nextResetTime, currentValue, usage, usageDetails[{modelCode, usage}]}]; model-usage -> data.totalUsage.totalTokensUsage / totalModelCallCount (window aggregate, no per-model/day split). Coding Plan (5-hour + weekly windows) only. CORS probe 2026-10-15: preflight 200 with Access-Control-Allow-Origin:null, Allow-Credentials:true, authorization allowed; unauthenticated GET -> {code:1001, msg:'Authentication parameter not received in Header'} -> browser-callable. Unofficial; may change. Treat the monitor endpoints as experimental.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.z.ai/api/monitor/usage/quota/limit ; /api/monitor/usage/model-usage (undocumented; also open.bigmodel.cn)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://cdn.jsdelivr.net/npm/opencode-glm-quota@1.8.0/README.md"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None official. chat.z.ai/api/v1/chats answered a null-origin preflight with Access-Control-Allow-Origin:null + credentials (probe 2026-10-15) but requires the web session's token; undocumented.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none official",
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.z.ai/devpack/faq.md"
+        }
+      ],
+      "bestMethod": "Chat: none. GLM Coding Plan: undocumented api.z.ai/api/monitor/usage/* (window token totals + quota %) — a coding-tool connector, not chat.",
+      "dataQuality": "none",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: monitor endpoints are undocumented/experimental and their field schema is unverified (from live responses in community tools). Chat products expose nothing. The Coding Plan monitor API is real (CORS-open, raw-key header) but undocumented; treat like the Claude OAuth usage endpoint: optional, best-effort. Sources: https://docs.z.ai/devpack/faq.md ; https://cdn.jsdelivr.net/npm/opencode-glm-quota@1.8.0/dist/api/endpoints.js ; https://docs.roomote.dev/providers/inference/zai-coding-plan ; https://aimemory.pro/blog/chatglm-memory-guide"
+    },
+    {
+      "name": "Poe (Quora)",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "Poe Usage API with a personal key from poe.com/api/keys (Authorization: Bearer). GET https://api.poe.com/usage/current_balance -> {current_point_balance} (plan + add-on points). GET https://api.poe.com/usage/points_history?limit=<1..100>&starting_after=<query_id> -> {has_more, length, data:[{creation_time (unix microseconds), bot_name, query_id, usage_type:'API'|'Chat'|'Canvas App', chat_name|canvas_tab_name|api_key_name, cost_points, cost_usd (string), cost_breakdown_in_points:{Input:'450 points (5290 tokens)', 'Cache write':'63 points (2921 tokens)', Output:'7 points (15 tokens)', 'Cache discount':'-181 points (2366 tokens)', Total:'339 points'}}]}, newest first, up to 30 days back. Tokens are only inside the breakdown strings (regex '(\\d+) tokens'). usage_type 'Chat' with chat_name indicates poe.com chat-app usage is included alongside API calls (docs define the field; not verified with a live key). CORS probe 2026-10-15: preflight 204 with Access-Control-Allow-Origin:* and Authorization allowed on both endpoints -> callable from file://. Poll at least every 30 days and persist locally.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "GET https://api.poe.com/usage/points_history ; GET https://api.poe.com/usage/current_balance",
+          "browserCallable": "yes",
+          "sourceUrl": "https://creator.poe.com/docs/resources/usage-api"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "No official bulk export ('Poe has no data export equivalent to ChatGPT's'). Privacy requests go through the Quora privacy process (Poe policy 'supplements' Quora's; DPO privacy@quora.com). Workarounds inside Poe: @savechats (.json of current chat), @export-chat / @SaveThisChat (.md), userscripts (Poe Chat Exporter, poe2md) — per-chat only, no tokens.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none official (in-Poe bots @savechats/.json, @export-chat/.md)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://aimemory.pro/blog/export-poe-ai"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None documented. Poe desktop/mobile apps render the web app; no local transcript or usage store is documented.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://poe.com/privacy"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None. The web app's GraphQL (poe.com/api/gql_POST) is cookie-bound; preflight probe returned 403 with no CORS headers.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://creator.poe.com/api-reference/getPointsHistory"
+        }
+      ],
+      "bestMethod": "api-key: points_history (per-query bot/model, points, USD, tokens parsed from breakdown strings; 30-day window) + current_balance; browser-callable",
+      "dataQuality": "exact",
+      "confidence": "medium",
+      "notes": "The one consumer chat app in this batch with a real usage API: per-query tokens, points and cost_usd, CORS-open. Open questions: whether subscription chat turns always appear with usage_type 'Chat' (docs imply yes), and whether cost_usd reflects the user's actual bill or a nominal USD value of points. 30-day retention means the connector must persist history. Sources: https://creator.poe.com/docs/resources/usage-api ; https://creator.poe.com/api-reference/getPointsHistory ; https://creator.poe.com/api-reference/getCurrentBalance ; https://raw.githubusercontent.com/steipete/CodexBar/main/docs/poe.md"
+    },
+    {
+      "name": "You.com",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "No account-level export. Per-response only: download button below a response -> DOCX, RTF or MD (includes query, response with citations, sources); tables have a CSV download; copy as text/markdown. Privacy policy: users 'can access and delete' personal information and 'in some circumstances ... obtain certain information in a portable format'; requests to Privacy@you.com after identity verification (EU/UK answered within one month). No format documented. (Verifier 2026-10-15: the previously cited home.you.com/support/copying-and-exporting-chats page returns 404; the support knowledge base at support.you.com/kb is the current source. Conclusion unchanged: no account-level export.)",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "per-response download (DOCX/RTF/MD, CSV for tables); privacy request Privacy@you.com",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.you.com/kb"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "You.com developer API (Search/Contents/Research APIs — not the chat product). GET https://api.you.com/v1/billing/account_balance with X-API-Key -> {balance} in cents; usage history is dashboard-only (you.com/platform > Usage & Billing). CORS probe 2026-10-15: preflight on api.you.com returned 401 with no Access-Control headers -> blocked from file://. Does not reflect you.com chat usage.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.you.com/v1/billing/account_balance (X-API-Key)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://you.com/docs/administration/billing.md"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None. Web/mobile product; no documented desktop transcript or usage files.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://you.com/privacy"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None. Internal you.com/api/* endpoints are cookie-bound; preflight probe returned 401 without CORS headers.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://you.com/docs/administration/account.md"
+        }
+      ],
+      "bestMethod": "none (manual entry); per-response DOCX/MD downloads are not a usage source",
+      "dataQuality": "none",
+      "confidence": "medium",
+      "notes": "Nothing usable: no bulk export, no local files, API balance endpoint is for the search/research API and is CORS-blocked. Sources: https://support.you.com/kb ; https://you.com/docs/administration/billing.md ; https://you.com/privacy ; verifier: original support URL 404 -> replaced with support.you.com/kb; 'none' conclusion stands."
+    },
+    {
+      "name": "Character.ai",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Official account-wide request: web Profile Settings > Account > Manage Account & Data > 'Export Data' (pop-up confirms a download link will be emailed); mobile Profile > Settings > Legal & Privacy > Export Data. Processing 'can take 3-4 weeks'; the emailed link is valid 7 days. No per-chat export button. Contents are not officially documented; third-party guides describe a ZIP with user, character and message files (account details, character info, messages with timestamps). No model, no tokens -> estimate from text. Timing (3-4 weeks processing, emailed link valid 7 days) is stated in both the 'How do I export all my data' article (30299431702555) and 'How do I download my data' (56967715028891).",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "Profile Settings > Account > Manage Account & Data > Export Data (emailed ZIP, 3-4 weeks, link 7 days)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.character.ai/hc/en-us/articles/30299431702555-How-do-I-export-all-my-data-How-can-I-export-my-chats ; https://support.character.ai/hc/en-us/articles/56967715028891-How-do-I-download-my-data"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None. Web + iOS/Android only; no desktop app, no local transcript files.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.character.ai/hc/en-us/categories/15665985346587-Mobile-App"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None. Character.ai has no public API, no usage or billing endpoint (c.ai+ subscription has no metered quota surface). The internal character.ai/api/* answered a preflight with Access-Control-Allow-Origin:* (probe 2026-10-15) but is undocumented and session-bound.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.character.ai/hc/en-us/articles/39030432883099-Privacy-Policy"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None. No third-party login scope exposes chats or usage.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.character.ai/hc/en-us/articles/56967715028891-How-do-I-download-my-data"
+        }
+      ],
+      "bestMethod": "data-export-file (official but slow: weeks) with text-based estimation; archive schema must be sniffed",
+      "dataQuality": "estimated",
+      "confidence": "medium",
+      "notes": "Export is official and complete but takes 3-4 weeks and its file layout is only known from third-party guides. No live or exact source. Sources: https://support.character.ai/hc/en-us/articles/30299431702555-How-do-I-export-all-my-data-How-can-I-export-my-chats ; https://characterai.it.com/how-to-export-character-ai-chats-step-by-step-guide/ ; https://aiinsightsnews.net/how-to-export-character-ai-chat/ ; https://support.character.ai/hc/en-us/articles/56967715028891-How-do-I-download-my-data"
+    },
+    {
+      "name": "Google NotebookLM (renamed 'Gemini Notebook' in Google help, 2026)",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Workspace only: the admin Data Export tool ('Export Gemini Notebook data', knowledge.workspace.google.com, updated Apr 2026) includes 'Chat history, excluding deleted chat history', generated audio overviews, uploaded content and generated notes — an org-wide export run by a Workspace admin through the admin Data Export tool, format undocumented. Consumer accounts: NotebookLM/Gemini Notebook was NOT confirmed as a Google Takeout product (could not verify the Takeout product list without sign-in; third-party nlmtools, Apr 2026: 'chat history cannot be exported'). In-app: individual notes export to Google Docs/Sheets (Studio panel three-dot menu); chat answers must be saved as notes first. Browser extensions (NotebookLM Chat Exporter, NotebookLM Exporter) scrape the open chat to MD/JSON/PDF. No model, no tokens anywhere.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "Workspace admin Data Export tool (org-wide) ; consumer: none confirmed (notes -> Docs/Sheets only)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://knowledge.workspace.google.com/admin/migrate/export-notebooklm-data"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None. Web app (plus mobile apps); no desktop app, no local chat or usage files.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.google.com/notebooklm/answer/16179559?hl=en"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None. No consumer API, no usage or quota endpoint; daily chat-query limits are shown only in the UI (FAQ mentions only that enterprise gets 'higher limits'). The NotebookLM Enterprise/Cloud notebooks API manages notebooks, not usage.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.google.com/notebooklm/answer/16269187?hl=en"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None. Google's Data Portability API resource groups do not include NotebookLM/Gemini Notebook, and Google OAuth cannot redirect to a file:// page anyway.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://developers.google.com/data-portability/schema-reference/my_activity"
+        }
+      ],
+      "bestMethod": "none for consumers (manual entry); Workspace admins can pull chat history org-wide via the admin Data Export tool",
+      "dataQuality": "none",
+      "confidence": "medium",
+      "notes": "Unverified: whether 'Gemini Notebook'/NotebookLM appears in takeout.google.com for personal accounts (needs a signed-in check). Everything else points to nothing exportable by an individual. Sources: https://knowledge.workspace.google.com/admin/migrate/export-notebooklm-data ; https://support.google.com/notebooklm/answer/16262519 ; https://www.nlmtools.com/blog/notebooklm-export-sources ; https://chromewebstore.google.com/detail/ffkhelaagbcaeidogobojfedgkhfchlg"
+    },
+    {
+      "name": "Claude Desktop 'Cowork' sessions (Windows/macOS)",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "CONFIRMED on disk 2026-10-15 (Claude Desktop, Windows; 264 transcript files, 220 audit.jsonl). Cowork transcripts live ONLY under %APPDATA%\\Claude\\local-agent-mode-sessions\\<orgId>\\<userId>\\<sessionDir>\\.claude\\projects\\<slug>\\<cliSessionId>.jsonl — sessionDir is local_<uuid> (newer builds; slug derived from the session cwd) or an 8-hex id (Feb-Apr 2026 builds; slug 'session'); lines carry entrypoint 'local-agent'. They are NOT under ~/.claude/projects, which holds Code-tab / CLI / Agent SDK sessions only. Lines are the Claude Code transcript format (type assistant|user|system|attachment|queue-operation|last-prompt); assistant lines carry message.model and the same message.usage fields as Claude Code {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, cache_creation{ephemeral_5m_input_tokens, ephemeral_1h_input_tokens}, server_tool_use, service_tier, inference_geo, iterations, speed} plus top-level uuid, requestId, sessionId, cwd, timestamp, version. Each <sessionDir> also has audit.jsonl (HMAC-chained; types assistant|user|system|result|rate_limit_event) whose result lines carry total_cost_usd, usage{...} and modelUsage{<model>: {inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens, costUSD, canonicalModel, provider}}, num_turns, duration_ms. Roots: standard app %APPDATA%\\Claude (3P/BYO-provider edition %LOCALAPPDATA%\\Claude-3p); macOS ~/Library/Application Support/Claude/local-agent-mode-sessions/. Official docs confirm local-agent-mode-sessions/ holds Cowork (and 3P Chat) history and audit.jsonl. The dashboard's collector ('local' tool = ~/.claude only) and folder scanner therefore MISS Cowork today.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "%APPDATA%\\Claude\\local-agent-mode-sessions\\<orgId>\\<userId>\\<sessionDir>\\.claude\\projects\\<slug>\\<cliSessionId>.jsonl (tokens per assistant message; entrypoint 'local-agent') ; ...\\<sessionDir>\\audit.jsonl result lines (total_cost_usd, usage, modelUsage{inputTokens,outputTokens,cacheReadInputTokens,cacheCreationInputTokens,costUSD,canonicalModel,provider}) ; 3P edition %LOCALAPPDATA%\\Claude-3p\\local-agent-mode-sessions ; macOS ~/Library/Application Support/Claude/local-agent-mode-sessions/",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://claude.com/docs/third-party/claude-desktop/data-storage"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Not covered by the claude.ai Settings > Privacy > Export data ZIP: Cowork history is local-only ('stored on the user's machine, is not subject to Anthropic's retention policies, and cannot be centrally managed or exported'); the official 'move a user to a new device' procedure copies the application-data directory and ~/.claude instead of exporting.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none (claude.ai export excludes Cowork)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://brycewatson.com/blog/13-cowork-conversation-transcripts"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Claude Enterprise Analytics API (already in the Claude.ai entry) reports Claude Code sessions per user; whether Cowork sessions are counted there is not documented. Enterprise orgs only.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://api.anthropic.com/v1/organizations/analytics/* (Cowork coverage unverified)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://platform.claude.com/docs/en/manage-claude/analytics-api"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None. Cowork runs Claude Code inside a local VM; usage is counted against the claude.ai plan and shown in Settings > Usage (internal, cookie-bound endpoint, CORS-blocked from file://).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://brycewatson.com/blog/09-cowork-session-schema"
+        }
+      ],
+      "bestMethod": "local-logs-folder: add %APPDATA%\\Claude\\local-agent-mode-sessions (and %LOCALAPPDATA%\\Claude-3p\\...; macOS ~/Library/Application Support/Claude/local-agent-mode-sessions) as a second discovery root of the 'local' (Claude Code / Desktop) tool and of the collector, globbing **/.claude/projects/**/*.jsonl with the existing parser (dedupe by uuid/requestId); optionally read audit.jsonl result lines for total_cost_usd / modelUsage",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: CONFIRMED on disk (264 transcripts, 220 audit.jsonl under the APPDATA root; ~/.claude/projects holds Code-tab / CLI / SDK sessions only). CORRECTION to the 2026-08-16 research and the dashboard's Claude card text: Cowork transcripts are NOT under ~/.claude/projects, so Cowork usage is currently invisible to ROSTUM. Same JSONL schema as Claude Code (352/352 assistant lines in a sample file had message.usage). Paths changed twice (8-hex 'session' slug -> local_<uuid> cwd slug), so glob broadly. Sources: https://claude.com/docs/third-party/claude-desktop/data-storage ; https://brycewatson.com/blog/13-cowork-conversation-transcripts ; https://code.claude.com/docs/en/sessions ; https://medium.com/@samjmaeer/did-you-know-that-on-windows-claude-desktop-has-three-tabs-and-each-one-stores-your-work-01aa11ae3dad"
+    },
+    {
+      "name": "Microsoft 365 Copilot (work/school account) — beyond the consumer privacy-dashboard CSV",
+      "category": "chat-app",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "End user: none. The work-account control (myaccount.microsoft.com > Data and Privacy > Data options > Copilot activity history) offers DELETE only ('a deletion request is sent to Microsoft'; all-or-nothing across apps); the consumer privacy-dashboard CSV export explicitly 'only applies when you're signed in with your Microsoft account'. No per-session export ('Copilot does not currently offer you a way to export your entire session's conversation'); per-response copy / 'Edit in Word/Pages' only. Tenant admin: Microsoft 365 admin center > Reports > Usage > Microsoft Copilot > Copilot > Export (.csv) — per licensed user: Prompts submitted (any app), Copilot Chat (work) prompts, Copilot Chat (web) prompts, Active days, Last activity date per app; windows 7/28/90/180 days; ~48 h lag; counts only, no tokens, no cost; requires Reports Reader/Global Reader or similar admin role, and user names are pseudonymised unless an admin turns that off.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "user: none ; admin: M365 admin center > Reports > Usage > Microsoft Copilot > Export CSV (prompt counts per user)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://learn.microsoft.com/en-us/microsoft-365/admin/activity-reports/microsoft-365-copilot-usage"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "Admin-only Graph APIs (already covered): GET /v1.0/copilot/reports/getMicrosoft365CopilotUsageUserDetail(period='D30') (Reports.Read.All; per-user last-activity and prompt counts) and GET /v1.0/copilot/users/{id}/interactionHistory/getAllEnterpriseInteractions (AiEnterpriseInteraction.Read.All, application permission only; full prompts/responses). Purview audit (CopilotInteraction records) and eDiscovery hold the transcripts for compliance. No delegated 'me' scope lets a user read their own Copilot usage, and Entra will not issue tokens to a file:// / null-origin redirect, so none of this is reachable from the dashboard without a hosted OAuth relay. No tokens anywhere.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "https://graph.microsoft.com/v1.0/copilot/reports/getMicrosoft365CopilotUsageUserDetail(period='D30') ; /v1.0/copilot/users/{id}/interactionHistory/getAllEnterpriseInteractions",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/api/ai-services/interaction-export/aiinteractionhistory-getallenterpriseinteractions"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None documented. The Microsoft 365 Copilot app (Windows/macOS) and Copilot in Office apps keep conversations server-side (Exchange hidden folder for compliance); no local transcript or usage files are documented.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://it.cornell.edu/microsoft-copilot-enterprise/save-copilot-responses"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None. M365 Copilot is a per-seat licence with no metered token quota exposed to users or admins; there is no personal API key or usage endpoint (distinct from GitHub Copilot and from Azure/Foundry API keys).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.microsoft.com/en-us/office/delete-your-microsoft-365-copilot-activity-history-76de8afa-5eaf-43b0-bda8-0076d6e0390f"
+        }
+      ],
+      "bestMethod": "none for an individual work user (manual entry); tenant admins: admin-center usage CSV or Graph reports via a hosted OAuth app — prompt counts only, never tokens",
+      "dataQuality": "none",
+      "confidence": "medium",
+      "notes": "Work accounts have strictly less than consumer accounts: delete-only self-service, no export, no local files. The admin CSV is a possible importer (prompt counts per user per period) if the dashboard ever accepts counts-only sources. Sources: https://learn.microsoft.com/en-us/microsoft-365/admin/activity-reports/microsoft-365-copilot-usage ; https://support.microsoft.com/en-us/office/delete-your-microsoft-365-copilot-activity-history-76de8afa-5eaf-43b0-bda8-0076d6e0390f ; https://support.microsoft.com/en-us/privacy/manage-your-copilot-activity-history-in-the-privacy-dashboard ; https://it.cornell.edu/microsoft-copilot-enterprise/save-copilot-responses"
+    },
+    {
+      "name": "Cerebras Inference (Cloud Console)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "No usage/billing/credits endpoint anywhere in the docs index (inference-docs.cerebras.ai/llms.txt) or the OpenAPI spec. Only key-based call that helps is GET https://api.cerebras.ai/v1/models (Authorization: Bearer csk-...) -> {object:'list', data:[{id, object:'model', created, owned_by}]}; a bogus key returns 401, so it validates the key. The Metrics API (GET /v1/metrics, Prometheus text) is for dedicated endpoints only and carries no billing data. Per-response `usage` (prompt_tokens/completion_tokens, prompt_tokens_details.cached_tokens) exists only for calls the page itself makes. CORS verified: preflight (Origin: null) and GET on api.cerebras.ai return Access-Control-Allow-Origin: * with allow-headers authorization,content-type (probed).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.cerebras.ai/v1/models",
+          "browserCallable": "yes",
+          "sourceUrl": "https://inference-docs.cerebras.ai/api-reference/models/list-models"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Cloud Console https://cloud.cerebras.ai > Analytics. Tabs: Usage (request volume + token consumption over a date range, optional 'Show quotas' overlay), Cached-Usage (input tokens split cache-hit vs fresh), Cost (calendar month, by model and input/output token type; may lag 10 min; subscription-covered requests excluded). Usage, Cached-Usage and Logs > Request Logs (filter by model, API key, date range, status) each have a 'Download Report' button that exports CSV; Cost has no export. All timestamps UTC. CSV column names are not documented — sniff headers on import.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "cloud.cerebras.ai > Analytics > Usage / Cached-Usage / Request Logs > Download Report (CSV)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://inference-docs.cerebras.ai/console/usage-monitoring"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Account & Billing in the console: prepaid credits (developer tier), monthly subscription plans, spend limits, team members. No admin API, no local logs. Rate limits (per-minute/per-day/hourly, per project or org) are shown under Analytics > Limits.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://cloud.cerebras.ai (Account & Billing)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://inference-docs.cerebras.ai/console/account-billing"
+        }
+      ],
+      "bestMethod": "Validate-only via GET /v1/models (CORS open) + import of the Analytics > Usage / Cached-Usage CSV 'Download Report' for exact token history; cost must be priced locally from the Cost tab or published rates.",
+      "dataQuality": "exact",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: card = validate-only via GET /v1/models + CSV import of Analytics > Usage / Cached-Usage 'Download Report' (schema sniffed). Tokens are exact only through the console CSV (schema undocumented; needs a sample file to build the importer). Cost tab has no export, so USD must be computed from tokens x list price. Sources: https://inference-docs.cerebras.ai/console/usage-monitoring ; https://inference-docs.cerebras.ai/llms.txt ; https://inference-docs.cerebras.ai/api-reference/models/list-models"
+    },
+    {
+      "name": "SambaNova Cloud (SambaCloud)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "No usage, credits or billing endpoint documented (docs index v2.2.3 lists only 'API keys and URLs'). GET https://api.sambanova.ai/v1/models returns 200 even with a bogus Bearer key (probed), so it does NOT validate the key; its objects do carry extra fields: context_length, max_completion_tokens, pricing{prompt, completion} (USD per token as strings). Validation needs a real POST /v1/chat/completions (401 with bogus key, probed). Rate-limit headers x-ratelimit-limit-requests / -remaining-requests / -reset-requests and the -day variants come back per response. CORS: preflight (Origin: null) and GET on api.sambanova.ai return NO Access-Control-Allow-* headers at all (probed) -> blocked from file://.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.sambanova.ai/v1/models (no CORS, no key validation)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.sambanova.ai/docs/en/models/rate-limits"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Console only: cloud.sambanova.ai Usage page (all requests, per model or per API key), Billing at cloud.sambanova.ai/plans/billing (prepaid credits since the Developer-tier change; Free tier when no card, Developer tier with card, 20M tokens/day cap). No CSV export, no API, no local logs. AWS Marketplace subscribers see billing only in AWS.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://cloud.sambanova.ai (Usage, Plans > Billing)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.sambanova.ai/docs/en/integrations/aws-marketplace"
+        }
+      ],
+      "bestMethod": "None from a file:// page (api.sambanova.ai sends no CORS headers). Only a proxy/collector could even validate the key; usage stays console-only.",
+      "dataQuality": "none",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: card = link-only (host sends no CORS headers; nothing fetchable from file://). Pricing per model is exposed in /v1/models (pricing.prompt / pricing.completion) which could price locally recorded calls, but the host is CORS-closed. Community reports (Aug 2026) say the $5 no-card grant was removed; unverified. Sources: https://docs.sambanova.ai/docs/en/models/rate-limits ; https://community.sambanova.ai/t/i-had-been-using-this-platform-from-many-months-and-paying-every-month-through-cc-now-i-am-getting-error-as-out-of-credits/1629 ; https://docs.sambanova.ai/docs/_llms/v2-2-3.txt"
+    },
+    {
+      "name": "DeepInfra",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "Not in the public docs, but the live OpenAPI spec (https://api.deepinfra.com/openapi.json, security HTTPBearer) exposes the dashboard's account/billing API. GET https://api.deepinfra.com/v1/me -> {uid, email, display_name, is_team_account, is_admin, ...} (key check). GET /payment/usage?from=YYYY-MM[&to=] (also /payment/usage/tokens, per-key /payment/usage/{api_token} and /payment/usage/id/{token_id}) -> {months:[{period:'YYYY.MM', interval{fr,to} (ms), items:[{model{...}, units (billed seconds or tokens), rate (cents/sec or cents/token), cost (cents), pricing_type, interval, discount}], total_cost (cents), invoice_id ('NOT_FINAL' for current month)}], initial_month}. GET /payment/key-limits -> [{token_id, name, limit (USD/month or null), spend (USD this month or null)}]. GET /payment/invoices -> {invoices:[{id,status,total,amount_due,created,due_date,period,invoice_type,hosted_invoice_url,invoice_pdf}], has_more, next_cursor}. GET /v1/me/rate_limit -> {rate_limit, tpm_rate_limit}. Validate also via GET https://api.deepinfra.com/v1/openai/models. CORS verified: preflight (Origin: null) and GET on /v1/me, /payment/usage and /v1/openai/models all return Access-Control-Allow-Origin: * (probed). Caveat: spec lists an optional `session` query param, hinting these were built for the logged-in dashboard; whether an ordinary API key is accepted on /payment/* is unverified without a key. VERIFIER 2026-10-15: whether /payment/* accepts an ordinary API key (vs. a dashboard session) remains unverified without a live key — the card must gate at runtime: call /v1/me (validate), then /payment/usage; on 401/403 fall back to validate-only and say so.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "GET https://api.deepinfra.com/payment/usage?from=&to= ; /payment/usage/tokens ; /payment/key-limits ; /payment/invoices ; GET /v1/me",
+          "browserCallable": "yes",
+          "sourceUrl": "https://api.deepinfra.com/openapi.json"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Dashboard https://deepinfra.com/dash (usage, billing, API keys at /dash/api_keys). Public docs (docs.deepinfra.com) describe only inference (base https://api.deepinfra.com/v1/openai) and link to the dashboard; no documented CSV export, no local logs.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://deepinfra.com/dash",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.deepinfra.com/"
+        }
+      ],
+      "bestMethod": "GET /payment/usage/tokens (per model units + cents per month) and /payment/key-limits with the user's API key; /v1/me for validation. All CORS-open. Quality 'exact' is CONDITIONAL on /payment/* accepting the ordinary API key — runtime-gated, fall back to validate-only on 401/403.",
+      "dataQuality": "exact",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: 'exact' is conditional (runtime-gated) on /payment/* accepting a plain API key; the OpenAPI `session` query param hints the routes were built for the logged-in dashboard. Potentially the richest source in this batch, but it is an undocumented dashboard API: monthly granularity only (items carry a time interval, not daily buckets), amounts in integer cents, `units` may be tokens or seconds depending on pricing_type. Must be confirmed with a real key (401 vs 403 on /payment/usage). Sources: https://api.deepinfra.com/openapi.json ; https://docs.deepinfra.com/"
+    },
+    {
+      "name": "Novita AI",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "Validation + balance with the regular API key (Authorization: Bearer): legacy GET https://api.novita.ai/v3/user -> {credit_balance} (Credit x 10000; 10000 = $1.00); a bogus key returns 403, so it validates (verifier 2026-10-15). Its documentation page is gone but the endpoint still answers. GET https://api.novita.ai/openai/v1/models does NOT validate — it returns 200 with a bogus key (verifier) — so it is only a reachability/model-list call. CORS: preflight (Origin: null) and GET on /v3/user and /openai/v1/models return Access-Control-Allow-Origin: * (probed) -> callable from file://. No per-model token endpoint.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.novita.ai/v3/user (validator; credit_balance) ; GET https://api.novita.ai/openai/v1/models (list only, no validation)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.novita.ai/api-reference/basic-get-user-balance"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "Official billing endpoints (Authorization: Bearer <API key>, Content-Type: application/json). GET https://api.novita.ai/openapi/v1/billing/balance/detail -> {availableBalance, cashBalance, creditLimit, pendingCharges, outstandingInvoices} (strings in 1/10000 USD). GET https://api.novita.ai/openapi/v1/billing/monthly/bill?startMonth=YYYY-MM&page=&pageSize= -> {data:[{billId, userId, billingMonth, totalAmount, originTotalAmount, voucherPayAmount, cashPayAmount, debtAmount, repaidAmount, status (pending|outed|paid|overdue|voided), invoiceUrl, startTime, endTime}]} (data from 2025-10). CORS CORRECTED (verifier 2026-10-15): the OPTIONS preflight on /openapi/v1/billing/* returns 401 with no Access-Control-Allow-Origin header, so these are NOT callable from a file:// page — collector proxy only. The earlier 'ACAO *' observation came from a direct GET, not the preflight. No per-model token endpoint.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "GET https://api.novita.ai/openapi/v1/billing/balance/detail ; GET https://api.novita.ai/openapi/v1/billing/monthly/bill (collector proxy only)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://novita.ai/docs/api-reference/basic-query-monthly-bill.md"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Console (novita.ai > Billing) shows balance, consumption records and invoices; no documented CSV export of per-model usage, no local logs.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://novita.ai/billing",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.novita.ai/llms.txt"
+        }
+      ],
+      "bestMethod": "Browser card = validate-only via legacy GET /v3/user (403 on bogus key; also yields credit_balance). Billing detail + monthly bills (billed USD per month) only through the collector proxy because the /openapi/v1/billing/* preflight is rejected (401, no CORS headers). Tokens are never available.",
+      "dataQuality": "validate-only",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: /openai/v1/models returns 200 with a bogus key (no validation) -> validator is GET /v3/user (403 on bogus); billing endpoints answer the OPTIONS preflight with 401 and no ACAO -> cors-blocked, collector only. Cost-only even via the collector: exact billed USD per month, no token counts (estimate from cost / list price). All amounts are strings scaled by 10000. Sources: https://docs.novita.ai/api-reference/basic-get-user-balance ; https://novita.ai/docs/api-reference/basic-query-monthly-bill.md ; https://docs.novita.ai/llms.txt"
+    },
+    {
+      "name": "Nebius Token Factory (ex Nebius AI Studio)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "AI Studio was relaunched as Nebius Token Factory on 2025-11-05; docs moved to docs.tokenfactory.nebius.com and the API to https://api.tokenfactory.nebius.com (legacy https://api.studio.nebius.com still answers). The OpenAPI spec (api.tokenfactory.nebius.com/openapi.json) has no billing/usage/balance path. Only key-based call: GET https://api.tokenfactory.nebius.com/v1/models (Authorization: Bearer; bogus key -> 401, so it validates). Per-response `usage` only for the page's own calls. CORS verified: preflight (Origin: null) and GET on both hosts return Access-Control-Allow-Origin: * (plus allow-credentials: true) (probed).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.tokenfactory.nebius.com/v1/models (legacy https://api.studio.nebius.com/v1/models)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.tokenfactory.nebius.com/api-reference/models/list-models"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Console only: Organisation page > Usage tab (chart icon; pick entity type and period; filter by region, project, service, product). Prepaid balance debited in real time; Transactions section; $1 trial credit for 30 days. No CSV export, no usage API, no local logs documented.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "tokenfactory.nebius.com console > Organisation > Usage",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.tokenfactory.nebius.com/other-capabilities/billing-new"
+        }
+      ],
+      "bestMethod": "Validate-only (GET /v1/models, CORS open). Usage/balance are console-only.",
+      "dataQuality": "validate-only",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: card = validate-only via GET /v1/models (accept both tokenfactory and legacy studio hosts). Rename AI Studio -> Token Factory (Nov 2025) means the dashboard should accept both hostnames. Sources: https://docs.tokenfactory.nebius.com/llms.txt ; https://docs.tokenfactory.nebius.com/other-capabilities/billing-new ; https://nebius.com/newsroom/nebius-launches-nebius-token-factory-to-deliver-production-ai-inference-at-scale"
+    },
+    {
+      "name": "NVIDIA NIM API catalog (build.nvidia.com / integrate.api.nvidia.com)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "No usage, credits or billing endpoint. The credits system was removed in early 2025 (NVIDIA staff, forum 2025-06-24); the hosted catalog is a trial with per-account rate limits (~40 RPM community-observed, varies by model/traffic) shown in the build.nvidia.com account menu, not a balance. GET https://integrate.api.nvidia.com/v1/models returns 200 even without a key (probed) -> not a validator; validation needs POST /v1/chat/completions (Authorization: Bearer nvapi-...). CORS: preflight (Origin: null) on /v1/models and /v1/chat/completions and GET /v1/models return only Vary: Origin, no Access-Control-Allow-Origin (probed) -> blocked from file://.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://integrate.api.nvidia.com/v1/models (no CORS, no validation)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://forums.developer.nvidia.com/t/cannot-find-the-amount-of-credits-left-on-nim-api/337051"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "build.nvidia.com > account (top-right) shows rate limits only. Paid production use is self-hosted NIM (NVIDIA AI Enterprise) or NIM on Hugging Face, each with its own billing. No usage dashboard, CSV or API for the hosted trial.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://build.nvidia.com (account menu > rate limits)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.api.nvidia.com/nim/reference/llm-apis"
+        }
+      ],
+      "bestMethod": "None. Nothing to measure (no credits, no usage data) and the host is CORS-closed.",
+      "dataQuality": "none",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: card = link-only (no credits, no usage data, CORS-closed). Treat as a free rate-limited sandbox; only the page's own calls (usage object) could be counted, and even those need a proxy because of CORS. Sources: https://forums.developer.nvidia.com/t/cannot-find-the-amount-of-credits-left-on-nim-api/337051 ; https://docs.api.nvidia.com/nim/reference/llm-apis ; https://forums.developer.nvidia.com/t/is-nim-free/369368"
+    },
+    {
+      "name": "Baseten (Model APIs + dedicated deployments)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "Full usage + cost API with a regular Baseten API key (Authorization: Bearer <key>; legacy 'Authorization: Api-Key <key>' also accepted; a Team key needs the 'Manage and call all team models' permission). (1) GET https://api.baseten.co/v1/billing/usage_summary?start_date=&end_date= (ISO 8601 UTC, <=31 days, earliest 2026-01-01) -> {dedicated_usage{subtotal, credits_used, total, minutes, breakdown[{billable_resource{id, kind, name, model_id, model_name, instance_type, team_id, is_deleted}, subtotal, compute_cost, surcharge_cost, minutes, inference_requests, daily[{date,...}]}]}, training_usage{...}, model_apis_usage{subtotal, credits_used, total, breakdown[{model_name, model_family, subtotal, input_tokens, output_tokens, cached_input_tokens, daily[{date, subtotal, input_tokens, output_tokens, cached_input_tokens}]}]}}. (2) GET https://api.baseten.co/v1/model_apis/usage?start_time=&end_time=&bucket_width=1m|1h|1d&group_by=model|api_key|user|team&limit=&cursor= -> {items[{start_time, end_time, results[{api_key_prefix, user_id, model, team_id, input_tokens, cached_input_tokens, uncached_input_tokens, output_tokens, request_count}]}], pagination{has_more, cursor}}; 92-day retention, data since 2026-08-05. (3) GET https://api.baseten.co/v1/billing/model_apis?start_date=&end_date=&group_by=model|api_key_prefix|user|service_tier -> {items[{date, results[{api_key_prefixes, user_id, model, service_tier, subtotal (USD string)}]}], pagination} (<=90 days). CORS: preflight (Origin: null, also with api-key header) and GET on api.baseten.co return only Vary: Origin, Cookie and no Access-Control-Allow-Origin (probed); inference.baseten.co/v1/models likewise -> blocked from file://.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "GET https://api.baseten.co/v1/billing/usage_summary ; GET https://api.baseten.co/v1/model_apis/usage ; GET https://api.baseten.co/v1/billing/model_apis",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.baseten.co/reference/management-api/billing/gets-billing-usage-summary-for-a-date-range"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "app.baseten.co/settings/billing > export 'model and billing usage' for the selected billing period as CSV with columns Date, Model ID, Model name, Deployment ID, Deployment name, Minutes, Cost, Requests (changelog 2024-07-02). Covers dedicated deployments (minutes/cost/requests); no token columns and no Model APIs rows documented.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "https://app.baseten.co/settings/billing -> CSV (Date, Model ID, Model name, Deployment ID, Deployment name, Minutes, Cost, Requests)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://www.baseten.co/resources/changelog/export-billing-usage-data/"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Dashboard: Billing & usage page with detailed metrics (observability/usage docs). No local logs.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://app.baseten.co/settings/billing",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.baseten.co/observability/usage"
+        }
+      ],
+      "bestMethod": "api-key management API (usage_summary + model_apis/usage + billing/model_apis) through the collector/proxy — CORS-blocked from file://; billing CSV as browser-only fallback (cost, no tokens).",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: card = link-only + billing CSV import (cost, no tokens); the management API is collector-proxy only (CORS-closed). Fireworks-class data (daily tokens by model/key + USD) but api.baseten.co sends no CORS headers, so a direct file:// fetch fails even for /v1/models. Model API token data only exists from 2026-08-05 and for 92 days; usage_summary is capped at 31-day windows (loop months). Sources: https://docs.baseten.co/reference/management-api/billing/gets-billing-usage-summary-for-a-date-range ; https://docs.baseten.co/reference/management-api/model-apis/gets-model-apis-token-usage ; https://docs.baseten.co/reference/management-api/billing/gets-model-apis-costs ; https://docs.vantage.sh/connecting_baseten"
+    },
+    {
+      "name": "Lambda Inference API (sunset)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "Service discontinued: Lambda staff announced on 2025-09-02 that Lambda Chat and the Lambda Inference API would be sunset on 2025-09-25 ('The Lambda Inference API will be deprecated on September 25, 2025'). api.lambda.ai and api.lambdalabs.com no longer resolve (NXDOMAIN, probed 2026-10-15). The surviving Lambda Cloud API (https://cloud.lambda.ai/api/v1, Bearer) covers instances, filesystems, firewall, ssh-keys, images, regions, tickets, audit-events — its openapi.json has no billing/usage/inference path. CORS: preflight on cloud.lambda.ai/api/v1/instances returned 200 with only Vary: origin, no Access-Control-Allow-Origin (probed).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none (api.lambda.ai gone; cloud.lambda.ai/api/v1 has no usage endpoints)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://deeptalk.lambda.ai/t/sunsetting-chat-sunsetting-inference/4744"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Lambda's docs page for the Inference API now redirects to the public-cloud index. Historical invoices for GPU instances remain in the Lambda Cloud dashboard (Usage/Billing) but have no inference token data.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://cloud.lambda.ai (dashboard, GPU billing only)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.lambda.ai/public-cloud/lambda-inference-api"
+        }
+      ],
+      "bestMethod": "None — drop the connector; the product no longer exists.",
+      "dataQuality": "none",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: sunset confirmed (NXDOMAIN re-probed) -> card is link-only/none; remove from vendor registry or mark 'discontinued 2025-09-25'. Remove from the vendor list or mark 'discontinued 2025-09-25'. Sources: https://deeptalk.lambda.ai/t/sunsetting-chat-sunsetting-inference/4744 ; https://cloud.lambda.ai/api/v1/openapi.json"
+    },
+    {
+      "name": "Moonshot AI / Kimi Open Platform (platform.kimi.ai, ex platform.moonshot.ai)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "Official balance endpoint: GET https://api.moonshot.ai/v1/users/me/balance (Authorization: Bearer sk-...) -> {code:0, data:{available_balance, voucher_balance, cash_balance} (USD numbers; cash can go negative, then available = voucher), scode:'0x0', status:true}; 401 on bad key. Validate/list with GET https://api.moonshot.ai/v1/models. No usage-history or per-model token endpoint; per-response `usage` only for the page's own calls. Docs moved from platform.moonshot.ai to platform.kimi.ai (301); keys from platform.kimi.ai and the China site platform.kimi.com are independent (401 cross-use). CORS verified: preflight (Origin: null) and GET on /v1/models and /v1/users/me/balance echo Access-Control-Allow-Origin: null with allow-credentials: true, allow-methods GET (probed) -> callable from file://.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.moonshot.ai/v1/users/me/balance ; GET https://api.moonshot.ai/v1/models",
+          "browserCallable": "yes",
+          "sourceUrl": "https://platform.kimi.ai/docs/api/balance"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Console (platform.kimi.ai) shows usage/billing and lets you top up; no documented CSV export of per-model tokens, no usage API, no local logs.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://platform.kimi.ai (console > Usage / Billing)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://platform.kimi.ai/docs/llms.txt"
+        }
+      ],
+      "bestMethod": "Balance API (live available/voucher/cash) + /v1/models validation; spend can only be inferred from balance deltas between dashboard refreshes.",
+      "dataQuality": "estimated",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: card = api-key balance (available/voucher/cash) + /v1/models validation; spend inferred from balance deltas only. Same pattern as DeepSeek's balance endpoint but without the CSV export. Update the vendor's console URL to platform.kimi.ai. Sources: https://platform.kimi.ai/docs/api/balance"
+    },
+    {
+      "name": "Alibaba Cloud Model Studio / DashScope (international)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "DashScope API keys carry no usage/balance endpoint. Validate with GET https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models (Authorization: Bearer sk-...; 401 on bogus key). Base URLs: Singapore legacy https://dashscope-intl.aliyuncs.com/compatible-mode/v1 (recommended now: https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1), US https://dashscope-us.aliyuncs.com/compatible-mode/v1 (models suffixed -us); keys are region-bound. Per-response `usage` only for the page's own calls. CORS verified: preflight (Origin: null) and GET on dashscope-intl return Access-Control-Allow-Origin: * with allow-methods POST,GET (probed).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+          "browserCallable": "yes",
+          "sourceUrl": "https://www.alibabacloud.com/help/en/model-studio/regions"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Account-level Alibaba Cloud OpenAPIs exist but need an AccessKey ID/Secret with RPC/ROA request signing (RAM user recommended): BssOpenAPI 2017-12-14 QueryAccountBalance and DescribeInstanceBill (spend by product/instance, 18 months, no per-model tokens); the Model Studio OpenAPI bailian 2023-12-29 has no usage/billing operation at all (only data/knowledge-base/prompt ops). Signing an AccessKey secret inside a browser page is unsafe and the endpoints are not documented as CORS-enabled -> not realistic for the dashboard.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "BssOpenAPI QueryAccountBalance / DescribeInstanceBill (AccessKey-signed; not browser-suitable)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://www.alibabacloud.com/help/en/boa/latest/api-bssopenapi-2017-12-14-describeinstancebill"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Console: the Model Studio usage page shows only free-quota consumption; detailed token usage comes from the bill. Expenses and Costs > Bill Details (usercenter2-intl ... finance/expense-report/expense-detail) > set Billing Month > Product Name = Model Studio > download icon / 'Export Bill CSV'. Rows are billed per model and token type: billing item is uniformly 'Large Model Text Consumption'; the model name and token type are parsed from the semicolon-delimited Instance ID whose order is billingType;workspaceId;model;tokenType;channel (e.g. 'text_token;llm-xxx;qwen-max;output_token;app' — the model is the 3rd field, the token type (input_token|output_token) the 4th; CORRECTED by the verifier: llm-xxx is the workspace id, not the model); bill can be broken down by API Key ID, workspace, model, input/output, channel. Cost Overview (costing-balance/overview) charts spend by API Key ID or model; Model Monitoring shows call volume/tokens for 30 days (no export).",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "Alibaba Cloud console > Expenses and Costs > Bill Details > Product Name: Model Studio > Export Bill CSV (Instance ID = billingType;workspaceId;model;tokenType;channel)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://www.alibabacloud.com/help/en/model-studio/model-usage-statistics"
+        }
+      ],
+      "bestMethod": "Validate-only via compatible-mode /v1/models (CORS open) + import of the exported Model Studio bill CSV (usage quantity per model/token type parsed from the Instance ID — billingType;workspaceId;model;tokenType;channel, model = 3rd field) for exact tokens and billed cost.",
+      "dataQuality": "exact",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: Instance ID field order corrected (model is the 3rd field, after billingType and workspaceId). CSV column schema is not published in English docs (JP/ID pages describe the Instance ID parsing rule); verify with a sample export. Workspace-dedicated domains mean the connector must accept a configurable base URL. Sources: https://www.alibabacloud.com/help/en/model-studio/model-usage-statistics ; https://www.alibabacloud.com/help/ja/model-studio/bill-query-and-cost-management ; https://help.aliyun.com/en/model-studio/developer-reference/api-bailian-2023-12-29-overview ; https://www.alibabacloud.com/help/en/model-studio/regions"
+    },
+    {
+      "name": "Z.ai / Zhipu GLM API (api.z.ai)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "Official API (base https://api.z.ai/api/paas/v4, Authorization: Bearer) has no balance/usage endpoint (docs.z.ai/openapi.json lists only inference paths). Validate with GET https://api.z.ai/api/paas/v4/models (401 on bogus key). EXPERIMENTAL, undocumented monitor endpoints used by community quota widgets (Coding Plan keys) — field schema unverified, transcribed from live responses captured by those tools: GET https://api.z.ai/api/monitor/usage/quota/limit -> {code:0, msg:'success', success:true, data:{limits:[{type:'TOKENS_LIMIT'|'TIME_LIMIT', unit (3 = 5-hour window, 6 = weekly), percentage, next reset epoch ms, ...}]}}; GET /api/monitor/usage/model-usage?startTime=&endTime= and /api/monitor/usage/tool-usage (24h window). Auth header is `Authorization` (some clients send the raw key, others 'Bearer <key>'); a bogus token returns HTTP 200 with body {code:401, msg:'token expired or incorrect'}. China mirror https://open.bigmodel.cn. CORS verified: preflight (Origin: null) and GET on /paas/v4/models, /monitor/usage/quota/limit and /monitor/usage/model-usage echo Access-Control-Allow-Origin: null with allow-credentials: true (probed) -> callable from file://.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.z.ai/api/paas/v4/models ; GET https://api.z.ai/api/monitor/usage/quota/limit (undocumented) ; GET https://api.z.ai/api/monitor/usage/model-usage?startTime=&endTime=",
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.z.ai/api-reference"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Console: Coding Plan quota progress at https://z.ai/manage-apikey/subscription (5-hour and weekly windows); pay-as-you-go balance/credits under Finance > Transaction History. No documented CSV export, no official usage API, no local logs.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://z.ai/manage-apikey/subscription",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.z.ai/devpack/faq"
+        }
+      ],
+      "bestMethod": "Validate via /paas/v4/models; for Coding Plan keys optionally read the EXPERIMENTAL /api/monitor/usage/quota/limit percentages (CORS open; undocumented, may change). Pay-as-you-go keys: validate-only.",
+      "dataQuality": "estimated",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: monitor endpoints = experimental (optional quota widget only); field schema unverified (from live responses). Monitor endpoints are reverse-engineered (opencode-glm-quota, pi-glm-usage, Home Assistant posts) and may change; response gives quota percentages and resets, not token counts. Sources: https://docs.z.ai/api-reference ; https://cdn.jsdelivr.net/npm/opencode-glm-quota@1.8.0/README.md ; https://www.steeman.be/posts/tracking-my-ai-usage-limits-in-home-assistant/ ; https://docs.z.ai/devpack/faq"
+    },
+    {
+      "name": "MiniMax Open Platform (api.minimax.io)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "Pay-as-you-go API keys: no balance/usage endpoint in the docs index. Validate with GET https://api.minimax.io/v1/models (Authorization: Bearer; 401 on bogus key) -> {object:'list', data:[{id, object:'model', created, owned_by}]}. EXPERIMENTAL, undocumented plan-quota endpoint used by community skills (field semantics unverified) (needs the plan Subscription/Coding Plan key, NOT a standard key): GET https://platform.minimax.io/v1/api/openplatform/coding_plan/remains?GroupId=<GroupId from user-center/basic-information> (community scripts also send referer https://platform.minimax.io/user-center/payment/coding-plan) -> per model: model_name, current_interval_total_count (window quota), current_interval_usage_count (REMAINING despite the name — used = total - this), start_time/end_time (5-hour window, ms), remains_time (seconds left in subscription). China site: https://www.minimaxi.com/v1/api/openplatform/coding_plan/remains and /v1/token_plan/remains. CORS verified: preflight and GET on api.minimax.io return Access-Control-Allow-Origin: * ; preflight on platform.minimax.io/.../coding_plan/remains and www.minimaxi.com/v1/token_plan/remains echo Access-Control-Allow-Origin: null with allow-credentials (probed) -> callable from file://.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.minimax.io/v1/models ; GET https://platform.minimax.io/v1/api/openplatform/coding_plan/remains?GroupId= (undocumented, plan key)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://platform.minimax.io/docs/api-reference/models/openai/list-models"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Console only: Account > Billing > Balance (platform.minimax.io/user-center/payment/balance; top-up, balance alerts, autobilling); M Plan usage at platform.minimax.io/console/usage (5-hour + weekly windows) or `mmx quota` in the MiniMax CLI. No CSV export, no official usage API, no local logs.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://platform.minimax.io/console/usage ; https://platform.minimax.io/user-center/payment/balance",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://platform.minimax.io/docs/m-plan/usage-rules"
+        }
+      ],
+      "bestMethod": "Validate-only via /v1/models for pay-as-you-go keys; plan subscribers may optionally read the EXPERIMENTAL coding_plan/remains counts (prompt counts per 5-hour window, not tokens; unverified).",
+      "dataQuality": "estimated",
+      "confidence": "low",
+      "notes": "Skeptic verification 2026-10-15: plan-quota endpoint = experimental and unverified (optional). Plan quota is counted in prompts, not tokens; field semantics (usage_count = remaining) are contradictory across community scripts — verify live. Subscription keys and standard API keys are not interchangeable. Sources: https://platform.minimax.io/docs/m-plan/usage-rules ; https://platform.minimax.io/docs/faq/about-account ; https://termo.ai/skills/minimax-usage ; https://clawhub.ai/lanhaixuan/minimax-usage-cn"
+    },
+    {
+      "name": "Meta Model API (dev.meta.ai, ex Llama API llama.developer.meta.com)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "The Llama API preview has become the 'Meta Model API': docs at https://dev.meta.ai/docs (llama.developer.meta.com/docs/* 302-redirects there), base URL https://api.meta.ai/v1, Authorization: Bearer <MODEL_API_KEY>. GET https://api.meta.ai/v1/models (optional ?client=) -> ListModelsResponse; bogus key -> 401 {error:{code:'invalid_api_key', type:'authentication_error'}} so it validates. Legacy https://api.llama.com/v1/models still answers 401 for old keys. No usage/billing/credits endpoint; successful responses carry x-ratelimit-* headers and a `usage` object (incl. cached_tokens) only for the page's own calls. Rate limits are per team (RPM/TPM per model). CORS verified: preflight (Origin: null) and GET on api.meta.ai and api.llama.com return Access-Control-Allow-Origin: * (probed).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.meta.ai/v1/models (legacy GET https://api.llama.com/v1/models)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://dev.meta.ai/docs/api-reference/models/list-models"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Dashboard https://dev.meta.ai/platform (API keys, teams, billing). Pay-as-you-go per token / per image / per audio hour, no prepaid credits documented; Muse Code subscriptions billed separately. No usage export or API documented.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://dev.meta.ai/platform",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://dev.meta.ai/docs/pricing-rate-limits"
+        }
+      ],
+      "bestMethod": "Validate-only (GET https://api.meta.ai/v1/models, CORS open). Usage is dashboard-only.",
+      "dataQuality": "validate-only",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: card = validate-only via GET https://api.meta.ai/v1/models (accept legacy api.llama.com). Rename the connector (Llama API -> Meta Model API) and switch the default base URL to api.meta.ai/v1 while still accepting api.llama.com. Sources: https://dev.meta.ai/docs/overview ; https://dev.meta.ai/docs/pricing-rate-limits ; https://dev.meta.ai/docs/api-reference/models/list-models"
+    },
+    {
+      "name": "Mistral (La Plateforme) — Admin API re-check Oct 2026",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "Unchanged since Aug 2026: standard keys have no usage endpoint; GET https://api.mistral.ai/v1/models (Bearer) validates and lists models.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET https://api.mistral.ai/v1/models",
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.mistral.ai/getting-started/quickstart/"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Still Enterprise-only, not self-serve, all groups marked Beta. Base URL unchanged: https://api.mistral.ai/v1/admin with x-api-key (Admin API key from the Backoffice); example curl 'https://api.mistral.ai/v1/admin/usage?month=5&year=2026'. GET /usage?month=&year=&workspace_id= -> consumption by category (chat, completion, ocr, audio, connectors, libraries_api, fine_tuning, vibe_usage) + start_date, end_date, currency; GET/POST /spend-limit; GET /rate-limit. Reference now lists groups: users & invitations, workspaces, api-keys, analytics, billing, audit-logs, user-groups. New vs Aug: le Chat analytics GET /analytics/lechat/usage/by_user_stats | by_agent_stats | by_time_stats?granularity= (messages, files, agents per user/agent/time; start_time/end_time Unix seconds) alongside Vibe /analytics/vibe/usage/by_workspace (daily tokens in/out/cached per model for Vibe sessions) and by_organization. Still no per-model token breakdown for API usage. CORS re-probed: OPTIONS and GET https://api.mistral.ai/v1/admin/usage -> 401 with no Access-Control-Allow-Origin; https://console.mistral.ai/api/admin/usage -> 401, no ACAO -> cors-blocked.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "GET https://api.mistral.ai/v1/admin/usage ; /v1/admin/analytics/lechat/usage/* ; /v1/admin/analytics/vibe/usage/by_workspace",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.mistral.ai/admin/admin-api/usage-metrics"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Console Workspaces > Usage unchanged; no CSV export documented.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "console.mistral.ai (Workspaces > Usage)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://help.mistral.ai/en/articles/347463-how-can-i-consult-my-workspace-usage"
+        }
+      ],
+      "bestMethod": "No change: validate-only via GET /v1/models; Admin API remains Enterprise-only and CORS-blocked (proxy only).",
+      "dataQuality": "validate-only",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: card unchanged (validate-only via /v1/models; Admin API Enterprise-only, cors-blocked). Only delta since the Aug 2026 entry: Admin API reference gained api-keys, audit-logs and user-groups groups and le Chat analytics endpoints; nothing new for API token usage. Sources: https://docs.mistral.ai/admin/admin-api/usage-metrics ; https://docs.mistral.ai/admin/admin-api/api-reference"
+    },
+    {
+      "name": "OpenAI-compatible generic server (any base URL)",
+      "category": "api",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "Discovery: GET {base}/v1/models with Authorization: Bearer <key> -> {object:'list', data:[{id, object:'model', created (unix s), owned_by}]} (vendors append fields, e.g. SambaNova pricing/context_length, Ollama/LM Studio omit auth). A 200 with a bogus key (NVIDIA, SambaNova, Perplexity) means the server does not validate keys here. Usage endpoints exist only on specific gateways and must be probed by path: (a) OpenAI: /v1/organization/usage/completions and /v1/organization/costs (admin key; existing connector). (b) LiteLLM proxy: GET /key/info?key= -> {key, info{token, spend (USD), expires, models, max_budget...}}; GET /spend/logs?start_date&end_date (rows: api_key, user, team_id, model_group, spend, total_tokens, prompt_tokens, completion_tokens, request_id) and paginated /spend/logs/v2; GET /user/daily/activity -> results[{date, metrics{spend, prompt_tokens, completion_tokens, total_tokens, api_requests}, breakdown{models, providers, api_keys}}]; GET /global/spend/report; response header x-litellm-response-cost. (c) OpenRouter: GET https://openrouter.ai/api/v1/key -> data{label, limit, limit_remaining, limit_reset, usage, usage_daily, usage_weekly, usage_monthly, byok_usage*, is_free_tier, budgets[{limit_usd, spend_usd, remaining_usd, resets_at}], free_model_daily_requests{used, limit, remaining}}; GET /api/v1/credits (management key) -> data{total_credits, total_usage}; CORS verified * on openrouter.ai/api/v1/key (probed). (d) vLLM / llama.cpp / LocalAI: GET /metrics (Prometheus text: vllm:prompt_tokens_total, vllm:generation_tokens_total, vllm:request_success_total) — cumulative since process start, local host, CORS per server flag. (e) Legacy OpenAI /dashboard/billing/usage and /dashboard/billing/credit_grants: session-cookie only, long removed — do not probe. CORS differs per host: open on api.openai.com, cerebras, deepinfra, groq, together, fireworks, openrouter, novita, nebius, dashscope, minimax, meta; closed on sambanova, nvidia, baseten, mistral admin.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "GET {base}/v1/models ; optional probes: /key/info, /spend/logs, /user/daily/activity (LiteLLM) ; /api/v1/key, /api/v1/credits (OpenRouter) ; /metrics (vLLM)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://platform.openai.com/docs/api-reference/models/list"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "For plain OpenAI-compatible servers (Ollama, LM Studio, llama.cpp without metrics, unknown vendors) only the page's own calls expose `usage` {prompt_tokens, completion_tokens, total_tokens}; there is no standard usage, balance or billing route in the OpenAI-compatible surface. Response-header hints worth logging when present: x-ratelimit-*, x-litellm-response-cost, x-groq.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none (per-response usage object only)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.litellm.ai/docs/proxy/cost_tracking"
+        }
+      ],
+      "bestMethod": "Generic connector = validate-only (GET /v1/models, tolerate 200-without-validation) plus optional fingerprinting: LiteLLM (/key/info, /user/daily/activity -> exact tokens+spend), OpenRouter (/api/v1/key -> spend, /api/v1/credits), vLLM (/metrics -> cumulative tokens).",
+      "dataQuality": "validate-only",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: card = generic validate-only (GET {base}/v1/models, tolerate 200-without-validation) with OpenRouter detection (/api/v1/key -> exact spend) and optional LiteLLM/vLLM fingerprints. Quality becomes 'exact' only when a known gateway is detected (LiteLLM, OpenRouter). Keep the base URL user-editable and strip a trailing /v1 before appending paths. Sources: https://platform.openai.com/docs/api-reference/models/list ; https://docs.litellm.ai/docs/proxy/cost_tracking ; https://docs.litellm.ai/docs/proxy/virtual_keys ; https://openrouter.ai/docs/api-reference/limits ; https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits ; https://docs.vllm.ai/en/latest/design/metrics.html"
+    },
+    {
+      "name": "Cursor (IDE + cursor-agent CLI)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Undocumented, reverse-engineered. Global store: Windows %APPDATA%\\Cursor\\User\\globalStorage\\state.vscdb (macOS ~/Library/Application Support/Cursor/User/globalStorage/state.vscdb; Linux ~/.config/Cursor/User/globalStorage/state.vscdb). SQLite with two tables: ItemTable (key/value; `cursorAuth/accessToken` JWT, `composer.composerHeaders`, legacy `workbench.panel.aichat.view.aichat.chatdata`) and cursorDiskKV (keys `composerData:<composerId>` = conversation metadata, `bubbleId:<composerId>:<bubbleId>` = one message blob, plus `agentKv` blobs for newer agent sessions; the DB is routinely multi-GB and WAL-locked while Cursor runs). Per-workspace: Cursor\\User\\workspaceStorage\\<hash>\\state.vscdb ItemTable key `composer.composerData` (in recent builds only `selectedComposerIds` + migration flags; the per-workspace composer list moved to `composer.composerHeaders`). Token fields: the open-source CodeBurn parser finds that no bubble carries a real `tokenCount` (it stays {0,0}), `composerData.usageData` is an empty object and 'Cursor v3 reports zero token counts', so it estimates tokens as chars/4; agent-walker likewise states Cursor keeps no per-request token counts on disk. Model name is present on bubbles/composers in some versions only; no cost. cursor-agent CLI: %USERPROFILE%\\.cursor\\projects\\<projectId>\\agent-transcripts\\ (legacy *.txt, Composer-2 JSONL), %USERPROFILE%\\.cursor\\chats\\<hash>\\<agentId>\\store.db (blobs + protobuf roots), %USERPROFILE%\\.cursor\\ai-tracking\\ai-code-tracking.db (table conversation_summaries) — again no token fields, estimation only.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "%APPDATA%\\Cursor\\User\\globalStorage\\state.vscdb (cursorDiskKV: composerData:<id>, bubbleId:<composerId>:<bubbleId>; ItemTable: composer.composerHeaders) ; %APPDATA%\\Cursor\\User\\workspaceStorage\\<hash>\\state.vscdb (ItemTable composer.composerData) ; %USERPROFILE%\\.cursor\\projects\\*\\agent-transcripts\\, .cursor\\chats\\*\\*\\store.db, .cursor\\ai-tracking\\ai-code-tracking.db",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/cursor.md"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Admin API (Teams/Enterprise only; no personal-usage API for Pro/Hobby). Key from cursor.com/dashboard (user API key) or team settings (service-account key); HTTP Basic auth with the key as username and empty password (`-u KEY:`). POST https://api.cursor.com/teams/filtered-usage-events {startDate,endDate (epoch ms), userId|email|serviceAccountId|cloudAgentId|automationId|hostingType, page, pageSize<=1000} -> usageEvents[]{timestamp (epoch-ms string), userEmail, conversationId, model, kind ('Usage-based' etc.), maxMode, requestsCosts, isTokenBasedCall, isChargeable, isHeadless, tokenUsage{inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, totalCents, discountPercentOff}, chargedCents, cursorTokenFee}; 60 req/min/team. POST /teams/daily-usage-data {startDate,endDate (<=30 days), page, pageSize} -> data[]{userId,email,day,date,isActive,totalLinesAdded/Deleted,acceptedLinesAdded/Deleted,totalApplies,totalAccepts,totalRejects,totalTabsShown,totalTabsAccepted,composerRequests,chatRequests,agentRequests,cmdkUsages,bugbotUsages,subscriptionIncludedReqs,apiKeyReqs,usageBasedReqs,mostUsedModel,applyMostUsedExtension,tabMostUsedExtension,clientVersion} — no token or cost fields; 20 req/min/team. Also POST /teams/spend (per-member spendCents) and GET /teams/members. CORS: live preflight (2026-10-15) returns `Vary: Origin` and echoes `Access-Control-Allow-Origin` only for https://cursor.com; for Origin: null / localhost / arbitrary origins no allow-origin header is returned -> blocked from file://, must go through the local collector helper.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "POST https://api.cursor.com/teams/filtered-usage-events ; POST /teams/daily-usage-data ; POST /teams/spend ; GET /teams/members (Basic auth, key as username)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://cursor.com/docs/account/teams/admin-api"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "cursor.com/dashboard?tab=usage -> Export CSV (already supported by the dashboard). Backed by the undocumented GET https://cursor.com/api/dashboard/export-usage-events-csv?strategy=tokens with cookie WorkosCursorSessionToken=<accountId>::<jwt> (jwt = state.vscdb ItemTable `cursorAuth/accessToken`, accountId = JWT `sub`, fallback ~/.cursor/cli-config.json authInfo.authId). Columns matched by header (Cursor adds columns): `Date`, `Model` (e.g. composer-2.5-fast), `Input (w/o Cache Write)`, `Input (w/ Cache Write)`, `Cache Read`, `Output Tokens`, `Total Tokens`, `Cost`. The two input columns are disjoint, so cache-write tokens are read directly.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "cursor.com/dashboard?tab=usage -> Export CSV (GET https://cursor.com/api/dashboard/export-usage-events-csv?strategy=tokens, cookie WorkosCursorSessionToken)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://raw.githubusercontent.com/miiiiiiich/agent-walker/HEAD/docs/cursor.md"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None official. The dashboard's internal endpoints (cursor.com/api/usage, /api/dashboard/get-aggregated-usage-events, the CSV export above) are cookie-authenticated, undocumented and CORS-blocked from file://; the local collector could call them with the JWT lifted from state.vscdb (agent-walker approach), which breaks whenever Cursor changes auth.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none official (cursor.com/api/usage, cursor.com/api/dashboard/* internal)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://cursor.com/docs/api"
+        }
+      ],
+      "bestMethod": "data-export-file (dashboard CSV, already supported) for individuals; admin-key filtered-usage-events via the local collector for team admins; local state.vscdb only for history/model with chars/4 estimates",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: Card = wrap the existing dashboard CSV importer (cursor-csv) in a Cursor card; admin-key filtered-usage-events only via the collector (CORS limited to https://cursor.com). Not installed on the research machine (checked 2026-10-15): paths and field names are source-based (third-party parsers / docs), unverified on disk. Local storage never carries real token counts (CodeBurn: tokenCount stays {0,0}, usageData empty; agent-walker: none on disk) and the SQLite file is huge and locked, so the local path is history/estimation only. Exact tokens+cost exist only in the dashboard CSV (undocumented endpoint) and the team Admin API (CORS limited to https://cursor.com — verified by preflight). Sources: https://cursor.com/docs/account/teams/admin-api ; https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/cursor.md ; https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/cursor-agent.md ; https://raw.githubusercontent.com/miiiiiiich/agent-walker/HEAD/docs/cursor.md ; https://forum.cursor.com/t/cursor-lost-all-my-agent-chat-history/158837 ; https://forum.cursor.com/t/state-vscdb-grows-to-30gb-due-to-bubbleid-agentkv-entries/167641"
+    },
+    {
+      "name": "Sourcegraph Cody (VS Code / JetBrains)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Chat panel > History > Export -> JSON file. Shape (from the v0.10 release notes): an object keyed by ISO timestamp string, each with `id` and `interactions[]` of {humanMessage, assistantMessage, fullContext[]} — the full conversation between Cody and the LLM. No model name per turn (model is a chat-level setting), no token counts, no cost; tokens must be estimated from text. Note Cody Free/Pro ended 2025-07-23 (no new signups after 2025-06-25); only Cody Enterprise remains and individuals were pointed to Amp.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "Cody chat panel > History > Export (JSON)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://sourcegraph.com/blog/cody-vscode-0-10-release"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Chat history is kept per machine (not synced) inside VS Code's extension storage — i.e. the Code\\User\\globalStorage\\state.vscdb ItemTable (VS Code Memento for extension sourcegraph.cody-ai) and/or globalStorage\\sourcegraph.cody-ai\\. Could not verify the exact storage key name against the sourcegraph/cody source during this research (the LocalStorageProvider.ts path returned 404 and code search found nothing); treat it as undocumented. Stored transcripts are the same shape as the export (no tokens). JetBrains: plugin state under the IDE's config dir; no token log documented.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "%APPDATA%\\Code\\User\\globalStorage\\state.vscdb (ItemTable, extension sourcegraph.cody-ai) / globalStorage\\sourcegraph.cody-ai\\ (key names unverified)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://community.sourcegraph.com/t/cody-chats-save/1819"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Cody Enterprise only: Sourcegraph instance admins see Cody analytics in the Site admin > Analytics > Cody page (and Cody Analytics dashboard) — DAU/WAU, chats, completions accepted — not per-user tokens or dollar cost; access requires a site-admin access token on the customer's own Sourcegraph instance (GraphQL), no public per-token usage API. No individual-plan API exists since Free/Pro ended.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "https://<your-sourcegraph-instance>/site-admin/analytics/cody (GraphQL, site-admin token)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://sourcegraph.com/docs/cody/capabilities/chat"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "No OAuth/consumer API: Cody Free and Pro were discontinued on 2025-07-23; individual users were migrated to Amp (see Amp entry).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://webflow.sourcegraph.com/blog/changes-to-cody-free-pro-and-enterprise-starter-plans"
+        }
+      ],
+      "bestMethod": "data-export-file (History > Export JSON) with text-based token estimation; low priority because the product is Enterprise-only since July 2025",
+      "dataQuality": "estimated",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: Not installed on the research machine (checked 2026-10-15): paths and field names are source-based (third-party parsers / docs), unverified on disk. Export JSON shape is from 2023 release notes and may have drifted; local storage key not verified. Sources: https://sourcegraph.com/blog/cody-vscode-0-10-release ; https://sourcegraph.com/docs/cody/capabilities/chat ; https://community.sourcegraph.com/t/cody-chats-save/1819 ; https://en.wikipedia.org/wiki/Sourcegraph"
+    },
+    {
+      "name": "Tabnine",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None usable. No documentation or open-source parser describes a local chat/usage log for the Tabnine IDE plugins; Tabnine's privacy docs say the chat-history context sent for a request is deleted server-side after the answer, and the plugin's local logs (binary/plugin logs) are diagnostic only. Treat as no local token log.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none documented",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.tabnine.com/main/welcome/readme/privacy"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Tabnine Usage Metrics API (Enterprise SaaS console.tabnine.com and private installations; released with 5.18.0). Any user creates a Personal Access Token under Settings > Access Tokens with the 'Usage metrics: Read' scope; header `Authorization: Bearer <token>`; host is the customer's Tabnine instance (paths are relative in the docs). GET /api/v2/organization/usage and /api/v2/team/usage ('usage totals with chat, agent, and model breakdowns'), GET /api/v2/user/usage ('per-user usage with IDE and language breakdowns'), GET /api/v1/{organization|team|user}/agent-usage (organizationId, from/to ISO-8601 UTC; agent usage vs budget/quota), legacy /api/v1/*/usage and /account-utilizations. Field names live in the OpenAPI spec (unified-tabnine-api.yaml); the docs describe completions/chat/agent counts and model breakdowns, not raw tokens or dollar cost per request. CORS not documented; api.tabnine.com answers 404 for preflight -> assume not browser-callable.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "https://<tabnine-instance>/api/v2/user/usage ; /api/v2/team/usage ; /api/v2/organization/usage ; /api/v1/*/agent-usage (Bearer PAT, scope Usage metrics)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.tabnine.com/main/administering-tabnine/managing-your-team/tabnine-apis"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Enterprise admin console > Analytics (Overview / Usage / Usage per User / Agent Usage page) -> export CSV, or schedule the CSV usage report by e-mail. Aggregate counts (active users, completions, chat interactions, agent usage against budget), not tokens.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "Tabnine admin console > Analytics > Usage / Usage per User / Agent usage -> CSV",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.tabnine.com/main/administering-tabnine/private-installation/managing-your-team/reporting"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "No usage API or export for individual (Dev/Pro) users; usage visibility is enterprise-admin only.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.tabnine.com/main/administering-tabnine/managing-your-team/reporting/agent-usage-page.md"
+        }
+      ],
+      "bestMethod": "none for individuals; admin-key Usage Metrics API via the collector only for Enterprise admins (counts, no tokens)",
+      "dataQuality": "none",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: ~/.tabnine exists on the research machine (plugin installed) but no usage/transcript log is documented, consistent with the research. Could not verify the API host (docs give relative paths; it is the customer's instance URL) nor the response field names (OpenAPI yaml did not render). Sources: https://docs.tabnine.com/main/administering-tabnine/managing-your-team/tabnine-apis ; https://docs.tabnine.com/main/administering-tabnine/private-installation/managing-your-team/reporting ; https://docs.tabnine.com/main/welcome/readme/privacy"
+    },
+    {
+      "name": "Zed (Agent Panel)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Agent threads are stored in one SQLite file: Windows %LOCALAPPDATA%\\Zed\\threads\\threads.db; macOS ~/Library/Application Support/Zed/threads/threads.db; Linux ~/.local/share/zed/threads/threads.db. Table `threads` (one row per thread): id, summary, updated_at, data_type ('zstd' = zstd-compressed JSON, 'json' = legacy uncompressed), data (blob). Decompressed thread JSON (version 0.1.0/0.2.0/0.3.0) carries `model: {provider, model}`, `request_token_usage`: map of user-message id -> {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens} (zero-valued fields omitted; does not cover every request), and `cumulative_token_usage` with the same shape for the whole thread; no per-request timestamps (only thread updated_at) and no cost field. Zstd decompression is needed in-page (e.g. fzstd WASM/JS) since the browser has no native zstd. Text threads (legacy assistant) are plain JSON under Zed/conversations/. Zed's storage migration to SQLite+zstd is commit #31741.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "%LOCALAPPDATA%\\Zed\\threads\\threads.db (table threads: data zstd/json -> request_token_usage, cumulative_token_usage, model) ; macOS ~/Library/Application Support/Zed/threads/threads.db ; Linux ~/.local/share/zed/threads/threads.db",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/zed.md"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "Zed Pro bills hosted-model usage per token (provider list price +10%, $5/month credit included); usage is shown on the Billing page at dashboard.zed.dev, embedded from the metering provider Orb. No usage API, no export documented; login is GitHub-based and the dashboard is cookie-authenticated (not callable from file://). The editor shows the active thread's token count next to the profile selector; for external agents (Claude Agent, Gemini CLI via ACP) token display may be unavailable — those agents' own logs apply.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": false,
+          "endpointOrPath": "https://dashboard.zed.dev (Billing page, Orb-embedded usage)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://zed.dev/docs/ai/plans-and-usage"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None for Zed-hosted usage. When the user configures BYO provider keys (Anthropic/OpenAI/Gemini/Ollama...) in Zed, that usage appears in the respective provider's usage API already covered by the dashboard's existing connectors; threads.db tokens still apply locally.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none (provider-side connectors)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://zed.dev/docs/ai/agent-panel"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "No built-in thread export with usage; Zed's own commit shows the manual recipe: `sqlite3 threads.db \"select hex(data) from threads\" | xxd -r -p | zstd -d` -> JSON. Community scripts (rud.is zed-ai-history.sh) do the same and sort by `version`.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "manual: sqlite3 + zstd -d on threads.db",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://git.secluded.site/zed/commit/c874f1fa9d70c889602e54a8f6ac3ad8c2a2734a"
+        }
+      ],
+      "bestMethod": "local-logs-folder threads.db (SQLite via sql.js + zstd decompress) -> request_token_usage / cumulative_token_usage per thread, priced from the model name",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: Not installed on the research machine (checked 2026-10-15): paths and field names are source-based (third-party parsers / docs), unverified on disk. Exact Anthropic-style token fields but day-level attribution is approximate (only thread updated_at). Needs zstd in the page/collector. Field names come from the CodeBurn parser and Zed commit #31741, not an official schema doc. Sources: https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/zed.md ; https://git.secluded.site/zed/commit/c874f1fa9d70c889602e54a8f6ac3ad8c2a2734a ; https://rud.is/git/gists.git/tree/2025/2025-09-20-zed-ai-history.sh ; https://zed.dev/docs/ai/plans-and-usage"
+    },
+    {
+      "name": "Augment Code (VS Code/JetBrains extension + Auggie CLI)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Closed-source; no documented local usage log. The VS Code extension keeps chat history in its extension storage (location/format undocumented; changelog 0.904.1 only mentions 'chat history save reliability'). Auggie CLI: ~/.augment/session.json = auth credentials (not a transcript), ~/.augment/plans/, ~/.augment/commands/; saved CLI sessions are listable with `auggie session list --json` (and deletable with --delete-saved-sessions) but their on-disk path/format and whether they carry token or credit counts are not documented.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "%USERPROFILE%\\.augment\\session.json (auth only); `auggie session list --json` (format undocumented); VS Code globalStorage (undocumented)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.augmentcode.com/cli/reference"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Analytics API (preview, Enterprise only). Service account token from the web app's service-accounts page; `Authorization: Bearer <token>`; base https://api.augmentcode.com. GET /analytics/v0/daily-usage (aggregated by day), /analytics/v0/user-activity (per user, paginated), /analytics/v0/credit-usage-by-user (per-user credits, optional date and model breakdown), /analytics/v0/dau, /dau-count, /daily-user-activity-by-editor-language; POST /analytics/v0/get-user-budget-overrides / set-user-budget-overrides. Max 90-day range, 2-year lookback, UTC, previous day available ~02:00 UTC. Credits/dollars, not raw tokens. Preflight probe (2026-10-15) returns 405/401 with no CORS headers -> not browser-callable.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "https://api.augmentcode.com/analytics/v0/credit-usage-by-user ; /analytics/v0/user-activity ; /analytics/v0/daily-usage (Bearer service-account token)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.augmentcode.com/analytics/analytics-api"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "app.augmentcode.com dashboards: 'My Usage' (any enterprise user: usage consumed, avg/day, stacked per-model chart, 7/30/90-day or custom range) and 'Organization Usage' (admins; per-user table, model distribution; CSV export of model distribution and 'complete user usage data'). Usage is in dollars on token-based pricing or credits on legacy contracts; no per-request history. Individual (non-enterprise) plans see totals/remaining credits and model breakdown in the web dashboard only.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "app.augmentcode.com > Organization Usage > Export CSV (Enterprise admins); My Usage (view only)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.augmentcode.com/analytics/credit-dashboard-and-quotas"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "Unofficial: CodexBar reads credits via `auggie account status` (CLI) or, with browser cookies for *.augmentcode.com, GET https://app.augmentcode.com/api/credits and /api/subscription (remaining credits, used this cycle, plan). Internal, cookie-authenticated, CORS-blocked from file://; the collector could run `auggie account status` instead.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": false,
+          "endpointOrPath": "`auggie account status` ; https://app.augmentcode.com/api/credits (internal, cookie)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://raw.githubusercontent.com/steipete/CodexBar/main/docs/augment.md"
+        }
+      ],
+      "bestMethod": "none for individuals beyond a collector-run `auggie account status` snapshot; admin-key Analytics API (credits per user/day/model) for Enterprise",
+      "dataQuality": "none",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: ~/.augment exists on the research machine (CLI installed); contents beyond session.json (auth) were not inspected — no usage log is documented. No token counts anywhere (Augment bills credits/dollars); no local transcript format documented; the VS Code extension's globalStorage path and the Auggie saved-session format could not be verified. Sources: https://docs.augmentcode.com/analytics/analytics-api ; https://docs.augmentcode.com/analytics/credit-dashboard-and-quotas ; https://docs.augmentcode.com/cli/reference ; https://raw.githubusercontent.com/steipete/CodexBar/main/docs/augment.md"
+    },
+    {
+      "name": "Amp (ampcode.com; CLI + editor extensions)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "CLI data dir ~/.local/share/amp (set in cli/src/config.ts; override AMP_DATA_DIR; Windows location unverified — likely %USERPROFILE%\\.local\\share\\amp or %LOCALAPPDATA%\\amp). Files: threads/**/*.json (one JSON per thread, rewritten on every update; the threads/ directory is confirmed in the source, but the T-<id>.json file-naming is UNVERIFIED — glob *.json recursively), history.jsonl (one line per user prompt: text, cwd), session.json (last thread id, agent mode). Thread JSON (per CodeBurn parser): { id, messages: [{role, content:[text|thinking|tool_use|tool_result], usage:{inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens, totalTokens}, model?, timestamp?}], usageLedger?: { events: [{id, timestamp, model, tokens:{input,output,total}, toMessageId, credits}] } } — camelCase, Anthropic-style cache fields; `credits` is Amp's billing unit. Threads also live server-side (ampcode.com/threads/T-...), so local files cover only CLI/local sessions.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "~/.local/share/amp/threads/**/*.json (T-<id>.json naming unverified; usageLedger.events[].tokens/credits, messages[].usage) ; history.jsonl ; session.json ; $AMP_DATA_DIR override ; Windows path unverified",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/amp.md"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Web app: thread > More Actions > Export -> Markdown, or full JSON for the thread's creator; the same menu 'shows what the thread has cost so far'. CLI: `amp threads export T-...` (= `amp threads markdown`), `amp threads list`, `amp threads search`; appending .md to a thread URL returns Markdown. Per-thread, manual.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "ampcode.com thread > More Actions > Export (JSON for creator) ; `amp threads export T-...`",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://ampcode.com/docs/threads"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None public. Account usage/credits are shown at ampcode.com/settings (cookie session); no documented usage API for individuals or teams was found; Amp credits can also be checked by CodexBar-style scraping, unofficial.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": false,
+          "endpointOrPath": "https://ampcode.com/settings (web only)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://ampcode.com/manual/appendix"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None documented for usage; the Amp API key is used for running the agent (CLI/SDK), not for reading usage.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://ampcode.com/manual/plugin-api"
+        }
+      ],
+      "bestMethod": "local-logs-folder ~/.local/share/amp/threads/**/*.json (usageLedger events: tokens + credits per model) via folder pick / collector; sniff the thread shape rather than relying on the T-<id>.json name",
+      "dataQuality": "exact",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: threads/**/*.json confirmed, T-<id>.json naming unverified, Windows location unverified. Not installed on the research machine (checked 2026-10-15): paths and field names are source-based (third-party parsers / docs), unverified on disk. Field names and the ledger shape come from the CodeBurn parser and a developer transcript, not official Amp docs; Windows path unverified; threads run in cloud 'orbs' are not on disk. Sources: https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/amp.md ; https://traces.com/s/jn7c679tvtyemcetnqeq9tx34d81k96z ; https://ampcode.com/docs/threads"
+    },
+    {
+      "name": "Devin / Cognition (Devin cloud, Devin CLI 'Devin for Terminal', Devin Desktop ex-Windsurf)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "admin-key",
+          "howItWorks": "Enterprise API v3 (Enterprise plan only; 403 otherwise). Service-user API key (prefix cog_) created at enterprise level with permission ViewAccountConsumption (ViewAccountMembership for members); `Authorization: Bearer <key>`, base https://api.devin.ai. GET /v3/enterprise/consumption/daily?time_after=&time_before= (Unix s; billing day = midnight PST = 08:00 UTC) -> {total_acus, consumption_by_date[{date, acus, acus_by_product{devin, cascade, terminal, automation|null, review|null}}]}; GET /v3/enterprise/consumption/daily/users/{user_id} (same shape per user); /consumption/daily/sessions, /daily/service-users, /consumption/cycles; GET /v3/enterprise/members/users. Deprecated v2: GET /v2/enterprise/consumption/daily/{user_id} with Enterprise-Admin personal key (apk_user_*) -> {total_acus, consumption_by_date{date:number}, consumption_by_org_id}. Unit is ACUs (Agent Compute Units), not tokens. Preflight (2026-10-15): allow-methods/allow-headers/allow-credentials returned with `Vary: Origin` but no Access-Control-Allow-Origin for null/localhost origins -> blocked from file://.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "GET https://api.devin.ai/v3/enterprise/consumption/daily ; /v3/enterprise/consumption/daily/users/{user_id} ; /v3/enterprise/consumption/cycles (Bearer cog_ service-user key)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.devin.ai/api-reference/v3/consumption/consumption-daily-users.md"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Devin CLI (Devin for Terminal) keeps a local SQLite store: Linux ~/.local/share/devin/cli/sessions.db, macOS ~/Library/Application Support/devin/cli/sessions.db, Windows %APPDATA%\\devin\\cli\\sessions.db (override DEVIN_DATA_DIR / --data-dir); WAL mode. Table `sessions` {id, working_directory, model, title, created_at, last_activity_at, hidden, main_chain_id, prompt_history, metadata JSON with total_credit_cost / total_acu_cost}; table `message_nodes` with chat_message JSON {metadata.request_id, metadata.generation_model, metadata.created_at, metrics{input_tokens, cache_read_tokens, cache_creation_tokens}, tool_calls[].name}; retries are sibling nodes sharing request_id. Transcript exports ~/.local/share/devin/cli/transcripts/*.json (ATIF v1.7: session_id, agent.model_name, steps[].metrics{prompt_tokens, completion_tokens, cached_tokens, extra.cache_creation_input_tokens}, final_metrics). committed_acu_cost is null in current builds. Devin Desktop (ex-Windsurf/Cascade) keeps its data dir at ~/.codeium/windsurf/ (already covered under Windsurf; no token log).",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "%APPDATA%\\devin\\cli\\sessions.db (tables sessions, message_nodes -> metrics.input_tokens/cache_read_tokens/cache_creation_tokens, metadata.generation_model) ; ~/.local/share/devin/cli/transcripts/*.json",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/devin.md"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Self-serve (Core/Team) users: Settings > Plans shows current-month ACU usage, remaining allowance and on-demand balance; per-session ACUs appear in Session Insights; Enterprise has Consumption / Consumption Analytics pages and an opt-in 'My analytics' page. No CSV/JSON export documented for individuals.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": false,
+          "endpointOrPath": "app.devin.ai Settings > Plans ; Session Insights (view only)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.devin.ai/ja/admin/billing/usage"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "The regular Devin API (api.devin.ai/v1 sessions) creates/reads sessions, not account usage; no personal usage endpoint.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none for usage",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.devin.ai/enterprise/api-reference/overview"
+        }
+      ],
+      "bestMethod": "local-logs-folder Devin CLI sessions.db (exact tokens per request, ACU cost in sessions.metadata) ; admin-key v3 consumption endpoints via collector for Enterprise",
+      "dataQuality": "exact",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: Not installed on the research machine (checked 2026-10-15): paths and field names are source-based (third-party parsers / docs), unverified on disk. Cloud Devin sessions leave nothing local; only the CLI does. CLI schema is from third-party parsers (CodeBurn, devinmonitor) — 'Devin's schema is an internal detail that may change'. Sources: https://docs.devin.ai/api-reference/v3/consumption/consumption-daily-users.md ; https://docs.devin.ai/api-reference/v2/consumption/user-daily-consumption ; https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/devin.md ; https://pkg.go.dev/github.com/garywhat/devinmonitor@v0.1.0 ; https://docs.devin.ai/enterprise/api-reference/overview"
+    },
+    {
+      "name": "OpenCode (opencode.ai, sst/opencode)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Data dir: macOS/Linux ~/.local/share/opencode/ (XDG_DATA_HOME/opencode; OPENCODE_DATA_DIR / OPENCODE_HOME overrides); Windows %USERPROFILE%\\.local\\share\\opencode — CONFIRMED on disk 2026-10-15 (opencode.db exists there on the research machine, 0 rows; no %APPDATA%\\opencode directory exists despite the v1.2.0 release-note wording — still tolerate both). Since v1.2.0 (2026-02-14) all flat files are migrated into one SQLite DB opencode.db (WAL; channel builds opencode-<channel>.db; OPENCODE_DB override; `opencode db` CLI since 1.2.4); original files kept. Legacy layout (<=1.1): storage/session/{projectHash}/{sessionID}.json and storage/message/{sessionID}/msg_{messageID}.json (+ part/). Assistant message JSON (both layouts, table `message`.data or v2 `session_message`.data since 2.0.3): modelID (v2: model{id, providerID}), providerID, path.cwd, time{created, completed} (epoch ms), tokens{input, output, reasoning, cache{read, write}}, cost (USD; often 0 — recompute from tokens). parts/`part` rows carry type 'tool' + tool name. ccusage has an `opencode` family parser for the JSON layout; agent-walker reads the SQLite.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "%USERPROFILE%\\.local\\share\\opencode\\opencode.db (tables message/part/session; v2 session_v2/session_message; data JSON: modelID, tokens{input,output,reasoning,cache{read,write}}, cost, time.created) ; legacy storage\\message\\<sessionID>\\msg_*.json ; macOS/Linux ~/.local/share/opencode/",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://raw.githubusercontent.com/miiiiiiich/agent-walker/HEAD/docs/opencode.md"
+        },
+        {
+          "kind": "local-server",
+          "howItWorks": "`opencode serve` exposes a local HTTP API (sessions/messages incl. tokens/cost) on 127.0.0.1 that the page could query with CORS allowed for localhost origins; optional, the DB/JSON files are sufficient.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "http://127.0.0.1:<port>/session ... (`opencode serve`)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://opencode.ai/docs/troubleshooting"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None for OpenCode itself (BYO provider keys / OpenCode Zen); provider-side usage is covered by the existing provider connectors.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://opencode.ai/docs/troubleshooting"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "`/export` (share) writes a session as JSON/Markdown; not needed because raw storage is readable.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "opencode /export command",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://mintlify.wiki/ryoppippi/ccusage/family/opencode"
+        }
+      ],
+      "bestMethod": "local-logs-folder: opencode.db via sql.js (message.data tokens/cost/modelID/time) with legacy storage/message/*.json fallback",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: Windows path CONFIRMED (%USERPROFILE%\\.local\\share\\opencode\\opencode.db present, 0 rows, so the schema itself is still source-based). Two layouts must be supported (JSON <=1.1, SQLite >=1.2; v2 tables since 2.0.3). Official-docs Windows path confirmed; the release note's %APPDATA% wording was not observed. Sources: https://opencode.ai/docs/troubleshooting ; https://github.com/sst/opencode/releases/tag/v1.2.0 ; https://raw.githubusercontent.com/miiiiiiich/agent-walker/HEAD/docs/opencode.md ; https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/opencode.md ; https://mintlify.wiki/ryoppippi/ccusage/family/opencode"
+    },
+    {
+      "name": "Goose (block/goose CLI + Desktop)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Sessions are SQLite: macOS/Linux ~/.local/share/goose/sessions/sessions.db; Windows %APPDATA%\\Block\\goose\\sessions\\sessions.db (XDG_DATA_HOME / GOOSE_PATH_ROOT overrides; schema migrations at startup, currently v9). Table `sessions`: id, working_dir, name, user_set_name, session_type, created_at, updated_at, total_tokens, input_tokens, output_tokens, accumulated_total_tokens, accumulated_input_tokens, accumulated_output_tokens, schedule_id, recipe, provider_name, model_config (JSON with the model); table `messages`: id, session_id, role, content (JSON; toolRequest entries), timestamp. Session-level totals only (no per-request token rows; cache tokens not separated; no cost — price from model_config). Legacy (<2025) sessions were ~/.local/share/goose/sessions/<name>.jsonl, imported automatically; goose docs still also mention ~/.config/goose/sessions/ with conversation.json + metadata.json for some builds.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "%APPDATA%\\Block\\goose\\sessions\\sessions.db (sessions.accumulated_input_tokens/accumulated_output_tokens, provider_name, model_config, created_at) ; ~/.local/share/goose/sessions/sessions.db ; legacy *.jsonl",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/goose.md"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "`goose session export --name <n> --format json|yaml|markdown [-o file]` dumps one session; `goose session list --format json` lists sessions with metadata (token totals). Manual per-session; the DB is easier.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "goose session export --format json ; goose session list --format json",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://www.mankier.com/1/goose-session-export"
+        },
+        {
+          "kind": "local-server",
+          "howItWorks": "goose Desktop runs the goosed agent server locally (HTTP on 127.0.0.1 with a secret key) exposing sessions; undocumented for third parties, not needed.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "goosed on 127.0.0.1 (internal)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://mintlify.wiki/block/goose/concepts/architecture"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None for Goose (BYO provider); provider-side usage via existing connectors.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://mintlify.wiki/block/goose/concepts/sessions"
+        }
+      ],
+      "bestMethod": "local-logs-folder sessions.db (sql.js) -> per-session accumulated_input_tokens/accumulated_output_tokens + provider_name/model_config, priced locally",
+      "dataQuality": "exact",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: Not installed on the research machine (checked 2026-10-15): paths and field names are source-based (third-party parsers / docs), unverified on disk. Official docs are thin on paths; the Windows path and the column list come from the CodeBurn parser and the Goose docs mirror (mintlify.wiki). Session-level granularity only. Sources: https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/goose.md ; https://mintlify.wiki/block/goose/concepts/sessions ; https://instagit.com/block/goose/goose-sqlite-session-storage-jsonl-migration/ ; https://www.mankier.com/1/goose-session-export"
+    },
+    {
+      "name": "Kilo Code (VS Code / JetBrains / CLI; Roo/Cline fork)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Confirmed: same layout as Roo Code with only the extension id changed. %APPDATA%\\Code\\User\\globalStorage\\kilocode.kilo-code\\tasks\\<taskId>\\ (macOS ~/Library/Application Support/Code/User/globalStorage/kilocode.kilo-code/tasks/; Linux ~/.config/Code/...; Cursor/VSCodium/Windsurf use their own User\\globalStorage) containing ui_messages.json, api_conversation_history.json and task_metadata.json. Roo's GlobalFileNames: apiConversationHistory 'api_conversation_history.json', uiMessages 'ui_messages.json', taskMetadata 'task_metadata.json', historyItem 'history_item.json', historyIndex '_index.json'. Kilo's own JetBrains LegacyV5Importer notes 'task_metadata.json only holds files_in_context, so workspace must come from the conversation and ts from ui_messages.json'. Tokens: ui_messages.json entries {ts, type:'say', say:'api_req_started', text:'{\"request\":..., \"tokensIn\":N, \"tokensOut\":N, \"cacheWrites\":N, \"cacheReads\":N, \"cost\":0.0123}'}; model from api_conversation_history.json (<model> tag in user content, or provider settings). The task history index lives in VS Code globalState (state.vscdb) with per-task history_item.json copies. Kilo CLI config ~/.config/kilocode/kilocode.json; CLI sessions location not documented.",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "%APPDATA%\\Code\\User\\globalStorage\\kilocode.kilo-code\\tasks\\<taskId>\\ui_messages.json (say:'api_req_started' text JSON tokensIn/tokensOut/cacheWrites/cacheReads/cost) + api_conversation_history.json + task_metadata.json (files_in_context) + history_item.json",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/src/shared/globalFileNames.ts"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Task menu > Export task -> Markdown of the conversation (no token table).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "Kilo Code task > Export (Markdown)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://kilo.ai/docs"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "Kilo Gateway (app.kilo.ai) shows credit balance and usage per model in the web dashboard; no documented public usage API for individuals.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": false,
+          "endpointOrPath": "https://app.kilo.ai (web only)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://kilo.ai/docs/code-with-ai/platforms/cli"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None (BYO provider keys or Kilo Gateway); provider-side usage via existing connectors.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://kilo.ai/docs"
+        }
+      ],
+      "bestMethod": "local-logs-folder: reuse the existing Cline/Roo parser with extension id kilocode.kilo-code (api_req_started tokensIn/tokensOut/cacheWrites/cacheReads/cost)",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: Card = Kilo via the existing Roo/Cline parser with extension id kilocode.kilo-code. Not installed on the research machine (checked 2026-10-15): paths and field names are source-based (third-party parsers / docs), unverified on disk. Layout confirmed via Roo's globalFileNames.ts, Kilo's own LegacyV5Importer.kt comment and the CodeBurn kilo-code provider ('differs only by extension ID'). Sources: https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/src/shared/globalFileNames.ts ; https://github.com/Kilo-Org/kilocode/blob/main/packages/kilo-jetbrains/backend/src/main/kotlin/ai/kilocode/backend/migration/LegacyV5Importer.kt ; https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/kilo-code.md ; https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/vscode-cline-parser.md"
+    },
+    {
+      "name": "Claude Desktop Cowork + Claude Agent SDK sessions",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Two different roots (CORRECTED by the verifier, confirmed on disk 2026-10-15). (1) Cowork: transcripts are NOT in ~/.claude/projects. They live under %APPDATA%\\Claude\\local-agent-mode-sessions\\<orgId>\\<userId>\\<sessionDir>\\.claude\\projects\\<slug>\\<cliSessionId>.jsonl (entrypoint 'local-agent'; sessionDir = local_<uuid> or 8-hex; same message.usage fields as Claude Code), plus <sessionDir>\\audit.jsonl whose result lines carry total_cost_usd, usage{...} and modelUsage{inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens, costUSD, canonicalModel, provider}. Standard app root %APPDATA%\\Claude; 3P edition %LOCALAPPDATA%\\Claude-3p; macOS ~/Library/Application Support/Claude/local-agent-mode-sessions/. The session manifests local_<uuid>.json (model, title, createdAt, cwd) sit beside the session dirs. This is a NEW discovery root for the dashboard's 'local' tool and for the collector. (2) Agent SDK / CLI / Code tab: 'By default, the SDK writes session transcripts to JSONL files under ~/.claude/projects/' as ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl, subagents in <session-id>/subagents/agent-<id>.jsonl; CLAUDE_CONFIG_DIR relocates the whole tree (CLAUDE_CODE_PROJECT_DIR_NAME renames the project key); persistSession:false (TS) or --no-session-persistence disables writing; an optional SessionStore mirrors entries elsewhere and a run resumed from a store deletes its local copy. ~/.claude/projects holds Code-tab / CLI / SDK sessions ONLY. Each assistant line carries message.usage {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, cache_creation{ephemeral_5m_input_tokens, ephemeral_1h_input_tokens}} and message.model — the dashboard's Claude Code scanner already parses this. Windows: ~/.claude = %USERPROFILE%\\.claude.",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "Cowork: %APPDATA%\\Claude\\local-agent-mode-sessions\\<orgId>\\<userId>\\<sessionDir>\\.claude\\projects\\<slug>\\<cliSessionId>.jsonl (+ <sessionDir>\\audit.jsonl) ; 3P: %LOCALAPPDATA%\\Claude-3p\\... ; SDK/CLI/Code tab: %USERPROFILE%\\.claude\\projects\\<encoded-cwd>\\<sessionId>.jsonl (+ <sessionId>\\subagents\\agent-*.jsonl), CLAUDE_CONFIG_DIR override",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://code.claude.com/docs/en/agent-sdk/session-storage"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Anthropic Admin API usage/cost reports (api.anthropic.com/v1/organizations/usage_report/messages, /cost_report) cover API-key traffic (SDK runs with ANTHROPIC_API_KEY); Claude Enterprise Analytics API covers Claude Code sessions per user/day for Enterprise orgs — both already handled by existing connectors (browser access needs anthropic-dangerous-direct-browser-access).",
+          "givesTokens": "exact",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "https://api.anthropic.com/v1/organizations/usage_report/messages ; /v1/organizations/analytics/* (existing connectors)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://platform.claude.com/docs/en/manage-claude/analytics-api"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "Pro/Max subscription usage (Cowork and Claude Code on OAuth) has no official API; the unofficial api.anthropic.com/api/oauth/usage used by CLI monitors is undocumented (already noted for Claude.ai).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none official",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://code.claude.com/docs/en/sessions"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Not needed; `claude --resume` transcripts are already the raw JSONL. Claude Desktop's 'Export data' ZIP (conversations.json) covers chat, not Cowork/Code.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "n/a",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://code.claude.com/docs/en/claude-directory"
+        }
+      ],
+      "bestMethod": "local-logs-folder: keep ~/.claude/projects (honour CLAUDE_CONFIG_DIR) for SDK/CLI/Code-tab sessions AND add the Cowork APPDATA root (%APPDATA%\\Claude\\local-agent-mode-sessions, %LOCALAPPDATA%\\Claude-3p\\local-agent-mode-sessions, macOS Application Support) as a new discovery root of the 'local' tool and the collector, globbing **/.claude/projects/**/*.jsonl with the existing parser; label rows Cowork vs SDK vs CLI",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: the August claim that Cowork transcripts land in ~/.claude/projects is WRONG — confirmed on disk: Cowork = APPDATA root (264 transcripts + 220 audit.jsonl here), ~/.claude/projects = Code tab / CLI / SDK only. SDK default location confirmed by official docs. Edge cases: SDK runs with persistSession:false or a custom CLAUDE_CONFIG_DIR / temp dir leave nothing in the default tree. Sources: https://code.claude.com/docs/en/agent-sdk/session-storage ; https://code.claude.com/docs/en/claude-directory ; https://claude.com/docs/third-party/claude-desktop/data-storage ; https://platform.claude.com/cookbook/claude-agent-sdk-05-building-a-session-browser ; https://brycewatson.com/blog/13-cowork-conversation-transcripts"
+    },
+    {
+      "name": "GitHub Copilot in VS Code (Copilot Chat) + Copilot CLI",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "A local token log exists ONLY with the official opt-in OpenTelemetry file exporter (CONFIRMED by the VS Code docs, verifier 2026-10-15). (1) VS Code settings `github.copilot.chat.otel.enabled: true`, `github.copilot.chat.otel.exporterType: \"file\"` (values otlp-http (default) | otlp-grpc | console | file), `github.copilot.chat.otel.outfile: \"<path>\"` -> JSON-lines of traces/metrics/events; `chat` spans (one per LLM call) carry gen_ai.request.model, gen_ai.response.model, gen_ai.usage.input_tokens, gen_ai.usage.output_tokens, gen_ai.usage.cache_read.input_tokens, gen_ai.usage.cache_creation.input_tokens, gen_ai.usage.reasoning.output_tokens; `invoke_agent` root span has session totals; metric gen_ai.client.token.usage; events gen_ai.client.inference.operation.details and copilot_chat.agent.turn. `github.copilot.chat.otel.dbSpanExporter.enabled: true` instead writes spans to a local SQLite (agent-traces.db, table assistant_usage_events: input_tokens (cache-inclusive), output_tokens, total_nano_aiu, request_multiplier, created_at). Env equivalents: COPILOT_OTEL_ENABLED, COPILOT_OTEL_FILE_EXPORTER_PATH. (2) Without OTel there is NO token data: the VS Code chat journals %APPDATA%\\Code\\User\\workspaceStorage\\<hash>\\chatSessions\\*.jsonl and globalStorage\\emptyWindowChatSessions\\*.jsonl exist on disk (verified here, 2 workspaces) but carry NO token fields — the CodeBurn claim of result.metadata.promptTokens / outputTokens / modelTotals / copilotCredits was NOT reproduced; they are history/text only (estimation at best). Transcripts in workspaceStorage\\<hash>\\GitHub.copilot-chat\\transcripts\\ likewise carry no usage. (3) Copilot CLI (already a card): %USERPROFILE%\\.copilot\\session-state\\<id>\\events.jsonl (assistant.usage; session.shutdown modelMetrics) and ~/.copilot/session-store.db; CLI OTel defaults to exporter type `file` (COPILOT_OTEL_EXPORTER_TYPE). JetBrains: %LOCALAPPDATA%\\github-copilot\\<ide>\\...\\copilot-*-nitrite.db (unverified).",
+          "givesTokens": "exact",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "VS Code settings github.copilot.chat.otel.enabled=true + exporterType=\"file\" + outfile=<path> (JSONL chat spans, gen_ai.usage.*) or dbSpanExporter.enabled (agent-traces.db) ; %APPDATA%\\Code\\User\\workspaceStorage\\<hash>\\chatSessions\\*.jsonl (history only — NO token fields) ; %USERPROFILE%\\.copilot\\session-state\\*\\events.jsonl (CLI card)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://code.visualstudio.com/docs/copilot/guides/monitoring-agents"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "github.com > Settings > Billing & Licensing > Usage > Get report > 'Copilot premium requests usage report' (CSV): itemised premium requests since 2025-05-15 with timestamp, user, model, premium requests used per interaction, monthly quota and over-quota flag; includes usage inside and beyond the allowance. For org/enterprise seats only admins can download it; individuals download their own. Also VS Code 'Chat: Export Chat...' -> JSON of one session (no tokens).",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "github.com Settings > Billing & Licensing > Usage > Get report > Copilot premium requests usage report (CSV)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.github.com/en/copilot/how-tos/premium-requests/monitoring-your-copilot-usage-and-entitlements"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "Already supported: GitHub REST billing usage endpoints with a fine-grained PAT (premium_request/usage, ai_credit/usage) return product, sku, model, unitType, gross/net quantity and amounts per day for personally-billed Copilot; org/enterprise seat holders get nothing. CORS: api.github.com allows browser calls with a bearer token.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "https://api.github.com/users/{username}/settings/billing/premium_request/usage (PAT)",
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.github.com/en/rest/billing/enhanced-billing"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Org/enterprise admins: Copilot metrics API and usage report NDJSON export (aggregate per day/user, no tokens).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "GET https://api.github.com/orgs/{org}/copilot/metrics",
+          "browserCallable": "yes",
+          "sourceUrl": "https://docs.github.com/en/copilot/how-tos/premium-requests/monitoring-your-copilot-usage-and-entitlements"
+        }
+      ],
+      "bestMethod": "local-logs-folder: parser for the official OTel file exporter (exporterType=file -> JSONL chat spans with gen_ai.usage.*; optionally agent-traces.db). Quality is exact ONLY with the exporter switched on; without it the chatSessions journals give history/estimation at best. Keep the Copilot CLI events.jsonl parser.",
+      "dataQuality": "exact",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: OTel file exporter and gen_ai.* attribute names CONFIRMED by the VS Code docs (exporterType accepts file/console with outfile). DOWNGRADE: chatSessions/*.jsonl journals exist locally (2 workspaces here) but contain no token fields — the CodeBurn promptTokens/modelTotals/copilotCredits claim did not reproduce; bestMethod = OTel file export, exact only with the exporter on. Sources: https://code.visualstudio.com/docs/copilot/guides/monitoring-agents ; https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/copilot.md ; https://docs.github.com/en/copilot/how-tos/premium-requests/monitoring-your-copilot-usage-and-entitlements ; https://openobserve.ai/docs/integration/ai/github-copilot-tracing.md"
+    },
+    {
+      "name": "Gemini Code Assist (VS Code / JetBrains)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "No documented local usage/token log for the Code Assist chat itself; chat threads persist across IDE sessions (stored in VS Code extension storage, path/format undocumented; JetBrains keeps only idea.log under %LOCALAPPDATA%\\JetBrains\\<product>\\log). Agent mode in VS Code exposes 'all of the Gemini CLI built-in tools', reads ~/.gemini/settings.json and GEMINI.md via Gemini CLI memory discovery, and the 2.77.1 release notes say agent-mode logs were previously attributed to Gemini CLI — so agent-mode sessions plausibly land in the Gemini CLI location already scanned (%USERPROFILE%\\.gemini\\tmp\\<project_hash>\\chats\\session-*.json(l), type:'gemini' messages with tokens{promptTokenCount,...} and model). Not confirmed by Google docs; verify on a machine with agent mode used. Google Antigravity (separate product) stores conversations in %USERPROFILE%\\.gemini\\antigravity*\\conversations\\*.db (SQLite + protobuf gen_metadata with ModelUsageStats input/output/cache/thinking tokens).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none documented; agent mode possibly %USERPROFILE%\\.gemini\\tmp\\<hash>\\chats\\ (Gemini CLI store, unverified) ; Antigravity: %USERPROFILE%\\.gemini\\antigravity\\conversations\\*.db",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.cloud.google.com/gemini/docs/codeassist/agent-mode"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Standard/Enterprise: project admins enable Gemini Code Assist logging to Cloud Logging (prompts/responses, metadata per IDE interaction; requires billing + Cloud Logging API; nothing is captured if VS Code telemetry is disabled) and view request quotas in the Cloud console (Cloud Quotas: 6,000 code requests and 960 chat requests per user/day; agent mode + Gemini CLI combined 1,500/day Standard, 2,000/day Enterprise). Access is Google OAuth/gcloud, not usable from file://; no token or cost per request.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "Cloud Logging (logging.googleapis.com) + Cloud Quotas in console.cloud.google.com for the project",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.cloud.google.com/gemini/docs/configure-logging"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "Individuals (free tier) see only a daily request quota; no usage page, API or export. Google OAuth cannot redirect to file://.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.cloud.google.com/gemini/docs/quotas"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "No data export of chat history (VS Code has no query history; IntelliJ shows a query history view only).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://developers.google.com/gemini-code-assist/docs/use-gemini-code-assist-chat"
+        }
+      ],
+      "bestMethod": "none (quota-based product); rely on the existing Gemini CLI scanner, which may also catch Code Assist agent-mode sessions",
+      "dataQuality": "none",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: ~/.gemini/tmp is absent here, so the agent-mode -> Gemini CLI store hypothesis stays unverified. Not installed on the research machine (checked 2026-10-15): paths and field names are source-based (third-party parsers / docs), unverified on disk. Could not verify that agent mode writes to ~/.gemini/tmp; Google documents only that it shares Gemini CLI tools/settings and quotas. Sources: https://docs.cloud.google.com/gemini/docs/codeassist/agent-mode ; https://docs.cloud.google.com/gemini/docs/quotas ; https://docs.cloud.google.com/gemini/docs/configure-logging ; https://docs.cloud.google.com/gemini/docs/codeassist/release-notes ; https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/antigravity.md"
+    },
+    {
+      "name": "Amazon Q Developer in the IDE (VS Code / JetBrains)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "Confirmed: no local token log. AWS: 'Amazon Q stores your conversations on your local computer, in your home directory', per workspace — %USERPROFILE%\\.aws\\amazonq\\history\\chat-history-<hash>.json (LokiJS-style JSON: collections[tabs].conversations/messages with body, type, codeReference, relatedContent, created/updated) — no model, no tokens, no cost. The IDE 'Show Logs' button opens diagnostic logs that may contain conversation text but no usage metrics. Kiro CLI / ex-Q CLI already covered separately.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "%USERPROFILE%\\.aws\\amazonq\\history\\chat-history-*.json (text only)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/ide-chat-conversation.html"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Chat panel > Export (or history ⋮ > Export) -> Markdown or HTML of one conversation, saved as q-dev-chat-YYYY-MM-DD.{md|html} in the project root. Text only; tokens would have to be estimated.",
+          "givesTokens": "estimated",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "Amazon Q chat > Export -> q-dev-chat-<date>.md|html",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/ide-chat-conversation.html"
+        },
+        {
+          "kind": "admin-key",
+          "howItWorks": "Q Developer Pro admins: user-activity dashboard (aggregate), CloudWatch metrics, and opt-in prompt logging to an S3 bucket (prompts + responses for chat). Requires AWS SigV4 credentials; no per-user token or cost API.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": true,
+          "endpointOrPath": "AWS console Q Developer dashboard ; CloudWatch ; S3 prompt logs (admin)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/monitoring-overview.html"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "Free tier/Builder ID users have monthly request limits shown in the IDE only; no API, no export of usage.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/troubleshooting-q-logs.html"
+        }
+      ],
+      "bestMethod": "none for tokens; optional local-logs-folder import of .aws/amazonq/history JSON for history with text-based estimation",
+      "dataQuality": "estimated",
+      "confidence": "high",
+      "notes": "Skeptic verification 2026-10-15: Not installed on the research machine (checked 2026-10-15): paths and field names are source-based (third-party parsers / docs), unverified on disk. The home-dir JSON path is from a Classmethod write-up (AWS only says 'home directory'); format is a LokiJS dump. Sources: https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/ide-chat-conversation.html ; https://dev.classmethod.jp/articles/q-dev-cv-history/ ; https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/monitoring-overview.html"
+    },
+    {
+      "name": "Replit Agent",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Web only. Effort-based billing: each Build-mode request creates one checkpoint priced by complexity (Plan Mode conversations also billed); third-party API usage billed at provider list price from credits. Costs per checkpoint are shown in the Agent tab (hover usage icon) and the Usage dashboard (Settings > Usage / replit.com/usage: period selector, Per user / Per project / Per resource views with quantity, unit price, cost; data may lag 30 min). 'Download CSV' exports usage data — documented on Replit's Enterprise observability page (verifier 2026-10-15); availability for individual plans unconfirmed. The CSV carries dollar/credit amounts only, never tokens.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "replit.com Settings > Usage > Per resource > Download CSV (Enterprise page; dollars only; individual plans unconfirmed)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.replit.com/teams/observability"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None. Replit is browser/cloud based (desktop app is an Electron wrapper); no local transcript or usage files.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.replit.com/billing/ai-billing"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None. No public billing/usage API; invoices via a third-party portal ('See previous invoices').",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.replit.com/category/billing"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None; dashboard is cookie-authenticated GraphQL (replit.com/graphql), internal and CORS-blocked.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none official",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.replit.com/billing"
+        }
+      ],
+      "bestMethod": "data-export-file (Enterprise Usage CSV, dollars only) as a cost-only importer; otherwise none",
+      "dataQuality": "none",
+      "confidence": "medium",
+      "notes": "Skeptic verification 2026-10-15: CSV documented on the Enterprise page and carries dollars only. Could not confirm the CSV download for Core/Pro individual accounts or its columns. Sources: https://docs.replit.com/billing/ai-billing ; https://docs.replit.com/teams/observability ; https://docs.replit.com/category/billing"
+    },
+    {
+      "name": "Lovable",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Web only. Workspace settings > Plans & credit usage > Usage details: credits by build/chat/Cloud/AI-gateway, filterable by time range, project and person (admins see all members; editors their own). Per message: response > More options > 'Credits used'. Plan mode = 1 credit/message (+subagent research); build mode cost depends on complexity; chat 'a fraction of a credit'. No CSV export or API documented (third-party blogs claim a Billing > Usage History CSV — unverified). No tokens.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "lovable.dev Workspace settings > Plans & credit usage > Usage details (view only)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.lovable.dev/introduction/credits-and-usage"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None (browser app).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.lovable.dev/introduction/credits-and-usage"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None for usage (Business-plan 'API access' is for projects, not usage data).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://docs.lovable.dev/introduction/credits-and-usage"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "No OAuth/usage endpoint; internal dashboard calls are cookie-bound.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://docs.lovable.dev/introduction/credits-and-usage"
+        }
+      ],
+      "bestMethod": "none (manual credit entry at most)",
+      "dataQuality": "none",
+      "confidence": "high",
+      "notes": "Credits, not tokens; no export/API in official docs. Sources: https://docs.lovable.dev/introduction/credits-and-usage"
+    },
+    {
+      "name": "v0 (Vercel)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "api-key",
+          "howItWorks": "GET https://api.v0.dev/v2/usage/summary?start=<ISO>&end=<ISO>&userId= with `Authorization: Bearer $V0_API_KEY` (v0.app/chat/settings/keys). Response {object:'usage_summary', range{start,end}, scope{id, type:'team'|'personal', isTeamWide, userId?}, credits{plan, onDemand, total}, daily[{date (YYYY-MM-DD UTC), credits{plan,onDemand,total}}], dataAsOf}. Team owners/billing members get team-wide data and can filter by any userId; others only their own. Credits per day, no per-model or per-request breakdown, no tokens (v0 bills per-model token prices but exposes only credits). Default range = last 7 days. CORS: preflight 2026-10-15 returns 204 with no Access-Control-* headers -> blocked from file://, route through the collector.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": true,
+          "endpointOrPath": "GET https://api.v0.dev/v2/usage/summary (Bearer v0 API key)",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://v0.app/docs/api/v2/reference/usage/get-usage-summary"
+        },
+        {
+          "kind": "data-export-file",
+          "howItWorks": "v0.app Settings > Billing shows credit usage and resets; no CSV/JSON export documented.",
+          "givesTokens": "none",
+          "givesCost": "billed",
+          "givesHistory": false,
+          "endpointOrPath": "v0.app settings > Billing (view only)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://v0.app/docs/api/v2/reference/usage/get-usage-summary"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None (browser app; the v0 SDK/CLI keeps no usage files).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://v0.app/docs/api/v2/reference/usage/get-usage-summary"
+        },
+        {
+          "kind": "oauth",
+          "howItWorks": "None beyond the API key (Vercel OAuth does not cover v0 usage).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://v0.app/docs/api/v2/reference/usage/get-usage-summary"
+        }
+      ],
+      "bestMethod": "api-key GET /v2/usage/summary via the collector (daily credits, plan vs on-demand)",
+      "dataQuality": "validate-only",
+      "confidence": "high",
+      "notes": "Only credits per day; no tokens/model. CORS verified blocked for non-browser origins. Sources: https://v0.app/docs/api/v2/reference/usage/get-usage-summary"
+    },
+    {
+      "name": "Bolt.new (StackBlitz)",
+      "category": "coding-tool",
+      "methods": [
+        {
+          "kind": "data-export-file",
+          "howItWorks": "Web only. Token balance (incl. rollover) is shown under My Subscription; Free: 1M tokens/month with a 300K/day cap; paid: reset on renewal, unused tokens roll over for two months. Bolt does not publish per-message token usage, history or any export/API; 'Export > Download' exports the project files, not usage.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "bolt.new > My Subscription (token balance view only)",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.bolt.new/account-and-subscription/tokens"
+        },
+        {
+          "kind": "local-logs-folder",
+          "howItWorks": "None (browser app on WebContainers).",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.bolt.new/best-practices/maximizing-token-efficiency"
+        },
+        {
+          "kind": "api-key",
+          "howItWorks": "None.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "n/a",
+          "sourceUrl": "https://support.bolt.new/account-and-subscription/tokens"
+        },
+        {
+          "kind": "none",
+          "howItWorks": "No OAuth/usage endpoint; the in-app balance comes from cookie-bound internal calls.",
+          "givesTokens": "none",
+          "givesCost": "none",
+          "givesHistory": false,
+          "endpointOrPath": "none",
+          "browserCallable": "cors-blocked",
+          "sourceUrl": "https://support.bolt.new/account-and-subscription/tokens"
+        }
+      ],
+      "bestMethod": "none (manual balance entry at most)",
+      "dataQuality": "none",
+      "confidence": "high",
+      "notes": "Bolt meters tokens but exposes only the remaining balance. Sources: https://support.bolt.new/account-and-subscription/tokens ; https://support.bolt.new/best-practices/maximizing-token-efficiency"
+    }
+  ],
+  "corrections_to_august": [
+    {
+      "name": "Claude.ai web + Claude Desktop app",
+      "field": "methods[kind=local-logs-folder].howItWorks",
+      "old": "Chat-tab conversations are server-side (no local files). Claude Desktop app data: macOS ~/Library/Application Support/Claude/ ; Windows %APPDATA%\\Claude\\ (exe install) or %LOCALAPPDATA%\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude\\ (Store/MSIX). Cowork: local-agent-mode-sessions/<org>/<user>/local_<uuid>.json = session metadata only (model, title, createdAt, lastActivityAt, cwd...) — no transcript, no tokens; newer builds also use claude-code-sessions/. The actual Cowork and Code transcripts are JSONL under ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl with per-message usage {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, cache_creation.ephemeral_5m/1h} — the dashboard's existing Claude Code scanner already covers these (Cowork sessions show up there). Also ~/.claude/jobs/ (background jobs). Logs (~/Library/Logs/Claude/ main.log, mcp.log, claude.ai-web.log) contain no tokens. The 3P (BYO-provider) edition uses Claude-3p directories and stores Chat conversations locally as session files, still without token fields.",
+      "new": "Chat-tab conversations are server-side (no local files). Claude Desktop app data: macOS ~/Library/Application Support/Claude/ ; Windows %APPDATA%\\Claude\\ (standard exe install; Store/MSIX: %LOCALAPPDATA%\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude\\; 3P/BYO-provider edition: %LOCALAPPDATA%\\Claude-3p\\). Cowork (CORRECTED 2026-10-15, confirmed on disk): transcripts are JSONL ONLY under %APPDATA%\\Claude\\local-agent-mode-sessions\\<orgId>\\<userId>\\<sessionDir>\\.claude\\projects\\<slug>\\<cliSessionId>.jsonl (entrypoint 'local-agent'; sessionDir = local_<uuid> or 8-hex; same message.usage fields as Claude Code: input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, cache_creation.ephemeral_5m/1h), plus <sessionDir>\\audit.jsonl whose result lines carry total_cost_usd, usage{...} and modelUsage{inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens, costUSD, canonicalModel, provider}; local_<uuid>.json beside them is session metadata only (model, title, createdAt, lastActivityAt, cwd). ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl holds Code-tab / CLI / Agent SDK sessions ONLY — the dashboard's existing Claude Code scanner and collector therefore do NOT see Cowork today. Also ~/.claude/jobs/ (background jobs). Logs (~/Library/Logs/Claude/ main.log, mcp.log, claude.ai-web.log) contain no tokens."
+    },
+    {
+      "name": "Claude.ai web + Claude Desktop app",
+      "field": "methods[kind=local-logs-folder].endpointOrPath",
+      "old": "~/.claude/projects/**/*.jsonl (Cowork+Code transcripts, tokens); Claude/local-agent-mode-sessions/**/local_*.json (metadata only); Claude/claude-code-sessions/",
+      "new": "~/.claude/projects/**/*.jsonl (Code tab / CLI / SDK transcripts, tokens); %APPDATA%\\Claude\\local-agent-mode-sessions\\<orgId>\\<userId>\\<sessionDir>\\.claude\\projects\\<slug>\\*.jsonl (Cowork transcripts, tokens) + <sessionDir>\\audit.jsonl (total_cost_usd, modelUsage); local_*.json (metadata only); 3P: %LOCALAPPDATA%\\Claude-3p\\..."
+    },
+    {
+      "name": "Claude.ai web + Claude Desktop app",
+      "field": "bestMethod",
+      "old": "data-export-file for chat history (already supported) + ~/.claude/projects JSONL for Cowork/Code (already scanned); Enterprise Analytics API only for Enterprise orgs",
+      "new": "data-export-file for chat history (already supported) + ~/.claude/projects JSONL for Code tab / CLI / SDK (already scanned) + the Cowork APPDATA root %APPDATA%\\Claude\\local-agent-mode-sessions\\**\\.claude\\projects\\**\\*.jsonl as a NEW discovery root for the 'local' tool and the collector; Enterprise Analytics API only for Enterprise orgs"
+    },
+    {
+      "name": "Claude.ai web + Claude Desktop app",
+      "field": "notes",
+      "old": "Chat conversations never touch disk in the standard app; Cowork sessions do (metadata in local_*.json, tokens in ~/.claude/projects JSONL). Only new opportunity: label Cowork sessions distinctly and, for Enterprise users, the Analytics API. Sources: https://platform.claude.com/docs/en/manage-claude/analytics-api ; https://claude.com/docs/third-party/claude-desktop/data-storage ; https://brycewatson.com/blog/09-cowork-session-schema/ ; https://github.com/a-data3/cowork-context-meter",
+      "new": "Chat conversations never touch disk in the standard app; Cowork sessions do — but under the APPDATA root (local-agent-mode-sessions/.../.claude/projects/...), NOT under ~/.claude/projects (CORRECTION 2026-10-15, confirmed on disk: 264 transcripts + 220 audit.jsonl). Opportunities: add the Cowork root to the scanner/collector, label Cowork sessions distinctly, and, for Enterprise users, the Analytics API. Sources: https://platform.claude.com/docs/en/manage-claude/analytics-api ; https://claude.com/docs/third-party/claude-desktop/data-storage ; https://brycewatson.com/blog/13-cowork-conversation-transcripts ; https://github.com/a-data3/cowork-context-meter"
+    }
+  ]
+}

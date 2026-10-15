@@ -1,0 +1,5042 @@
+{
+ "generated": "2026-10-15",
+ "rows": [
+  {
+   "vendor": "Anthropic",
+   "label": "Claude Fable/Mythos 5",
+   "ids": [],
+   "pat": "claude-(fable|mythos)-5",
+   "in": 10,
+   "out": 50,
+   "cw": 12.5,
+   "cr": 1,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Anthropic",
+   "label": "Claude Opus 5 / 4.5+",
+   "ids": [],
+   "pat": "claude-opus-(5|4-[5-9])",
+   "in": 5,
+   "out": 25,
+   "cw": 6.25,
+   "cr": 0.5,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Anthropic",
+   "label": "Claude Opus 4 / 4.1",
+   "ids": [],
+   "pat": "claude-opus-4(-1)?(?=$|-\\d{8})",
+   "in": 15,
+   "out": 75,
+   "cw": 18.75,
+   "cr": 1.5,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Anthropic",
+   "label": "Claude Sonnet 5",
+   "ids": [],
+   "pat": "claude-sonnet-5",
+   "in": 2,
+   "out": 10,
+   "cw": 2.5,
+   "cr": 0.2,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Anthropic",
+   "label": "Claude Sonnet 4.x / 3.x",
+   "ids": [],
+   "pat": "claude-sonnet-4|claude-3-7-sonnet|claude-3-5-sonnet",
+   "in": 3,
+   "out": 15,
+   "cw": 3.75,
+   "cr": 0.3,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Anthropic",
+   "label": "Claude Haiku 4.5",
+   "ids": [],
+   "pat": "claude-haiku-4-5",
+   "in": 1,
+   "out": 5,
+   "cw": 1.25,
+   "cr": 0.1,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Anthropic",
+   "label": "Claude Haiku 3.5",
+   "ids": [],
+   "pat": "claude-3-5-haiku",
+   "in": 0.8,
+   "out": 4,
+   "cw": 1,
+   "cr": 0.08,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Anthropic",
+   "label": "Claude Haiku 3",
+   "ids": [],
+   "pat": "claude-3-haiku",
+   "in": 0.25,
+   "out": 1.25,
+   "cw": 0.3,
+   "cr": 0.03,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Anthropic",
+   "label": "Claude (other)",
+   "ids": [],
+   "pat": "claude",
+   "in": 3,
+   "out": 15,
+   "cw": 3.75,
+   "cr": 0.3,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "GPT-5.6 Sol / 5.5",
+   "ids": [],
+   "pat": "gpt-5[.-]?6-sol|gpt-5[.-]?5(?!-pro)",
+   "in": 5,
+   "out": 30,
+   "cw": 0,
+   "cr": 0.5,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "GPT-5.5 Pro",
+   "ids": [],
+   "pat": "gpt-5[.-]?5-pro",
+   "in": 30,
+   "out": 180,
+   "cw": 0,
+   "cr": 3,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "GPT-5.6 Terra",
+   "ids": [],
+   "pat": "gpt-5[.-]?6-terra",
+   "in": 2,
+   "out": 12,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "GPT-5.6 Luna",
+   "ids": [],
+   "pat": "gpt-5[.-]?6-luna",
+   "in": 0.2,
+   "out": 1.2,
+   "cw": 0,
+   "cr": 0.02,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "GPT-5.4 mini",
+   "ids": [],
+   "pat": "gpt-5[.-]?4-mini",
+   "in": 0.75,
+   "out": 4.5,
+   "cw": 0,
+   "cr": 0.075,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "GPT-5.4 nano",
+   "ids": [],
+   "pat": "gpt-5[.-]?4-nano",
+   "in": 0.2,
+   "out": 1.25,
+   "cw": 0,
+   "cr": 0.02,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "GPT-5.4",
+   "ids": [],
+   "pat": "gpt-5[.-]?4",
+   "in": 2.5,
+   "out": 15,
+   "cw": 0,
+   "cr": 0.25,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "GPT-5 mini",
+   "ids": [],
+   "pat": "gpt-5-mini",
+   "in": 0.25,
+   "out": 2,
+   "cw": 0,
+   "cr": 0.025,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "GPT-5 nano",
+   "ids": [],
+   "pat": "gpt-5-nano",
+   "in": 0.05,
+   "out": 0.4,
+   "cw": 0,
+   "cr": 0.005,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "openai",
+   "label": "GPT-5-Codex",
+   "ids": [
+    "gpt-5-codex"
+   ],
+   "pat": "^gpt-5-codex(?!-mini)",
+   "in": 1.25,
+   "out": 10,
+   "cw": 0,
+   "cr": 0.125,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://developers.openai.com/api/docs/models/gpt-5-codex",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Not on main pricing table; price from model page. Deprecations page: shut down Jul 23 2026 (replacement gpt-5.6-sol). Same price as gpt-5."
+  },
+  {
+   "vendor": "openai",
+   "label": "codex-mini-latest",
+   "ids": [
+    "codex-mini-latest"
+   ],
+   "pat": "^codex-mini",
+   "in": 1.5,
+   "out": 6,
+   "cw": 0,
+   "cr": 0.375,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://developers.openai.com/api/docs/models/codex-mini-latest",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Not on main pricing table; price from model page. Shut down Feb 12 2026 (replacement gpt-5-codex-mini)."
+  },
+  {
+   "vendor": "openai",
+   "label": "GPT-5.3-Codex",
+   "ids": [
+    "gpt-5.3-codex"
+   ],
+   "pat": "^gpt-5\\.3-codex",
+   "in": 1.75,
+   "out": 14,
+   "cw": 0,
+   "cr": 0.175,
+   "unit_note": "USD/1M tokens; 'Specialized' table",
+   "source_url": "https://developers.openai.com/api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Only codex id in the current OpenAI pricing table. Cursor's page also lists gpt-5.1-codex / gpt-5.1-codex-max 1.25/0.125/10, gpt-5.1-codex-mini 0.25/0.025/2, gpt-5.2-codex 1.75/0.175/14 (secondary source)."
+  },
+  {
+   "vendor": "openai",
+   "label": "GPT-4.1",
+   "ids": [
+    "gpt-4.1",
+    "gpt-4.1-2025-04-14"
+   ],
+   "pat": "^gpt-4\\.1(?!-mini|-nano)",
+   "in": 2,
+   "out": 8,
+   "cw": 0,
+   "cr": 0.5,
+   "unit_note": "USD/1M tokens, Standard tier",
+   "source_url": "https://developers.openai.com/api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Deprecation page: gpt-4.1-2025-04-14 shuts down Jan 14 2027 (replacement gpt-6-luna)."
+  },
+  {
+   "vendor": "openai",
+   "label": "GPT-4.1 mini",
+   "ids": [
+    "gpt-4.1-mini",
+    "gpt-4.1-mini-2025-04-14"
+   ],
+   "pat": "^gpt-4\\.1-mini",
+   "in": 0.4,
+   "out": 1.6,
+   "cw": 0,
+   "cr": 0.1,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://developers.openai.com/api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Shutdown Jan 14 2027."
+  },
+  {
+   "vendor": "openai",
+   "label": "GPT-4.1 nano",
+   "ids": [
+    "gpt-4.1-nano",
+    "gpt-4.1-nano-2025-04-14"
+   ],
+   "pat": "^gpt-4\\.1-nano",
+   "in": 0.1,
+   "out": 0.4,
+   "cw": 0,
+   "cr": 0.025,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://developers.openai.com/api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Shutdown Oct 23 2026 (replacement gpt-5.6-luna)."
+  },
+  {
+   "vendor": "openai",
+   "label": "GPT-4 Turbo",
+   "ids": [
+    "gpt-4-turbo",
+    "gpt-4-turbo-2024-04-09",
+    "gpt-4-turbo-preview",
+    "gpt-4-0125-preview",
+    "gpt-4-1106-preview"
+   ],
+   "pat": "^gpt-4-(turbo|0125-preview|1106-preview)",
+   "in": 10,
+   "out": 30,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens; no cached-input price",
+   "source_url": "https://developers.openai.com/api/docs/models/gpt-4-turbo",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Pricing page lists snapshot gpt-4-turbo-2024-04-09 only; model page confirms alias gpt-4-turbo. Shutdown Oct 23 2026; gpt-4-turbo-preview already shut down Mar 26 2026."
+  },
+  {
+   "vendor": "openai",
+   "label": "GPT-4",
+   "ids": [
+    "gpt-4",
+    "gpt-4-0613",
+    "gpt-4-0314"
+   ],
+   "pat": "^gpt-4(-0613|-0314)?$",
+   "in": 30,
+   "out": 60,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens; 8k context base; no cached-input price",
+   "source_url": "https://developers.openai.com/api/docs/models/gpt-4",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Shutdown Oct 23 2026. (gpt-4-32k variants historically 60/120, not on page.)"
+  },
+  {
+   "vendor": "openai",
+   "label": "GPT-3.5 Turbo",
+   "ids": [
+    "gpt-3.5-turbo",
+    "gpt-3.5-turbo-0125"
+   ],
+   "pat": "^gpt-3\\.5-turbo(-0125)?$",
+   "in": 0.5,
+   "out": 1.5,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://developers.openai.com/api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Shutdown Oct 23 2026. Fine-tuned gpt-3.5-turbo usage: $3.00 in / $6.00 out."
+  },
+  {
+   "vendor": "openai",
+   "label": "GPT-3.5 Turbo 1106",
+   "ids": [
+    "gpt-3.5-turbo-1106"
+   ],
+   "pat": "^gpt-3\\.5-turbo-1106",
+   "in": 1,
+   "out": 2,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://developers.openai.com/api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Shutdown Sep 28 2026."
+  },
+  {
+   "vendor": "openai",
+   "label": "GPT-3.5 Turbo Instruct",
+   "ids": [
+    "gpt-3.5-turbo-instruct"
+   ],
+   "pat": "^gpt-3\\.5-turbo-instruct",
+   "in": 1.5,
+   "out": 2,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://developers.openai.com/api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Shutdown Sep 28 2026."
+  },
+  {
+   "vendor": "openai",
+   "label": "o4-mini",
+   "ids": [
+    "o4-mini",
+    "o4-mini-2025-04-16"
+   ],
+   "pat": "^o4-mini",
+   "in": 1.1,
+   "out": 4.4,
+   "cw": 0,
+   "cr": 0.275,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://developers.openai.com/api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Shutdown Oct 23 2026 (replacement gpt-5.6-terra). Fine-tuned o4-mini: 4.00/1.00/16.00."
+  },
+  {
+   "vendor": "openai",
+   "label": "o3",
+   "ids": [
+    "o3",
+    "o3-2025-04-16"
+   ],
+   "pat": "^o3(-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 2,
+   "out": 8,
+   "cw": 0,
+   "cr": 0.5,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://developers.openai.com/api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Shutdown Dec 11 2026 (replacement gpt-5.6-sol)."
+  },
+  {
+   "vendor": "openai",
+   "label": "o1",
+   "ids": [
+    "o1",
+    "o1-2024-12-17",
+    "o1-preview",
+    "o1-preview-2024-09-12"
+   ],
+   "pat": "^o1(-2024-12-17|-preview.*)?$",
+   "in": 15,
+   "out": 60,
+   "cw": 0,
+   "cr": 7.5,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://developers.openai.com/api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "o1 shuts down Oct 23 2026; o1-preview already shut down Jul 28 2025 (same historical price)."
+  },
+  {
+   "vendor": "openai",
+   "label": "o1-mini",
+   "ids": [
+    "o1-mini",
+    "o1-mini-2024-09-12"
+   ],
+   "pat": "^o1-mini",
+   "in": 1.1,
+   "out": 4.4,
+   "cw": 0,
+   "cr": 0.55,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://developers.openai.com/api/docs/models/o1-mini",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Not on the main pricing table; price from the model page. Shut down Oct 27 2025 per deprecations page."
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "GPT-5 / 5.x (other)",
+   "ids": [],
+   "pat": "gpt-5",
+   "in": 2,
+   "out": 12,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "GPT-4o mini",
+   "ids": [],
+   "pat": "gpt-4o-mini",
+   "in": 0.15,
+   "out": 0.6,
+   "cw": 0,
+   "cr": 0.075,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "GPT-4o",
+   "ids": [],
+   "pat": "gpt-4o|chatgpt-4o",
+   "in": 2.5,
+   "out": 10,
+   "cw": 0,
+   "cr": 1.25,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "o3-pro",
+   "ids": [],
+   "pat": "o3-pro",
+   "in": 20,
+   "out": 80,
+   "cw": 0,
+   "cr": 5,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "o3-mini",
+   "ids": [],
+   "pat": "o3-mini",
+   "in": 1.1,
+   "out": 4.4,
+   "cw": 0,
+   "cr": 0.55,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "o1-pro",
+   "ids": [],
+   "pat": "o1-pro",
+   "in": 150,
+   "out": 600,
+   "cw": 0,
+   "cr": 75,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "OpenAI",
+   "label": "ChatGPT / Copilot (auto)",
+   "ids": [],
+   "pat": "^auto$|^gpt$|chatgpt|^copilot$",
+   "in": 2,
+   "out": 12,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Google",
+   "label": "Gemini 3.6/3.7 Flash",
+   "ids": [],
+   "pat": "gemini-3[.-]?[67]-flash",
+   "in": 0.75,
+   "out": 3.75,
+   "cw": 0,
+   "cr": 0.075,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Google",
+   "label": "Gemini 3.5 Flash-Lite",
+   "ids": [],
+   "pat": "gemini-3[.-]?5-flash-lite",
+   "in": 0.3,
+   "out": 2.5,
+   "cw": 0,
+   "cr": 0.03,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Google",
+   "label": "Gemini 3.5 Flash",
+   "ids": [],
+   "pat": "gemini-3[.-]?5-flash",
+   "in": 1.5,
+   "out": 9,
+   "cw": 0,
+   "cr": 0.15,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Google",
+   "label": "Gemini 3.x Pro",
+   "ids": [],
+   "pat": "gemini-3.*pro",
+   "in": 2,
+   "out": 12,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Google",
+   "label": "Gemini 3.x Flash-Lite",
+   "ids": [],
+   "pat": "gemini-3.*flash-lite",
+   "in": 0.25,
+   "out": 1.5,
+   "cw": 0,
+   "cr": 0.025,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Google",
+   "label": "Gemini 3 (other)",
+   "ids": [],
+   "pat": "gemini-3",
+   "in": 0.5,
+   "out": 3,
+   "cw": 0,
+   "cr": 0.05,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Google",
+   "label": "Gemini 2.5 Pro",
+   "ids": [],
+   "pat": "gemini-2[.-]?5-pro",
+   "in": 1.25,
+   "out": 10,
+   "cw": 0,
+   "cr": 0.125,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Google",
+   "label": "Gemini 2.5 Flash-Lite",
+   "ids": [],
+   "pat": "gemini-2[.-]?5-flash-lite",
+   "in": 0.1,
+   "out": 0.4,
+   "cw": 0,
+   "cr": 0.01,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Google",
+   "label": "Gemini 2.5 Flash",
+   "ids": [],
+   "pat": "gemini-2[.-]?5-flash",
+   "in": 0.3,
+   "out": 2.5,
+   "cw": 0,
+   "cr": 0.03,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "google",
+   "label": "Gemini 2.0 Flash",
+   "ids": [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+    "gemini-2.0-flash-exp"
+   ],
+   "pat": "^gemini-2\\.0-flash(?!-lite)",
+   "in": 0.1,
+   "out": 0.4,
+   "cw": 0,
+   "cr": 0.025,
+   "unit_note": "USD/1M tokens (last published paid-tier price)",
+   "source_url": "https://ai.google.dev/gemini-api/docs/deprecations",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "NOT on current pricing page. Shut down Jun 1 2026 per deprecations page. Price is last-known (0.10/0.40, cache 0.025) — unverifiable today."
+  },
+  {
+   "vendor": "google",
+   "label": "Gemini 2.0 Flash-Lite",
+   "ids": [
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash-lite-001"
+   ],
+   "pat": "^gemini-2\\.0-flash-lite",
+   "in": 0.075,
+   "out": 0.3,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens (last published); no context caching",
+   "source_url": "https://ai.google.dev/gemini-api/docs/deprecations",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Shut down Jun 1 2026. Last-known price, unverifiable today."
+  },
+  {
+   "vendor": "google",
+   "label": "Gemini 1.5 Pro",
+   "ids": [
+    "gemini-1.5-pro",
+    "gemini-1.5-pro-002",
+    "gemini-1.5-pro-001",
+    "gemini-1.5-pro-latest"
+   ],
+   "pat": "^gemini-1\\.5-pro",
+   "in": 1.25,
+   "out": 5,
+   "cw": 0,
+   "cr": 0.3125,
+   "unit_note": "USD/1M tokens, prompts <=128k; >128k: 2.50 / 10.00 / cache 0.625 (last published)",
+   "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Not on current pricing, models, or deprecations pages (retired ~Sep 2025). Last-known price, unverifiable today."
+  },
+  {
+   "vendor": "google",
+   "label": "Gemini 1.5 Flash",
+   "ids": [
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-002",
+    "gemini-1.5-flash-001",
+    "gemini-1.5-flash-latest"
+   ],
+   "pat": "^gemini-1\\.5-flash(?!-8b)",
+   "in": 0.075,
+   "out": 0.3,
+   "cw": 0,
+   "cr": 0.01875,
+   "unit_note": "USD/1M tokens, prompts <=128k; >128k: 0.15 / 0.60 / cache 0.0375 (last published)",
+   "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Retired; not on any current Google page. Last-known price."
+  },
+  {
+   "vendor": "google",
+   "label": "Gemini 1.5 Flash-8B",
+   "ids": [
+    "gemini-1.5-flash-8b",
+    "gemini-1.5-flash-8b-001",
+    "gemini-1.5-flash-8b-latest"
+   ],
+   "pat": "^gemini-1\\.5-flash-8b",
+   "in": 0.0375,
+   "out": 0.15,
+   "cw": 0,
+   "cr": 0.01,
+   "unit_note": "USD/1M tokens, prompts <=128k; >128k: 0.075 / 0.30 / cache 0.02 (last published)",
+   "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Retired; last-known price."
+  },
+  {
+   "vendor": "google",
+   "label": "Gemma 3 / 3n on Gemini API",
+   "ids": [
+    "gemma-3-27b-it",
+    "gemma-3-12b-it",
+    "gemma-3-4b-it",
+    "gemma-3-1b-it",
+    "gemma-3n-e4b-it",
+    "gemma-3n-e2b-it"
+   ],
+   "pat": "^gemma-3",
+   "in": 0,
+   "out": 0,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "free of charge on Gemini API (free tier only; paid tier 'not available')",
+   "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Gemma 3 ids no longer on the pricing/models pages; current page shows only Gemma 4 with paid price 'Not available' (same free-only model). $0 is consistent with the historical Gemma 3 listing. Hosted Gemma on other vendors (DeepInfra google/gemma-4-31B-it 0.20/0.40, SambaNova gemma-4-31B-it 0.38/1.15) is priced."
+  },
+  {
+   "vendor": "Google",
+   "label": "Gemini (other)",
+   "ids": [],
+   "pat": "gemini",
+   "in": 1.25,
+   "out": 10,
+   "cw": 0,
+   "cr": 0.125,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "groq",
+   "label": "gpt-oss-120b (Groq default; Together/Fireworks same price)",
+   "ids": [
+    "openai/gpt-oss-120b"
+   ],
+   "pat": "^openai/gpt-oss-120b",
+   "in": 0.15,
+   "out": 0.6,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://console.groq.com/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Same id 'openai/gpt-oss-120b' on Together (0.15/0.60, verified) and DeepInfra (0.037/0.17, verified) — bare-id collision; default to 0.15/0.60, override per platform if the row's platform is deepinfra. Cached input: Fireworks 0.015. DEFAULT row for the shared id openai/gpt-oss-120b; DeepInfra price is a platform override."
+  },
+  {
+   "vendor": "groq",
+   "label": "gpt-oss-20b (Groq default)",
+   "ids": [
+    "openai/gpt-oss-20b"
+   ],
+   "pat": "^openai/gpt-oss-20b",
+   "in": 0.075,
+   "out": 0.3,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://console.groq.com/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "DeepInfra same id: 0.03/0.14 (verified). DEFAULT row for the shared id openai/gpt-oss-20b; DeepInfra price is a platform override."
+  },
+  {
+   "vendor": "groq",
+   "label": "gpt-oss-safeguard-20b",
+   "ids": [
+    "openai/gpt-oss-safeguard-20b"
+   ],
+   "pat": "^openai/gpt-oss-safeguard-20b",
+   "in": 0.075,
+   "out": 0.3,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://console.groq.com/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Preview."
+  },
+  {
+   "vendor": "groq",
+   "label": "Qwen 3.8 27B",
+   "ids": [
+    "qwen/qwen3.8-27b"
+   ],
+   "pat": "^qwen/qwen3\\.8-27b",
+   "in": 0.8,
+   "out": 4,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://console.groq.com/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Preview."
+  },
+  {
+   "vendor": "groq",
+   "label": "Llama Prompt Guard 2",
+   "ids": [
+    "meta-llama/llama-prompt-guard-2-22m",
+    "meta-llama/llama-prompt-guard-2-86m"
+   ],
+   "pat": "^meta-llama/llama-prompt-guard-2",
+   "in": 0.03,
+   "out": 0.03,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens (22m); 86m is 0.04/0.04",
+   "source_url": "https://console.groq.com/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "groq",
+   "label": "Llama 3.3 70B Versatile (Groq) (last known)",
+   "ids": [
+    "llama-3.3-70b-versatile"
+   ],
+   "pat": "^llama-3\\.3-70b-versatile",
+   "in": 0.59,
+   "out": 0.79,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens (last published Groq price)",
+   "source_url": "https://console.groq.com/docs/deprecations",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Models page now shows 'ContactSales' (Enterprise); deprecations page: shutdown 08/16/26 for free/dev tiers. Bare id — other hosts differ (Cerebras 'llama-3.3-70b' 0.85/1.20, SambaNova 'Meta-Llama-3.3-70B-Instruct' 0.60/1.20, DeepInfra Turbo 0.10/0.32, Together Turbo 1.04/1.04)."
+  },
+  {
+   "vendor": "groq",
+   "label": "Llama 3.1 8B Instant (Groq) (last known)",
+   "ids": [
+    "llama-3.1-8b-instant"
+   ],
+   "pat": "^llama-3\\.1-8b-instant",
+   "in": 0.05,
+   "out": 0.08,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens (last published)",
+   "source_url": "https://console.groq.com/docs/deprecations",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Now 'ContactSales'; shutdown 08/16/26. Other hosts: Cerebras llama3.1-8b 0.10/0.10, DeepInfra Turbo 0.02/0.04."
+  },
+  {
+   "vendor": "groq",
+   "label": "Kimi K2 Instruct (Groq) (last known)",
+   "ids": [
+    "moonshotai/kimi-k2-instruct",
+    "moonshotai/kimi-k2-instruct-0905"
+   ],
+   "pat": "^moonshotai/kimi-k2-instruct",
+   "in": 1,
+   "out": 3,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens (last published)",
+   "source_url": "https://console.groq.com/docs/deprecations",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Shut down 10/10/25 and 04/15/26. Current Kimi on hosts: DeepInfra moonshotai/Kimi-K2.6 0.75/3.50 (cr 0.15); Kimi-K3 Together 3/15, Fireworks 3/15, DeepInfra 2.85/14.25. Together last-published price for moonshotai/Kimi-K2-Instruct was identical (1.00/3.00), so no Together override is needed."
+  },
+  {
+   "vendor": "groq",
+   "label": "DeepSeek R1 Distill Llama 70B (Groq) (last known)",
+   "ids": [
+    "deepseek-r1-distill-llama-70b"
+   ],
+   "pat": "^deepseek-r1-distill-llama-70b",
+   "in": 0.75,
+   "out": 0.99,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens (last published)",
+   "source_url": "https://console.groq.com/docs/deprecations",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Shut down 10/02/25."
+  },
+  {
+   "vendor": "groq",
+   "label": "Llama 4 Maverick (Groq)",
+   "ids": [
+    "meta-llama/llama-4-maverick-17b-128e-instruct"
+   ],
+   "pat": "^meta-llama/llama-4-maverick-17b-128e-instruct$",
+   "in": 0.2,
+   "out": 0.6,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens (last published)",
+   "source_url": "https://console.groq.com/docs/deprecations",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Shut down 03/09/26. Lowercase id is Groq's; Together/DeepInfra use mixed-case 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8' (dashboard lowercases, so patterns collide — see together row)."
+  },
+  {
+   "vendor": "groq",
+   "label": "Llama 4 Scout (Groq default)",
+   "ids": [
+    "meta-llama/llama-4-scout-17b-16e-instruct"
+   ],
+   "pat": "^meta-llama/llama-4-scout-17b-16e-instruct$",
+   "in": 0.11,
+   "out": 0.34,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens (last published)",
+   "source_url": "https://console.groq.com/docs/deprecations",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Shutdown 07/17/26. DeepInfra 'meta-llama/Llama-4-Scout-17B-16E-Instruct' 0.10/0.30 verified — lowercased ids are identical; prices close enough (0.10/0.30 is the verified one, prefer it). DEFAULT row for the shared id meta-llama/llama-4-scout-17b-16e-instruct (Groq live id); Together and DeepInfra prices are platform overrides."
+  },
+  {
+   "vendor": "together",
+   "label": "Llama 3.3 70B Instruct Turbo (Together default)",
+   "ids": [
+    "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+   ],
+   "pat": "^meta-llama/llama-3\\.3-70b-instruct-turbo",
+   "in": 1.04,
+   "out": 1.04,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens, serverless",
+   "source_url": "https://www.together.ai/models/llama-3-3-70b",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "ID COLLISION: DeepInfra uses the identical id at 0.10/0.32 (verified). Cannot disambiguate by id; needs platform-aware override (together vs deepinfra). Together pricing page confirms 1.04/1.04. DEFAULT row for the shared id; DeepInfra price is a platform override."
+  },
+  {
+   "vendor": "together",
+   "label": "Llama 3 8B Instruct Lite",
+   "ids": [
+    "meta-llama/Meta-Llama-3-8B-Instruct-Lite"
+   ],
+   "pat": "^meta-llama/meta-llama-3-8b-instruct-lite",
+   "in": 0.14,
+   "out": 0.14,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens, serverless",
+   "source_url": "https://www.together.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Price verified on pricing page; id string from Together docs convention (display name 'Llama 3 8B Instruct Lite')."
+  },
+  {
+   "vendor": "together",
+   "label": "Qwen2.5 7B Instruct Turbo",
+   "ids": [
+    "Qwen/Qwen2.5-7B-Instruct-Turbo"
+   ],
+   "pat": "^qwen/qwen2\\.5-7b-instruct-turbo",
+   "in": 0.3,
+   "out": 0.3,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens, serverless",
+   "source_url": "https://www.together.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Price verified; id from Together docs convention."
+  },
+  {
+   "vendor": "together",
+   "label": "Qwen3 235B A22B Instruct 2507 FP8 Throughput",
+   "ids": [
+    "Qwen/Qwen3-235B-A22B-Instruct-2507-tput"
+   ],
+   "pat": "^qwen/qwen3-235b-a22b-instruct-2507-tput",
+   "in": 0.2,
+   "out": 0.6,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens, serverless",
+   "source_url": "https://www.together.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Price verified; '-tput' id from Together docs convention. DeepInfra 'Qwen/Qwen3-235B-A22B-Instruct-2507' 0.09/0.55 (verified)."
+  },
+  {
+   "vendor": "together",
+   "label": "Kimi K3 (Together default)",
+   "ids": [
+    "moonshotai/Kimi-K3"
+   ],
+   "pat": "^moonshotai/kimi-k3",
+   "in": 3,
+   "out": 15,
+   "cw": 0,
+   "cr": 0.3,
+   "unit_note": "USD/1M tokens, serverless",
+   "source_url": "https://docs.together.ai/docs/serverless-models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Same id on DeepInfra at 2.85/14.25 (cr 0.285); Fireworks accounts/fireworks/models/kimi-k3 3/15 (cr 0.30). DEFAULT row for the shared id moonshotai/kimi-k3; DeepInfra price is a platform override."
+  },
+  {
+   "vendor": "together",
+   "label": "DeepSeek V4 Pro 0813 (Together default)",
+   "ids": [
+    "deepseek-ai/DeepSeek-V4-Pro-0813"
+   ],
+   "pat": "^deepseek-ai/deepseek-v4-pro",
+   "in": 1.32,
+   "out": 3.96,
+   "cw": 0,
+   "cr": 0.13,
+   "unit_note": "USD/1M tokens, serverless",
+   "source_url": "https://docs.together.ai/docs/serverless-models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "DeepInfra same id: 1.30/2.60 (cr 0.10). DeepInfra price (1.30/2.60, cr 0.10) is a platform override."
+  },
+  {
+   "vendor": "together",
+   "label": "DeepSeek V4.1 Flash (Together)",
+   "ids": [
+    "deepseek-ai/DeepSeek-V4.1-Flash"
+   ],
+   "pat": "^deepseek-ai/deepseek-v4\\.1-flash",
+   "in": 0.3,
+   "out": 1.2,
+   "cw": 0,
+   "cr": 0.006,
+   "unit_note": "USD/1M tokens, serverless",
+   "source_url": "https://docs.together.ai/docs/serverless-models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "DeepInfra same id: 0.14/0.42 (cr 0.004); Fireworks deepseek-v4p1-flash 0.30/0.006/1.20."
+  },
+  {
+   "vendor": "together",
+   "label": "GLM-5.3 / GLM-5.2 (Together)",
+   "ids": [
+    "zai-org/GLM-5.3",
+    "zai-org/GLM-5.2"
+   ],
+   "pat": "^zai-org/glm-5\\.[23]$",
+   "in": 1.4,
+   "out": 4.4,
+   "cw": 0,
+   "cr": 0.26,
+   "unit_note": "USD/1M tokens, serverless",
+   "source_url": "https://docs.together.ai/docs/serverless-models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "DeepInfra: GLM-5.3 0.563/2.50, GLM-5.2 0.563/1.80. Fireworks glm-5p3 1.40/0.26/4.40."
+  },
+  {
+   "vendor": "together",
+   "label": "GLM-5.3 Flash (Together)",
+   "ids": [
+    "zai-org/GLM-5.3-Flash"
+   ],
+   "pat": "^zai-org/glm-5\\.3-flash",
+   "in": 0.15,
+   "out": 0.5,
+   "cw": 0,
+   "cr": 0.03,
+   "unit_note": "USD/1M tokens, serverless",
+   "source_url": "https://docs.together.ai/docs/serverless-models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "DeepInfra 0.075/0.25; Fireworks glm-5p3-flash same 0.15/0.03/0.50."
+  },
+  {
+   "vendor": "together",
+   "label": "MiniMax M3 (Together)",
+   "ids": [
+    "MiniMaxAI/MiniMax-M3"
+   ],
+   "pat": "^minimaxai/minimax-m3",
+   "in": 0.3,
+   "out": 1.2,
+   "cw": 0,
+   "cr": 0.06,
+   "unit_note": "USD/1M tokens, serverless",
+   "source_url": "https://docs.together.ai/docs/serverless-models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Fireworks minimax-m3 same; SambaNova 'MiniMax-M3' 0.60/2.40 (cr 0.06)."
+  },
+  {
+   "vendor": "together",
+   "label": "Qwen3.8-2.4T-A95B (Together)",
+   "ids": [
+    "Qwen/Qwen3.8-2.4T-A95B"
+   ],
+   "pat": "^qwen/qwen3\\.8-2\\.4t-a95b$",
+   "in": 2,
+   "out": 6,
+   "cw": 0,
+   "cr": 0.5,
+   "unit_note": "USD per 1M tokens, serverless",
+   "source_url": "https://docs.together.ai/docs/serverless-models",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#67 (per-id prices from its unit_note). docs page cr 0.50 vs pricing page cr 0.25 - docs value kept."
+  },
+  {
+   "vendor": "together",
+   "label": "Qwen3.7-Max (Together)",
+   "ids": [
+    "Qwen/Qwen3.7-Max"
+   ],
+   "pat": "^qwen/qwen3\\.7-max$",
+   "in": 2.5,
+   "out": 7.5,
+   "cw": 0,
+   "cr": 0.5,
+   "unit_note": "USD per 1M tokens, serverless",
+   "source_url": "https://docs.together.ai/docs/serverless-models",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#67 (per-id prices from its unit_note). docs page 2.50/7.50 cr 0.50 vs pricing page 1.50/4.50 cr 0.30 - docs value kept; re-verify if the id appears in usage."
+  },
+  {
+   "vendor": "together",
+   "label": "Qwen3.7-Plus (Together)",
+   "ids": [
+    "Qwen/Qwen3.7-Plus"
+   ],
+   "pat": "^qwen/qwen3\\.7-plus$",
+   "in": 0.32,
+   "out": 1.28,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, serverless; no cached price published",
+   "source_url": "https://docs.together.ai/docs/serverless-models",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "split out of C#67 (per-id prices from its unit_note)."
+  },
+  {
+   "vendor": "together",
+   "label": "Qwen3.6-Plus (Together)",
+   "ids": [
+    "Qwen/Qwen3.6-Plus"
+   ],
+   "pat": "^qwen/qwen3\\.6-plus$",
+   "in": 0.5,
+   "out": 3,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, serverless; no cached price published",
+   "source_url": "https://docs.together.ai/docs/serverless-models",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "split out of C#67 (per-id prices from its unit_note)."
+  },
+  {
+   "vendor": "together",
+   "label": "Qwen3.8-Flash (Together)",
+   "ids": [
+    "Qwen/Qwen3.8-Flash"
+   ],
+   "pat": "^qwen/qwen3\\.8-flash$",
+   "in": 0.15,
+   "out": 0.47,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, serverless; no cached price published",
+   "source_url": "https://docs.together.ai/docs/serverless-models",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "split out of C#67 (per-id prices from its unit_note)."
+  },
+  {
+   "vendor": "together",
+   "label": "Qwen3.5-9B (Together)",
+   "ids": [
+    "Qwen/Qwen3.5-9B"
+   ],
+   "pat": "^qwen/qwen3\\.5-9b$",
+   "in": 0.17,
+   "out": 0.25,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, serverless; no cached price published",
+   "source_url": "https://docs.together.ai/docs/serverless-models",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "split out of C#67 (per-id prices from its unit_note)."
+  },
+  {
+   "vendor": "together",
+   "label": "Qwen3.5-397B-A17B (Together)",
+   "ids": [
+    "Qwen/Qwen3.5-397B-A17B"
+   ],
+   "pat": "^qwen/qwen3\\.5-397b-a17b$",
+   "in": 0.6,
+   "out": 3.6,
+   "cw": 0,
+   "cr": 0.35,
+   "unit_note": "USD per 1M tokens, serverless",
+   "source_url": "https://docs.together.ai/docs/serverless-models",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "split out of C#67 (per-id prices from its unit_note). DeepInfra same id 0.45/3.00 (cr 0.22) is a platform override."
+  },
+  {
+   "vendor": "together",
+   "label": "Llama 4 Maverick (Together, no longer serverless)",
+   "ids": [
+    "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"
+   ],
+   "pat": "^meta-llama/llama-4-maverick-17b-128e-instruct-fp8",
+   "in": 0.27,
+   "out": 0.85,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens (last published serverless price)",
+   "source_url": "https://www.together.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Appears only in fine-tuning tables today; no serverless price on page. DeepInfra model page for the same id now 404. Last-known price."
+  },
+  {
+   "vendor": "together",
+   "label": "Llama 3.1 70B Instruct Turbo (Together) (last known)",
+   "ids": [
+    "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+   ],
+   "pat": "^meta-llama/meta-llama-3\\.1-70b-instruct-turbo",
+   "in": 0.88,
+   "out": 0.88,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; last published Together serverless price, not on today's table",
+   "source_url": "https://www.together.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#70 (Llama 3.1 8B / 405B Turbo (Together, legacy))."
+  },
+  {
+   "vendor": "together",
+   "label": "Llama 3.1 405B Instruct Turbo (Together) (last known)",
+   "ids": [
+    "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo"
+   ],
+   "pat": "^meta-llama/meta-llama-3\\.1-405b-instruct-turbo",
+   "in": 3.5,
+   "out": 3.5,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; last published Together serverless price, not on today's table",
+   "source_url": "https://www.together.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#70 (Llama 3.1 8B / 405B Turbo (Together, legacy))."
+  },
+  {
+   "vendor": "fireworks",
+   "label": "gpt-oss-120b (Fireworks)",
+   "ids": [
+    "accounts/fireworks/models/gpt-oss-120b"
+   ],
+   "pat": "^accounts/fireworks/models/gpt-oss-120b",
+   "in": 0.15,
+   "out": 0.6,
+   "cw": 0,
+   "cr": 0.015,
+   "unit_note": "USD/1M tokens, Standard serverless; Priority 0.18/0.018/0.72",
+   "source_url": "https://docs.fireworks.ai/serverless/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Vendor-prefixed id, no collision."
+  },
+  {
+   "vendor": "fireworks",
+   "label": "Kimi K3 (Fireworks)",
+   "ids": [
+    "accounts/fireworks/models/kimi-k3"
+   ],
+   "pat": "^accounts/fireworks/models/kimi-k3",
+   "in": 3,
+   "out": 15,
+   "cw": 0,
+   "cr": 0.3,
+   "unit_note": "USD/1M tokens Standard; Fast and US variants 4.50/0.45/22.50 (same id)",
+   "source_url": "https://docs.fireworks.ai/serverless/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "fireworks",
+   "label": "DeepSeek V4.1 Flash (Fireworks)",
+   "ids": [
+    "accounts/fireworks/models/deepseek-v4p1-flash"
+   ],
+   "pat": "^accounts/fireworks/models/deepseek-v4p1-flash",
+   "in": 0.3,
+   "out": 1.2,
+   "cw": 0,
+   "cr": 0.006,
+   "unit_note": "USD/1M tokens Standard; US variant 0.45/0.009/1.80",
+   "source_url": "https://docs.fireworks.ai/serverless/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "fireworks",
+   "label": "GLM 5.3 (Fireworks)",
+   "ids": [
+    "accounts/fireworks/models/glm-5p3"
+   ],
+   "pat": "^accounts/fireworks/models/glm-5p3$",
+   "in": 1.4,
+   "out": 4.4,
+   "cw": 0,
+   "cr": 0.26,
+   "unit_note": "USD/1M tokens Standard; Fast/US 2.10/0.39/6.60",
+   "source_url": "https://docs.fireworks.ai/serverless/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "fireworks",
+   "label": "GLM 5.3 Flash (Fireworks)",
+   "ids": [
+    "accounts/fireworks/models/glm-5p3-flash"
+   ],
+   "pat": "^accounts/fireworks/models/glm-5p3-flash",
+   "in": 0.15,
+   "out": 0.5,
+   "cw": 0,
+   "cr": 0.03,
+   "unit_note": "USD/1M tokens Standard",
+   "source_url": "https://docs.fireworks.ai/serverless/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "fireworks",
+   "label": "Qwen 3.8 Max (Fireworks)",
+   "ids": [
+    "accounts/fireworks/models/qwen3p8-max"
+   ],
+   "pat": "^accounts/fireworks/models/qwen3p8-max",
+   "in": 2,
+   "out": 6,
+   "cw": 0,
+   "cr": 0.25,
+   "unit_note": "USD/1M tokens Standard",
+   "source_url": "https://docs.fireworks.ai/serverless/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "fireworks",
+   "label": "MiniMax M3 (Fireworks)",
+   "ids": [
+    "accounts/fireworks/models/minimax-m3"
+   ],
+   "pat": "^accounts/fireworks/models/minimax-m3",
+   "in": 0.3,
+   "out": 1.2,
+   "cw": 0,
+   "cr": 0.06,
+   "unit_note": "USD/1M tokens Standard",
+   "source_url": "https://docs.fireworks.ai/serverless/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "fireworks",
+   "label": "Nemotron 3.5 Lightning 30B A3B (Fireworks)",
+   "ids": [
+    "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"
+   ],
+   "pat": "^accounts/fireworks/models/nemotron-lightning-3p5",
+   "in": 0.05,
+   "out": 0.2,
+   "cw": 0,
+   "cr": 0.01,
+   "unit_note": "USD/1M tokens Standard",
+   "source_url": "https://docs.fireworks.ai/serverless/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "fireworks",
+   "label": "Fireworks size-tier fallback (dense >16B)",
+   "ids": [
+    "accounts/fireworks/models/llama-v3p3-70b-instruct",
+    "accounts/fireworks/models/llama-v3p1-70b-instruct",
+    "accounts/fireworks/models/qwen3-32b"
+   ],
+   "pat": "^accounts/fireworks/models/(llama-v3p[13]-70b|qwen3-32b|.*-70b-instruct)",
+   "in": 0.9,
+   "out": 0.9,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens; size tiers: <4B 0.10, 4-16B 0.20, >16B 0.90, MoE <=56B 0.50, MoE 56.1-176B 1.20 (in = out, no cache)",
+   "source_url": "https://docs.fireworks.ai/serverless/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Tier table verified. llama-v3p3-70b-instruct model page says 'Serverless: Not supported' (on-demand GPU billing only), so a usage row for it would be deployment-billed, not per-token."
+  },
+  {
+   "vendor": "fireworks",
+   "label": "Llama 3.1 8B (Fireworks, size tier 4-16B)",
+   "ids": [
+    "accounts/fireworks/models/llama-v3p1-8b-instruct"
+   ],
+   "pat": "^accounts/fireworks/models/llama-v3p1-8b",
+   "in": 0.2,
+   "out": 0.2,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; Fireworks published size-tier price (4-16B dense); serverless availability unverified",
+   "source_url": "https://docs.fireworks.ai/serverless/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "split out of C#81 (Fireworks size-tier fallback (small dense / MoE))."
+  },
+  {
+   "vendor": "fireworks",
+   "label": "Llama 4 Scout (Fireworks) (last known)",
+   "ids": [
+    "accounts/fireworks/models/llama4-scout-instruct-basic"
+   ],
+   "pat": "^accounts/fireworks/models/llama4-scout",
+   "in": 0.15,
+   "out": 0.6,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; last published named price (size-tier table would say 1.20/1.20)",
+   "source_url": "https://docs.fireworks.ai/serverless/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#81 (Fireworks size-tier fallback (small dense / MoE))."
+  },
+  {
+   "vendor": "fireworks",
+   "label": "Llama 4 Maverick (Fireworks) (last known)",
+   "ids": [
+    "accounts/fireworks/models/llama4-maverick-instruct-basic"
+   ],
+   "pat": "^accounts/fireworks/models/llama4-maverick",
+   "in": 0.22,
+   "out": 0.88,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; last published named price",
+   "source_url": "https://docs.fireworks.ai/serverless/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#81 (Fireworks size-tier fallback (small dense / MoE))."
+  },
+  {
+   "vendor": "fireworks",
+   "label": "gpt-oss-20b (Fireworks) (last known)",
+   "ids": [
+    "accounts/fireworks/models/gpt-oss-20b"
+   ],
+   "pat": "^accounts/fireworks/models/gpt-oss-20b",
+   "in": 0.07,
+   "out": 0.3,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; last published named price",
+   "source_url": "https://docs.fireworks.ai/serverless/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#81 (Fireworks size-tier fallback (small dense / MoE))."
+  },
+  {
+   "vendor": "deepinfra",
+   "label": "Llama 3.1 8B Instruct Turbo (DeepInfra default)",
+   "ids": [
+    "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+   ],
+   "pat": "^meta-llama/meta-llama-3\\.1-8b-instruct-turbo",
+   "in": 0.02,
+   "out": 0.04,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens base; flex 0.016/0.032",
+   "source_url": "https://deepinfra.com/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "DEFAULT row for the shared id (verified live); Together last-known price is a platform override."
+  },
+  {
+   "vendor": "deepinfra",
+   "label": "DeepSeek-R1 / R1-0528 (DeepInfra default)",
+   "ids": [
+    "deepseek-ai/DeepSeek-R1-0528",
+    "deepseek-ai/DeepSeek-R1"
+   ],
+   "pat": "^deepseek-ai/deepseek-r1(-0528)?$",
+   "in": 0.5,
+   "out": 2.15,
+   "cw": 0,
+   "cr": 0.35,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://deepinfra.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Bare 'deepseek-ai/DeepSeek-R1' not listed; 0528 is the live one. DEFAULT row for deepseek-ai/deepseek-r1; Together last-known price is a platform override."
+  },
+  {
+   "vendor": "deepinfra",
+   "label": "DeepSeek-V3 (DeepInfra default)",
+   "ids": [
+    "deepseek-ai/DeepSeek-V3"
+   ],
+   "pat": "^deepseek-ai/deepseek-v3$",
+   "in": 0.32,
+   "out": 0.89,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://deepinfra.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "DEFAULT row for deepseek-ai/deepseek-v3; Together last-known price is a platform override."
+  },
+  {
+   "vendor": "deepinfra",
+   "label": "DeepSeek-V3.1 (DeepInfra)",
+   "ids": [
+    "deepseek-ai/DeepSeek-V3.1"
+   ],
+   "pat": "^deepseek-ai/deepseek-v3\\.1",
+   "in": 0.25,
+   "out": 0.95,
+   "cw": 0,
+   "cr": 0.13,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://deepinfra.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "SambaNova 'DeepSeek-V3.1' (bare) 3.00/4.50."
+  },
+  {
+   "vendor": "deepinfra",
+   "label": "DeepSeek-V3.2 (DeepInfra)",
+   "ids": [
+    "deepseek-ai/DeepSeek-V3.2"
+   ],
+   "pat": "^deepseek-ai/deepseek-v3\\.2",
+   "in": 0.26,
+   "out": 0.38,
+   "cw": 0,
+   "cr": 0.13,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://deepinfra.com/models/text-generation",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "SambaNova 'DeepSeek-V3.2' (bare) 3.00/4.50."
+  },
+  {
+   "vendor": "deepinfra",
+   "label": "Qwen3-32B (DeepInfra default)",
+   "ids": [
+    "Qwen/Qwen3-32B"
+   ],
+   "pat": "^qwen/qwen3-32b$",
+   "in": 0.08,
+   "out": 0.28,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens; 40k context",
+   "source_url": "https://deepinfra.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Lowercased, identical to Groq's 'qwen/qwen3-32b' (0.29/0.59, deprecated on Groq) — collision; prefer this verified price unless platform=groq. DEFAULT row for qwen/qwen3-32b (verified live); Groq last-known price is a platform override."
+  },
+  {
+   "vendor": "deepinfra",
+   "label": "Qwen3-235B-A22B-Instruct-2507 (DeepInfra)",
+   "ids": [
+    "Qwen/Qwen3-235B-A22B-Instruct-2507"
+   ],
+   "pat": "^qwen/qwen3-235b-a22b-instruct-2507$",
+   "in": 0.09,
+   "out": 0.55,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://deepinfra.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "deepinfra",
+   "label": "Kimi-K2.6 (DeepInfra)",
+   "ids": [
+    "moonshotai/Kimi-K2.6"
+   ],
+   "pat": "^moonshotai/kimi-k2\\.6",
+   "in": 0.75,
+   "out": 3.5,
+   "cw": 0,
+   "cr": 0.15,
+   "unit_note": "USD/1M tokens; 256k context",
+   "source_url": "https://deepinfra.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "deepinfra",
+   "label": "Gemma 4 (DeepInfra)",
+   "ids": [
+    "google/gemma-4-31B-it",
+    "google/gemma-4-26B-A4B-it"
+   ],
+   "pat": "^google/gemma-4-(31b|26b-a4b)-it",
+   "in": 0.2,
+   "out": 0.4,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens (31B); 26B-A4B 0.07/0.34",
+   "source_url": "https://deepinfra.com/models/text-generation",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "sambanova",
+   "label": "Meta-Llama-3.3-70B-Instruct (SambaNova)",
+   "ids": [
+    "Meta-Llama-3.3-70B-Instruct"
+   ],
+   "pat": "^meta-llama-3\\.3-70b-instruct$",
+   "in": 0.6,
+   "out": 1.2,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://cloud.sambanova.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "SambaNova ids have no vendor prefix but the 'Meta-Llama-3.3-70B-Instruct' spelling is unique to SambaNova (no -Turbo / -versatile suffix)."
+  },
+  {
+   "vendor": "sambanova",
+   "label": "gpt-oss-120b (SambaNova default; bare id)",
+   "ids": [
+    "gpt-oss-120b"
+   ],
+   "pat": "^gpt-oss-120b$",
+   "in": 0.22,
+   "out": 0.59,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://cloud.sambanova.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "BARE-ID COLLISION with Cerebras 'gpt-oss-120b' (0.25/0.69 blog; 0.35/0.75 trackers). This SambaNova price is the only one verified on a vendor pricing page today. DEFAULT row for the bare id gpt-oss-120b (only price verified on a vendor page today); Cerebras is a platform override."
+  },
+  {
+   "vendor": "sambanova",
+   "label": "DeepSeek-V3.1 / V3.2 (SambaNova)",
+   "ids": [
+    "DeepSeek-V3.1",
+    "DeepSeek-V3.2"
+   ],
+   "pat": "^deepseek-v3\\.[12]$",
+   "in": 3,
+   "out": 4.5,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://cloud.sambanova.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Bare ids (no 'deepseek-ai/' prefix) are SambaNova-specific."
+  },
+  {
+   "vendor": "sambanova",
+   "label": "gemma-4-31B-it (SambaNova)",
+   "ids": [
+    "gemma-4-31B-it"
+   ],
+   "pat": "^gemma-4-31b-it$",
+   "in": 0.38,
+   "out": 1.15,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://cloud.sambanova.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Preview."
+  },
+  {
+   "vendor": "sambanova",
+   "label": "Meta-Llama-3.1-8B-Instruct (SambaNova) (last known)",
+   "ids": [
+    "Meta-Llama-3.1-8B-Instruct"
+   ],
+   "pat": "^meta-llama-3\\.1-8b-instruct$",
+   "in": 0.1,
+   "out": 0.2,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; last published SambaNova price",
+   "source_url": "https://cloud.sambanova.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#104 (Legacy SambaNova ids)."
+  },
+  {
+   "vendor": "sambanova",
+   "label": "Meta-Llama-3.1-405B-Instruct (SambaNova) (last known)",
+   "ids": [
+    "Meta-Llama-3.1-405B-Instruct"
+   ],
+   "pat": "^meta-llama-3\\.1-405b-instruct$",
+   "in": 5,
+   "out": 10,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; last published SambaNova price",
+   "source_url": "https://cloud.sambanova.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#104 (Legacy SambaNova ids)."
+  },
+  {
+   "vendor": "sambanova",
+   "label": "Llama-4-Maverick-17B-128E-Instruct (SambaNova) (last known)",
+   "ids": [
+    "Llama-4-Maverick-17B-128E-Instruct",
+    "Llama-4-Maverick-17B-128E-Instruct-FP8"
+   ],
+   "pat": "^llama-4-maverick-17b-128e-instruct(-fp8)?$",
+   "in": 0.63,
+   "out": 1.8,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; last published SambaNova price",
+   "source_url": "https://cloud.sambanova.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#104. Same bare id was also a Cerebras id (C#84) with no last-known price, so this row is the default for it; the -FP8 spelling (Azure / old Meta Llama API id) is accepted so it does not fall to the Unknown row."
+  },
+  {
+   "vendor": "cerebras",
+   "label": "llama3.1-8b (Cerebras) (last known)",
+   "ids": [
+    "llama3.1-8b"
+   ],
+   "pat": "^llama3\\.1-8b$",
+   "in": 0.1,
+   "out": 0.1,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; last published Cerebras price (model removed from catalog)",
+   "source_url": "https://inference-docs.cerebras.ai/models/overview",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#84 (Legacy Cerebras ids)."
+  },
+  {
+   "vendor": "cerebras",
+   "label": "llama-3.3-70b (Cerebras) (last known)",
+   "ids": [
+    "llama-3.3-70b"
+   ],
+   "pat": "^llama-3\\.3-70b$",
+   "in": 0.85,
+   "out": 1.2,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; last published Cerebras price (model removed from catalog)",
+   "source_url": "https://inference-docs.cerebras.ai/models/overview",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#84 (Legacy Cerebras ids)."
+  },
+  {
+   "vendor": "cerebras",
+   "label": "qwen-3-32b (Cerebras) (last known)",
+   "ids": [
+    "qwen-3-32b"
+   ],
+   "pat": "^qwen-3-32b$",
+   "in": 0.4,
+   "out": 0.8,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; last published Cerebras price (model removed from catalog)",
+   "source_url": "https://inference-docs.cerebras.ai/models/overview",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#84 (Legacy Cerebras ids)."
+  },
+  {
+   "vendor": "cerebras",
+   "label": "qwen-3-235b-a22b-instruct-2507 (Cerebras) (last known)",
+   "ids": [
+    "qwen-3-235b-a22b-instruct-2507"
+   ],
+   "pat": "^qwen-3-235b-a22b",
+   "in": 0.6,
+   "out": 1.2,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; last published Cerebras price (model removed from catalog)",
+   "source_url": "https://inference-docs.cerebras.ai/models/overview",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#84 (Legacy Cerebras ids)."
+  },
+  {
+   "vendor": "cerebras",
+   "label": "llama-4-scout-17b-16e-instruct (Cerebras) (last known)",
+   "ids": [
+    "llama-4-scout-17b-16e-instruct"
+   ],
+   "pat": "^llama-4-scout-17b-16e-instruct$",
+   "in": 0.65,
+   "out": 0.85,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; last published Cerebras price (model removed from catalog)",
+   "source_url": "https://inference-docs.cerebras.ai/models/overview",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#84 (Legacy Cerebras ids)."
+  },
+  {
+   "vendor": "xai",
+   "label": "Grok 4.7",
+   "ids": [
+    "grok-4.7",
+    "grok-4.7-latest"
+   ],
+   "pat": "^grok-4\\.7",
+   "in": 2,
+   "out": 6,
+   "cw": 0,
+   "cr": 0.5,
+   "unit_note": "USD/1M tokens, <200k prompt; >=200k: 4.00 / 12.00 / cache 1.00 (whole request billed at higher rate)",
+   "source_url": "https://docs.x.ai/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "500k context."
+  },
+  {
+   "vendor": "xai",
+   "label": "Grok 4.6",
+   "ids": [
+    "grok-4.6"
+   ],
+   "pat": "^grok-4\\.6",
+   "in": 2,
+   "out": 6,
+   "cw": 0,
+   "cr": 0.5,
+   "unit_note": "USD/1M tokens, <200k prompt; >=200k: 4.00 / 12.00 / cache 1.00",
+   "source_url": "https://docs.x.ai/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "xai",
+   "label": "Grok 4.5",
+   "ids": [
+    "grok-4.5"
+   ],
+   "pat": "^grok-4\\.5",
+   "in": 2,
+   "out": 6,
+   "cw": 0,
+   "cr": 0.3,
+   "unit_note": "USD/1M tokens, <200k prompt; >=200k: 4.00 / 12.00 / cache 0.60",
+   "source_url": "https://docs.x.ai/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "xai",
+   "label": "Grok 4.3",
+   "ids": [
+    "grok-4.3"
+   ],
+   "pat": "^grok-4\\.3",
+   "in": 1.25,
+   "out": 2.5,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "USD/1M tokens, <200k prompt; >=200k: 2.50 / 5.00 / cache 0.40",
+   "source_url": "https://docs.x.ai/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "1M context. Retired grok-4 / grok-4-fast / grok-4-1-fast / grok-3 slugs now route here and are billed at these rates."
+  },
+  {
+   "vendor": "xai",
+   "label": "Grok 4.20 (reasoning / non-reasoning / multi-agent)",
+   "ids": [
+    "grok-4.20-0309-reasoning",
+    "grok-4.20-0309-non-reasoning",
+    "grok-4.20-multi-agent-0309"
+   ],
+   "pat": "^grok-4\\.20",
+   "in": 1.25,
+   "out": 2.5,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "USD/1M tokens, <200k prompt; >=200k: 2.50 / 5.00 / cache 0.40",
+   "source_url": "https://docs.x.ai/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "xai",
+   "label": "Grok Build 0.1 (= grok-code-fast-1)",
+   "ids": [
+    "grok-build-0.1",
+    "grok-code-fast-1",
+    "grok-code-fast",
+    "grok-code-fast-1-0825"
+   ],
+   "pat": "^grok-(build|code-fast)",
+   "in": 1,
+   "out": 2,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "USD/1M tokens, <200k prompt; >=200k: 2.00 / 4.00 / cache 0.40",
+   "source_url": "https://docs.x.ai/docs/models/grok-code-fast-1",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "grok-code-fast-1 is now an alias of grok-build-0.1 and bills at these rates (original grok-code-fast-1 price was 0.20/1.50, cache 0.02 — historical only)."
+  },
+  {
+   "vendor": "xai",
+   "label": "Grok 4 (retired, routes to grok-4.3)",
+   "ids": [
+    "grok-4",
+    "grok-4-0709",
+    "grok-4-latest"
+   ],
+   "pat": "^grok-4(-0709|-latest)?$",
+   "in": 1.25,
+   "out": 2.5,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "USD/1M tokens — current billing = grok-4.3 rates (<200k)",
+   "source_url": "https://docs.x.ai/developers/migration/may-15-retirement",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Retired May 15 2026; requests route to grok-4.3 and are billed at grok-4.3 rates 'rather than the rates of the original model'. Historical grok-4 price (for usage before May 15 2026): 3.00 / 15.00 / cache 0.75 (>128k prompt 6/30)."
+  },
+  {
+   "vendor": "xai",
+   "label": "Grok 4 Fast reasoning/non-reasoning (retired, routes to grok-4.3)",
+   "ids": [
+    "grok-4-fast-reasoning",
+    "grok-4-fast-non-reasoning",
+    "grok-4-fast",
+    "grok-4-fast-reasoning-latest",
+    "grok-4-fast-non-reasoning-latest"
+   ],
+   "pat": "^grok-4-fast",
+   "in": 1.25,
+   "out": 2.5,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "USD/1M tokens — current billing = grok-4.3 rates",
+   "source_url": "https://docs.x.ai/developers/migration/may-15-retirement",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Retired May 15 2026. Historical price (before retirement): 0.20 / 0.50 / cache 0.05 (<128k prompt; >128k 0.40/1.00)."
+  },
+  {
+   "vendor": "xai",
+   "label": "Grok 4.1 Fast reasoning/non-reasoning (retired, routes to grok-4.3)",
+   "ids": [
+    "grok-4-1-fast-reasoning",
+    "grok-4-1-fast-non-reasoning",
+    "grok-4-1-fast"
+   ],
+   "pat": "^grok-4-1-fast",
+   "in": 1.25,
+   "out": 2.5,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "USD/1M tokens — current billing = grok-4.3 rates",
+   "source_url": "https://docs.x.ai/developers/migration/may-15-retirement",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Retired May 15 2026. Historical price: 0.20 / 0.50 / cache 0.05."
+  },
+  {
+   "vendor": "xai",
+   "label": "Grok 3 (retired, routes to grok-4.3)",
+   "ids": [
+    "grok-3",
+    "grok-3-latest",
+    "grok-3-beta",
+    "grok-3-fast",
+    "grok-3-fast-latest",
+    "grok-3-fast-beta"
+   ],
+   "pat": "^grok-3(-latest|-beta|-fast(-latest|-beta)?)?$",
+   "in": 1.25,
+   "out": 2.5,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "USD/1M tokens — current billing = grok-4.3 rates",
+   "source_url": "https://docs.x.ai/developers/migration/may-15-retirement",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Retired May 15 2026. Historical: grok-3 3.00 / 15.00 / cache 0.75; grok-3-fast 5.00 / 25.00 / cache 1.25."
+  },
+  {
+   "vendor": "xai",
+   "label": "Grok 3 Mini",
+   "ids": [
+    "grok-3-mini",
+    "grok-3-mini-latest",
+    "grok-3-mini-beta",
+    "grok-3-mini-fast",
+    "grok-3-mini-fast-latest",
+    "grok-3-mini-fast-beta"
+   ],
+   "pat": "^grok-3-mini",
+   "in": 0.3,
+   "out": 0.5,
+   "cw": 0,
+   "cr": 0.075,
+   "unit_note": "USD/1M tokens (last published); grok-3-mini-fast was 0.60 / 4.00 / cache 0.15",
+   "source_url": "https://docs.x.ai/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Not on current models page and not in the May 15 2026 retirement list; status unknown (model page 404). Last-known price."
+  },
+  {
+   "vendor": "xai",
+   "label": "Grok 2",
+   "ids": [
+    "grok-2-1212",
+    "grok-2-latest",
+    "grok-2",
+    "grok-2-vision-1212",
+    "grok-2-vision-latest",
+    "grok-2-vision"
+   ],
+   "pat": "^grok-2",
+   "in": 2,
+   "out": 10,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens (last published, both text and vision variants)",
+   "source_url": "https://docs.x.ai/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Not on any current xAI page; retired earlier. Last-known price."
+  },
+  {
+   "vendor": "xAI",
+   "label": "Grok 4 (xAI list)",
+   "ids": [],
+   "pat": "^grok-4|^grok$",
+   "in": 3,
+   "out": 15,
+   "cw": 0,
+   "cr": 0.75,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8; now only reached by bare \"grok\" and unknown grok-4-* ids (all known 4.x ids have specific rows above). NOTE: 3/15 is the pre-retirement Grok 4 price - xAI now bills grok-4 at grok-4.3 rates."
+  },
+  {
+   "vendor": "DeepSeek",
+   "label": "DeepSeek Reasoner",
+   "ids": [],
+   "pat": "deepseek-reasoner|deepseek[.-]r1",
+   "in": 0.55,
+   "out": 2.19,
+   "cw": 0,
+   "cr": 0.14,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "DeepSeek",
+   "label": "DeepSeek chat (V3 list)",
+   "ids": [],
+   "pat": "^deepseek(?!-ai/)",
+   "in": 0.27,
+   "out": 1.1,
+   "cw": 0,
+   "cr": 0.07,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "v8 pattern \"deepseek\" anchored to ^deepseek(?!-ai/) per verdict so deepseek-ai/* host ids (Together/DeepInfra, placed above) and accounts/fireworks/models/deepseek-* are not swallowed."
+  },
+  {
+   "vendor": "perplexity",
+   "label": "Sonar",
+   "ids": [
+    "sonar"
+   ],
+   "pat": "^sonar$",
+   "in": 1,
+   "out": 1,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens; PLUS request fee per 1,000 requests by search_context_size: low $5 / medium $8 / high $12",
+   "source_url": "https://docs.perplexity.ai/getting-started/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Request fee is per call, not per token — model separately. Agent API catalog lists 'perplexity/sonar' at 0.25 / 2.50 / cache 0.0625 (different product)."
+  },
+  {
+   "vendor": "perplexity",
+   "label": "Sonar Pro",
+   "ids": [
+    "sonar-pro"
+   ],
+   "pat": "^sonar-pro$",
+   "in": 3,
+   "out": 15,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens; request fee per 1,000 requests: low $6 / medium $10 / high $14",
+   "source_url": "https://docs.perplexity.ai/getting-started/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "perplexity",
+   "label": "Sonar Reasoning Pro",
+   "ids": [
+    "sonar-reasoning-pro"
+   ],
+   "pat": "^sonar-reasoning-pro",
+   "in": 2,
+   "out": 8,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens; request fee per 1,000 requests: low $6 / medium $10 / high $14",
+   "source_url": "https://docs.perplexity.ai/getting-started/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Reasoning tokens billed as output."
+  },
+  {
+   "vendor": "perplexity",
+   "label": "Sonar Reasoning (retired)",
+   "ids": [
+    "sonar-reasoning"
+   ],
+   "pat": "^sonar-reasoning$",
+   "in": 1,
+   "out": 5,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens (last published); request fee was low $5 / medium $8 / high $12 per 1,000",
+   "source_url": "https://docs.perplexity.ai/getting-started/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "No longer on the pricing or models page. Last-known price."
+  },
+  {
+   "vendor": "perplexity",
+   "label": "Sonar Deep Research",
+   "ids": [
+    "sonar-deep-research"
+   ],
+   "pat": "^sonar-deep-research",
+   "in": 2,
+   "out": 8,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens; PLUS citation tokens $2/1M, reasoning tokens $3/1M, search queries $5 per 1,000 searches; no per-request fee listed",
+   "source_url": "https://docs.perplexity.ai/getting-started/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Citation/reasoning/search fees apply to Deep Research only; usage object reports them separately."
+  },
+  {
+   "vendor": "Perplexity",
+   "label": "Perplexity Sonar",
+   "ids": [],
+   "pat": "^sonar|^perplexity$",
+   "in": 1,
+   "out": 1,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Meta",
+   "label": "Meta AI (consumer, no API price)",
+   "ids": [],
+   "pat": "^meta-ai$",
+   "in": 0,
+   "out": 0,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  },
+  {
+   "vendor": "Mistral AI",
+   "label": "Mistral Large 4 (public preview, sale price)",
+   "ids": [
+    "mistral-large-4",
+    "mistral-large-4-0"
+   ],
+   "pat": "^mistral-large-4(-0)?$",
+   "in": 0.68,
+   "out": 2.09,
+   "cw": 0,
+   "cr": 0.07,
+   "unit_note": "cached input = 10% of input; sale price in effect (original $1.36 in / $0.14 cached / $4.18 out); batch = 50% off",
+   "source_url": "https://docs.mistral.ai/inference/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Released 2026-10-06, 1M context. ids read from https://docs.mistral.ai/models/mistral-large-4-0 (no -latest alias listed; mistral-large-latest still points at Large 3)."
+  },
+  {
+   "vendor": "Mistral AI",
+   "label": "Mistral Large 3",
+   "ids": [
+    "mistral-large-2512",
+    "mistral-large-latest"
+   ],
+   "pat": "^mistral-large-(2512|latest)$",
+   "in": 0.5,
+   "out": 1.5,
+   "cw": 0,
+   "cr": 0.05,
+   "unit_note": "cached input = 10% of input; batch = 50% off",
+   "source_url": "https://docs.mistral.ai/inference/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "ids from https://docs.mistral.ai/models/mistral-large-3-25-12. mistral-large-2411 / pixtral-large-2411 retired 2026-05-31."
+  },
+  {
+   "vendor": "Mistral AI",
+   "label": "Mistral Medium 3.5",
+   "ids": [
+    "mistral-medium-3-5",
+    "mistral-medium-3",
+    "mistral-medium-latest"
+   ],
+   "pat": "^mistral-medium-(3-5|3|latest|2604)$",
+   "in": 1.5,
+   "out": 7.5,
+   "cw": 0,
+   "cr": 0.15,
+   "unit_note": "cached input = 10% of input; batch = 50% off",
+   "source_url": "https://docs.mistral.ai/inference/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "v26.04 released 2026-04-28; ids from https://docs.mistral.ai/models/mistral-medium-3-5-26-04. Older mistral-medium-2505/2508 (Medium 3/3.1) retired 2026-08-31 and were priced differently ($0.40/$2) so deliberately excluded from pat."
+  },
+  {
+   "vendor": "Mistral AI",
+   "label": "Mistral Small 4",
+   "ids": [
+    "mistral-small-2603",
+    "mistral-small-latest"
+   ],
+   "pat": "^mistral-small-(2603|latest)$",
+   "in": 0.15,
+   "out": 0.6,
+   "cw": 0,
+   "cr": 0.015,
+   "unit_note": "cached input = 10% of input; batch = 50% off",
+   "source_url": "https://docs.mistral.ai/inference/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "ids from https://docs.mistral.ai/models/mistral-small-4-0-26-03. mistral-small-2506 (3.2) retired 2026-07-31."
+  },
+  {
+   "vendor": "Mistral AI",
+   "label": "Ministral 3 14B",
+   "ids": [
+    "ministral-14b-2512",
+    "ministral-14b-latest"
+   ],
+   "pat": "^ministral-14b-(2512|latest)$",
+   "in": 0.2,
+   "out": 0.2,
+   "cw": 0,
+   "cr": 0.02,
+   "unit_note": "cached input = 10% of input; batch = 50% off",
+   "source_url": "https://docs.mistral.ai/inference/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "ids from https://docs.mistral.ai/models/ministral-3-14b-25-12"
+  },
+  {
+   "vendor": "Mistral AI",
+   "label": "Ministral 3 8B",
+   "ids": [
+    "ministral-8b-2512",
+    "ministral-8b-latest"
+   ],
+   "pat": "^ministral-8b-(2512|latest)$",
+   "in": 0.15,
+   "out": 0.15,
+   "cw": 0,
+   "cr": 0.015,
+   "unit_note": "cached input = 10% of input; batch = 50% off",
+   "source_url": "https://docs.mistral.ai/inference/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "ids from https://docs.mistral.ai/models/ministral-3-8b-25-12. ministral-8b-2410 retired 2025-12-31."
+  },
+  {
+   "vendor": "Mistral AI",
+   "label": "Ministral 3 3B",
+   "ids": [
+    "ministral-3b-2512",
+    "ministral-3b-latest"
+   ],
+   "pat": "^ministral-3b-(2512|latest)$",
+   "in": 0.1,
+   "out": 0.1,
+   "cw": 0,
+   "cr": 0.01,
+   "unit_note": "cached input = 10% of input; batch = 50% off",
+   "source_url": "https://docs.mistral.ai/inference/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "ids from https://docs.mistral.ai/models/ministral-3-3b-25-12. ministral-3b-2410 retired 2025-12-31."
+  },
+  {
+   "vendor": "Mistral AI",
+   "label": "Codestral",
+   "ids": [
+    "codestral-2508",
+    "codestral-latest"
+   ],
+   "pat": "^codestral-(2508|latest)$",
+   "in": 0.3,
+   "out": 0.9,
+   "cw": 0,
+   "cr": 0.03,
+   "unit_note": "cached input = 10% of input; batch = 50% off; same price for /v1/fim/completions",
+   "source_url": "https://docs.mistral.ai/inference/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "ids from https://docs.mistral.ai/models/codestral-25-08. codestral-2501 retired 2025-11-30. Codestral Embed skipped."
+  },
+  {
+   "vendor": "Mistral AI",
+   "label": "Z.ai GLM 5.3 (third-party hosted on La Plateforme)",
+   "ids": [
+    "zai-glm-5-3"
+   ],
+   "pat": "^zai-glm-5-3$",
+   "in": 1.4,
+   "out": 4.4,
+   "cw": 0,
+   "cr": 0.14,
+   "unit_note": "cached input = 10% of input",
+   "source_url": "https://docs.mistral.ai/inference/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Not a Mistral model but billed through Mistral. zai-glm-5-2 deprecated (retires 2026-10-31)."
+  },
+  {
+   "vendor": "Mistral AI",
+   "label": "Mistral (other)",
+   "ids": [],
+   "pat": "^(open-)?(mistral(?!ai/)|ministral|codestral|magistral|devstral|pixtral|labs-|zai-glm-)",
+   "in": 1.5,
+   "out": 7.5,
+   "cw": 0,
+   "cr": 0.15,
+   "unit_note": "catch-all = Mistral Medium 3.5 mid-tier price; cached input = 10% of input",
+   "source_url": "https://docs.mistral.ai/inference/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Magistral, Devstral, Pixtral, Mistral Nemo, Mistral OCR 2/3, Mistral Saba are all deprecated/retired per https://docs.mistral.ai/getting-started/models/models_overview (last retirements 2026-07-31/08-31); none have a current list price, so they fall to this row. Vision/OCR/Voxtral priced per page/minute, not per token. Pattern tightened per verdict: mistral(?!ai/) so mistralai/* host ids are not priced as Mistral Medium; zai- -> zai-glm- so zai-org/* (Together) is not caught."
+  },
+  {
+   "vendor": "Cohere",
+   "label": "Command A",
+   "ids": [
+    "command-a-03-2025"
+   ],
+   "pat": "^command-a(-\\d{2}-\\d{4})?$",
+   "in": 2.5,
+   "out": 10,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "no cache pricing",
+   "source_url": "https://cohere.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "NOT on the current cohere.com/pricing 'Generative models' tab any more (only Command A+, Command R, Command R7B are listed). $2.50/$10 is the historical Command A price (same as Command R+ 08-2024, which the pricing FAQ still lists at $2.50/$10) and is what third-party aggregators still show; treat as unverified from a primary source today."
+  },
+  {
+   "vendor": "Cohere",
+   "label": "Command R+ (08-2024)",
+   "ids": [
+    "command-r-plus-08-2024"
+   ],
+   "pat": "^command-r-plus-08-2024$",
+   "in": 2.5,
+   "out": 10,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "no cache pricing",
+   "source_url": "https://cohere.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "From pricing FAQ 'Where do I find pricing for our legacy models?'"
+  },
+  {
+   "vendor": "Cohere",
+   "label": "Command R+ (04-2024, legacy)",
+   "ids": [
+    "command-r-plus-04-2024",
+    "command-r-plus"
+   ],
+   "pat": "^command-r-plus(-04-2024)?$",
+   "in": 3,
+   "out": 15,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "legacy, existing customers only",
+   "source_url": "https://cohere.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Deprecated 2025-09-15 per https://docs.cohere.com/docs/models; alias command-r-plus -> 04-2024."
+  },
+  {
+   "vendor": "Cohere",
+   "label": "Command R (08-2024)",
+   "ids": [
+    "command-r-08-2024"
+   ],
+   "pat": "^command-r-08-2024$",
+   "in": 0.15,
+   "out": 0.6,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "no cache pricing",
+   "source_url": "https://cohere.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Pricing page 'Command R' card: $0.15 in / $0.60 out, 128K context, 4K max output."
+  },
+  {
+   "vendor": "Cohere",
+   "label": "Command R (03-2024, legacy)",
+   "ids": [
+    "command-r-03-2024",
+    "command-r"
+   ],
+   "pat": "^command-r(-03-2024)?$",
+   "in": 0.5,
+   "out": 1.5,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "legacy, existing customers only",
+   "source_url": "https://cohere.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Deprecated 2025-09-15; alias command-r -> 03-2024."
+  },
+  {
+   "vendor": "Cohere",
+   "label": "Command R7B",
+   "ids": [
+    "command-r7b-12-2024"
+   ],
+   "pat": "^command-r7b(-\\d{2}-\\d{4})?$",
+   "in": 0.0375,
+   "out": 0.15,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "no cache pricing",
+   "source_url": "https://cohere.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "Cohere",
+   "label": "Command (legacy)",
+   "ids": [
+    "command",
+    "command-nightly"
+   ],
+   "pat": "^command(-nightly)?$",
+   "in": 1,
+   "out": 2,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "legacy, existing customers only",
+   "source_url": "https://cohere.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Deprecated 2025-09-15."
+  },
+  {
+   "vendor": "Cohere",
+   "label": "Command-light (legacy)",
+   "ids": [
+    "command-light",
+    "command-light-nightly"
+   ],
+   "pat": "^command-light(-nightly)?$",
+   "in": 0.3,
+   "out": 0.6,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "legacy, existing customers only",
+   "source_url": "https://cohere.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Deprecated 2025-09-15."
+  },
+  {
+   "vendor": "Cohere",
+   "label": "Aya Expanse / Aya Vision",
+   "ids": [
+    "c4ai-aya-expanse-8b",
+    "c4ai-aya-expanse-32b",
+    "c4ai-aya-vision-8b",
+    "c4ai-aya-vision-32b"
+   ],
+   "pat": "^c4ai-aya-(expanse|vision)-(8b|32b)$",
+   "in": 0.5,
+   "out": 1.5,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "pricing FAQ states Aya Expanse (8B and 32B) = $0.50/$1.50; Aya Vision not priced separately",
+   "source_url": "https://cohere.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Docs list only the 32B ids (https://docs.cohere.com/docs/aya-expanse, /aya-vision); 8B ids kept for older logs."
+  },
+  {
+   "vendor": "Cohere",
+   "label": "Cohere (other)",
+   "ids": [],
+   "pat": "^(command|c4ai-)",
+   "in": 2.5,
+   "out": 10,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "catch-all = Command A / Command R+ 08-2024 mid-tier price",
+   "source_url": "https://cohere.com/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Place after the specific Cohere rows."
+  },
+  {
+   "vendor": "Meta",
+   "label": "Muse Wonder 1.0 (Meta Model API, preview)",
+   "ids": [
+    "muse-wonder-1.0"
+   ],
+   "pat": "^muse-wonder-",
+   "in": 4,
+   "out": 20,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "cached input = $0.20/1M (5% of input); Standard mode only; web search $2.50 per 1K queries extra",
+   "source_url": "https://dev.meta.ai/docs/pricing-rate-limits",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "llama.developer.meta.com now redirects to dev.meta.ai ('Meta Model API'); the API serves only Muse models - no Llama 4 / 3.x models are listed on https://dev.meta.ai/docs/models or the pricing page."
+  },
+  {
+   "vendor": "Meta",
+   "label": "Muse Spark 1.x (Standard mode)",
+   "ids": [
+    "muse-spark-1.3",
+    "muse-spark-1.2",
+    "muse-spark-1.1"
+   ],
+   "pat": "^muse-spark-\\d+\\.\\d+$",
+   "in": 1.25,
+   "out": 4.25,
+   "cw": 0,
+   "cr": 0.15,
+   "unit_note": "cached input = $0.15/1M (12% of input); no long-context premium",
+   "source_url": "https://dev.meta.ai/docs/pricing-rate-limits",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "Meta",
+   "label": "Muse Spark 1.x (Contributor mode)",
+   "ids": [
+    "muse-spark-1.3-contributor",
+    "muse-spark-1.2-contributor"
+   ],
+   "pat": "^muse-spark-\\d+\\.\\d+-contributor$",
+   "in": 0.1,
+   "out": 0.2,
+   "cw": 0,
+   "cr": 0.002,
+   "unit_note": "cached input = $0.002/1M; discounted in exchange for training on your content",
+   "source_url": "https://dev.meta.ai/docs/pricing-rate-limits",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "Meta",
+   "label": "Meta (other)",
+   "ids": [],
+   "pat": "^muse-",
+   "in": 1.25,
+   "out": 4.25,
+   "cw": 0,
+   "cr": 0.15,
+   "unit_note": "catch-all = Muse Spark Standard mid-tier price",
+   "source_url": "https://dev.meta.ai/docs/pricing-rate-limits",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "muse-image-1.0 ($0.01/image), muse-voice-transcribe-1.0 ($0.18/audio hour) and sam-3.1 (per image/frame) are not token-priced."
+  },
+  {
+   "vendor": "Amazon",
+   "label": "Amazon Nova Micro",
+   "ids": [
+    "amazon.nova-micro-v1:0",
+    "us.amazon.nova-micro-v1:0",
+    "eu.amazon.nova-micro-v1:0"
+   ],
+   "pat": "nova-micro",
+   "in": 0.035,
+   "out": 0.14,
+   "cw": 0,
+   "cr": 0.00875,
+   "unit_note": "us-east-1 on-demand (Standard tier); cache read = 25% of input (page lists $0.00875); no cache-write charge; batch = 50% off",
+   "source_url": "https://aws.amazon.com/bedrock/pricing/",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "ids from https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-micro.md"
+  },
+  {
+   "vendor": "Amazon",
+   "label": "Amazon Nova Lite",
+   "ids": [
+    "amazon.nova-lite-v1:0",
+    "us.amazon.nova-lite-v1:0",
+    "eu.amazon.nova-lite-v1:0",
+    "apac.amazon.nova-lite-v1:0",
+    "ca.amazon.nova-lite-v1:0"
+   ],
+   "pat": "nova-lite",
+   "in": 0.06,
+   "out": 0.24,
+   "cw": 0,
+   "cr": 0.015,
+   "unit_note": "us-east-1 on-demand; cache read = 25% of input; batch = 50% off",
+   "source_url": "https://aws.amazon.com/bedrock/pricing/",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "pat 'nova-lite' does not match 'nova-2-lite' because of the '2-'; the two patterns are disjoint."
+  },
+  {
+   "vendor": "Amazon",
+   "label": "Amazon Nova Pro",
+   "ids": [
+    "amazon.nova-pro-v1:0",
+    "us.amazon.nova-pro-v1:0",
+    "eu.amazon.nova-pro-v1:0",
+    "apac.amazon.nova-pro-v1:0"
+   ],
+   "pat": "nova-pro",
+   "in": 0.8,
+   "out": 3.2,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "us-east-1 on-demand; cache read = 25% of input; batch = 50% off",
+   "source_url": "https://aws.amazon.com/bedrock/pricing/",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Disjoint from 'nova-2-pro'."
+  },
+  {
+   "vendor": "Amazon",
+   "label": "Amazon Nova Premier",
+   "ids": [
+    "amazon.nova-premier-v1:0",
+    "us.amazon.nova-premier-v1:0"
+   ],
+   "pat": "nova-premier",
+   "in": 2.5,
+   "out": 12.5,
+   "cw": 0,
+   "cr": 0.625,
+   "unit_note": "DERIVED: us-east-1 batch price is $1.25/$6.25 and Bedrock batch = 50% of on-demand; cache read = 25% of input",
+   "source_url": "https://aws.amazon.com/bedrock/pricing/",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Nova Premier no longer appears in the on-demand table nor in the Bedrock model-cards list (likely legacy/EOL); only the batch and web-grounding rows still mention it."
+  },
+  {
+   "vendor": "Amazon",
+   "label": "Amazon Nova 2 Lite",
+   "ids": [
+    "amazon.nova-2-lite-v1:0",
+    "us.amazon.nova-2-lite-v1:0",
+    "eu.amazon.nova-2-lite-v1:0",
+    "jp.amazon.nova-2-lite-v1:0",
+    "global.amazon.nova-2-lite-v1:0"
+   ],
+   "pat": "nova-2(\\.0)?-lite",
+   "in": 0.3,
+   "out": 2.5,
+   "cw": 0,
+   "cr": 0.075,
+   "unit_note": "us-east-1 Standard tier (global cross-region and geo/in-region tables both show $0.30/$2.50); cache read = $0.075 (25% of input); Priority tier $0.525/$4.375; batch $0.165/$1.375",
+   "source_url": "https://aws.amazon.com/bedrock/pricing/",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "ids from https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.md (us-east-1 only via geo/global inference profiles, not in-region)."
+  },
+  {
+   "vendor": "Amazon",
+   "label": "Amazon Nova 2 Pro (Preview)",
+   "ids": [
+    "amazon.nova-2-pro-v1:0",
+    "us.amazon.nova-2-pro-v1:0",
+    "global.amazon.nova-2-pro-v1:0"
+   ],
+   "pat": "nova-2-pro",
+   "in": 1.25,
+   "out": 10,
+   "cw": 0,
+   "cr": 0.3125,
+   "unit_note": "us-east-1 global cross-region Standard tier; same $1.25 for text/image/video/audio input; cache read = 75% less than input",
+   "source_url": "https://aws.amazon.com/bedrock/pricing/",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Price verified; model ids are inferred from the Nova naming convention (Nova 2 Pro has no Bedrock model card yet)."
+  },
+  {
+   "vendor": "Amazon",
+   "label": "Amazon Nova 2 Omni (Preview)",
+   "ids": [
+    "amazon.nova-2-omni-v1:0",
+    "us.amazon.nova-2-omni-v1:0",
+    "global.amazon.nova-2-omni-v1:0"
+   ],
+   "pat": "nova-2-omni",
+   "in": 0.3,
+   "out": 2.5,
+   "cw": 0,
+   "cr": 0.075,
+   "unit_note": "text tokens, us-east-1 global cross-region Standard tier; audio input $1.00/1M; image output $40/1M; cache read = 75% less than input",
+   "source_url": "https://aws.amazon.com/bedrock/pricing/",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Price verified; ids inferred (no model card yet)."
+  },
+  {
+   "vendor": "Amazon",
+   "label": "Amazon Nova (other)",
+   "ids": [],
+   "pat": "amazon\\.nova|^nova-",
+   "in": 0.3,
+   "out": 2.5,
+   "cw": 0,
+   "cr": 0.075,
+   "unit_note": "catch-all = Nova 2 Lite mid-tier price",
+   "source_url": "https://aws.amazon.com/bedrock/pricing/",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Nova 2 Sonic / 2.5 Sonic (speech $3/$12, text $0.33/$2.75), Nova Canvas (per image), Nova Reel (per second) and Nova Multimodal Embeddings are not covered."
+  },
+  {
+   "vendor": "Microsoft",
+   "label": "Phi-4",
+   "ids": [
+    "Phi-4"
+   ],
+   "pat": "^phi-4$",
+   "in": 0.125,
+   "out": 0.5,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "Azure AI Foundry Models serverless (pay-as-you-go) per 1M tokens; no cache pricing published",
+   "source_url": "https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Prices only render client-side (WebFetch shows '$-'); read via browser. Page does not state region or Global/Regional deployment type."
+  },
+  {
+   "vendor": "Microsoft",
+   "label": "Phi-4-mini / Phi-4-mini-reasoning",
+   "ids": [
+    "Phi-4-mini",
+    "Phi-4-mini-instruct",
+    "Phi-4-mini-reasoning"
+   ],
+   "pat": "^phi-4-mini(-instruct|-reasoning)?$",
+   "in": 0.075,
+   "out": 0.3,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "serverless pay-as-you-go",
+   "source_url": "https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Pricing page labels it 'Phi-4-mini'; the Foundry catalog deployment name is Phi-4-mini-instruct."
+  },
+  {
+   "vendor": "Microsoft",
+   "label": "Phi-4-multimodal (text + image)",
+   "ids": [
+    "Phi-4-multimodal",
+    "Phi-4-multimodal-instruct"
+   ],
+   "pat": "^phi-4-multimodal(-instruct)?$",
+   "in": 0.08,
+   "out": 0.32,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "text/image input $0.08; audio input $4.00/1M tokens; output $0.32",
+   "source_url": "https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "Microsoft",
+   "label": "Phi-4-reasoning / Phi-4-reasoning-plus",
+   "ids": [
+    "Phi-4-reasoning",
+    "Phi-4-reasoning-plus"
+   ],
+   "pat": "^phi-4-reasoning(-plus)?$",
+   "in": 0.125,
+   "out": 0.5,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "serverless pay-as-you-go; 32K context",
+   "source_url": "https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "Microsoft",
+   "label": "Phi-3.5-mini / Phi-3-mini",
+   "ids": [
+    "Phi-3.5-mini-instruct",
+    "Phi-3-mini-4k-instruct",
+    "Phi-3-mini-128k-instruct"
+   ],
+   "pat": "^phi-3(\\.5)?-mini",
+   "in": 0.13,
+   "out": 0.52,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "serverless pay-as-you-go",
+   "source_url": "https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "Microsoft",
+   "label": "Phi-3-small",
+   "ids": [
+    "Phi-3-small-8k-instruct",
+    "Phi-3-small-128k-instruct"
+   ],
+   "pat": "^phi-3-small",
+   "in": 0.15,
+   "out": 0.6,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "serverless pay-as-you-go",
+   "source_url": "https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "Microsoft",
+   "label": "Phi-3-medium",
+   "ids": [
+    "Phi-3-medium-4k-instruct",
+    "Phi-3-medium-128k-instruct"
+   ],
+   "pat": "^phi-3-medium",
+   "in": 0.17,
+   "out": 0.68,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "serverless pay-as-you-go",
+   "source_url": "https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "Microsoft",
+   "label": "Phi-3.5-MoE",
+   "ids": [
+    "Phi-3.5-MoE-instruct"
+   ],
+   "pat": "^phi-3\\.5-moe",
+   "in": 0.16,
+   "out": 0.64,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "serverless pay-as-you-go",
+   "source_url": "https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "Microsoft",
+   "label": "Phi (other)",
+   "ids": [],
+   "pat": "^(microsoft/)?phi-",
+   "in": 0.125,
+   "out": 0.5,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "catch-all = Phi-4 price (most common price point on the page)",
+   "source_url": "https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "Pattern widened per verdict to accept the microsoft/ host prefix."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.8-Max",
+   "ids": [
+    "qwen3.8-max",
+    "qwen3.8-max-0902"
+   ],
+   "pat": "^qwen3\\.8-max(-\\d{4})?$",
+   "in": 2,
+   "out": 6,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, Singapore (international) region, flat 0-1M input tier; no cached price published",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Cache-hit price for qwen3.8-max is not the default 20% rule; Alibaba says it is published only in the Model Studio console (https://www.alibabacloud.com/help/en/model-studio/context-cache). cw=0 for implicit cache; explicit cache creation = 125% of input."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.7-Max",
+   "ids": [
+    "qwen3.7-max",
+    "qwen3.7-max-2026-06-08",
+    "qwen3.7-max-2026-05-20",
+    "qwen3.7-max-preview",
+    "qwen3.7-max-2026-05-17"
+   ],
+   "pat": "^qwen3\\.7-max(-preview|-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 2.5,
+   "out": 7.5,
+   "cw": 0,
+   "cr": 0.5,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-1M input tier",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "cr = implicit cache hit at 20% of input (context-cache page). Explicit cache: creation 125% of input, hit 10%. qwen3.7-max-preview / -2026-05-17 are thinking-only."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen-Max (legacy stable alias)",
+   "ids": [
+    "qwen-max"
+   ],
+   "pat": "^qwen-max$",
+   "in": 1.6,
+   "out": 6.4,
+   "cw": 0,
+   "cr": 0.32,
+   "unit_note": "USD per 1M tokens, Singapore region, no tiers",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Non-thinking only. cr = 20% implicit cache hit. qwen-max-latest / qwen-max-2025-01-25 are no longer on the pricing page."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.7-Plus",
+   "ids": [
+    "qwen3.7-plus",
+    "qwen3.7-plus-2026-05-26"
+   ],
+   "pat": "^qwen3\\.7-plus(-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 0.4,
+   "out": 1.6,
+   "cw": 0,
+   "cr": 0.08,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-256K input tier; 256K-1M tier = 1.2 in / 4.8 out",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Same output price thinking and non-thinking. Page flags a limited-time 20% discount label on qwen3.7-plus; the figures recorded are the listed prices. cr = 20% implicit cache hit."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.6-Plus",
+   "ids": [
+    "qwen3.6-plus",
+    "qwen3.6-plus-2026-04-02"
+   ],
+   "pat": "^qwen3\\.6-plus(-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 0.5,
+   "out": 3,
+   "cw": 0,
+   "cr": 0.1,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-256K tier; 256K-1M tier = 2 in / 6 out",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "cr = 20% implicit cache hit (explicit cache supported for qwen3.6-plus)."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.5-Plus",
+   "ids": [
+    "qwen3.5-plus",
+    "qwen3.5-plus-2026-04-20",
+    "qwen3.5-plus-2026-02-15"
+   ],
+   "pat": "^qwen3\\.5-plus(-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 0.4,
+   "out": 2.4,
+   "cw": 0,
+   "cr": 0.08,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-256K tier; 256K-1M tier = 0.5 in / 3 out",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "cr = 20% implicit cache hit."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen-Plus (stable alias + snapshots)",
+   "ids": [
+    "qwen-plus",
+    "qwen-plus-latest",
+    "qwen-plus-2025-12-01",
+    "qwen-plus-2025-07-14",
+    "qwen-plus-2025-04-28",
+    "qwen-plus-2025-01-25"
+   ],
+   "pat": "^qwen-plus(-latest|-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 0.4,
+   "out": 1.2,
+   "cw": 0,
+   "cr": 0.08,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-256K tier, non-thinking output; thinking output = 4; 256K-1M tier = 1.2 in / 3.6 out (12 thinking)",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Thinking-mode output is 4 USD (3.3x) - if the dashboard sees reasoning tokens, consider out=4. Excludes qwen-plus-character (role-play, 0.5/1.4). cr = 20% implicit cache hit."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.8-Flash",
+   "ids": [
+    "qwen3.8-flash"
+   ],
+   "pat": "^qwen3\\.8-flash$",
+   "in": 0.15,
+   "out": 0.47,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, Singapore region, flat 0-1M tier; no cached price published",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Cache-hit price is console-only (not the 20% default) per the context-cache page."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.7-Flash",
+   "ids": [
+    "qwen3.7-flash",
+    "qwen3.7-flash-2026-07-15"
+   ],
+   "pat": "^qwen3\\.7-flash(-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 0.03,
+   "out": 0.13,
+   "cw": 0,
+   "cr": 0.006,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-32K tier; 32K-256K = 0.10 / 0.40; 256K-1M = 0.20 / 0.80",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "cr = 20% implicit cache hit of base tier."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.6-Flash",
+   "ids": [
+    "qwen3.6-flash",
+    "qwen3.6-flash-2026-04-16"
+   ],
+   "pat": "^qwen3\\.6-flash(-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 0.25,
+   "out": 1.5,
+   "cw": 0,
+   "cr": 0.05,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-256K tier; 256K-1M = 1 / 4",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "cr = 20% implicit cache hit."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.5-Flash",
+   "ids": [
+    "qwen3.5-flash",
+    "qwen3.5-flash-2026-02-23"
+   ],
+   "pat": "^qwen3\\.5-flash(-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 0.1,
+   "out": 0.4,
+   "cw": 0,
+   "cr": 0.02,
+   "unit_note": "USD per 1M tokens, Singapore region, flat 0-1M tier",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "cr = 20% implicit cache hit."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen-Flash (stable alias, successor of qwen-turbo)",
+   "ids": [
+    "qwen-flash",
+    "qwen-flash-2025-07-28"
+   ],
+   "pat": "^qwen-flash(-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 0.05,
+   "out": 0.4,
+   "cw": 0,
+   "cr": 0.01,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-256K tier; 256K-1M = 0.25 / 2",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Excludes qwen-flash-character (role-play). cr = 20% implicit cache hit."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.8 open-weight (2.4T-A95B)",
+   "ids": [
+    "qwen3.8-2.4t-a95b"
+   ],
+   "pat": "^qwen3\\.8-2\\.4t-a95b$",
+   "in": 2,
+   "out": 6,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-1M tier; no cached price published",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Cache-hit price console-only."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.8 open-weight (27B)",
+   "ids": [
+    "qwen3.8-27b"
+   ],
+   "pat": "^qwen3\\.8-27b$",
+   "in": 0.5,
+   "out": 3,
+   "cw": 0,
+   "cr": 0.1,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-1M tier",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "cr = 20% implicit cache hit (listed as implicit-cache supported)."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.6 open-weight (35B-A3B)",
+   "ids": [
+    "qwen3.6-35b-a3b"
+   ],
+   "pat": "^qwen3\\.6-35b-a3b$",
+   "in": 0.375,
+   "out": 2.25,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-256K; no cached price published",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Not in the context-cache supported-model list; cache price unknown."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.6 open-weight (27B)",
+   "ids": [
+    "qwen3.6-27b"
+   ],
+   "pat": "^qwen3\\.6-27b$",
+   "in": 0.6,
+   "out": 3.6,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-256K; no cached price published",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Not in the context-cache supported-model list."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.5 open-weight (397B-A17B)",
+   "ids": [
+    "qwen3.5-397b-a17b"
+   ],
+   "pat": "^qwen3\\.5-397b-a17b$",
+   "in": 0.6,
+   "out": 3.6,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-256K; no cached price published",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Same output price thinking/non-thinking."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.5 open-weight (122B-A10B)",
+   "ids": [
+    "qwen3.5-122b-a10b"
+   ],
+   "pat": "^qwen3\\.5-122b-a10b$",
+   "in": 0.4,
+   "out": 3.2,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-256K; no cached price published",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.5 open-weight (27B)",
+   "ids": [
+    "qwen3.5-27b"
+   ],
+   "pat": "^qwen3\\.5-27b$",
+   "in": 0.3,
+   "out": 2.4,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-256K; no cached price published",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3.5 open-weight (35B-A3B)",
+   "ids": [
+    "qwen3.5-35b-a3b"
+   ],
+   "pat": "^qwen3\\.5-35b-a3b$",
+   "in": 0.25,
+   "out": 2,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-256K; no cached price published",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3-Coder-Flash",
+   "ids": [
+    "qwen3-coder-flash",
+    "qwen3-coder-flash-2025-07-28"
+   ],
+   "pat": "^qwen3-coder-flash(-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 0.3,
+   "out": 1.5,
+   "cw": 0,
+   "cr": 0.06,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-32K tier; 32K-128K = 0.5 / 2.5; 128K-256K = 0.8 / 4; 256K-1M = 1.6 / 9.6",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Only Qwen-Coder model left on the international pricing page. cr = 20% implicit cache hit."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3-VL-Plus",
+   "ids": [
+    "qwen3-vl-plus"
+   ],
+   "pat": "^qwen3-vl-plus(-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 0.2,
+   "out": 1.6,
+   "cw": 0,
+   "cr": 0.04,
+   "unit_note": "USD per 1M tokens, Singapore region, 0-32K tier; 32K-128K = 0.3 / 2.4; 128K-256K = 0.6 / 4.8",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "cr = 20% implicit cache hit."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen-VL-OCR",
+   "ids": [
+    "qwen-vl-ocr",
+    "qwen-vl-ocr-2025-11-20"
+   ],
+   "pat": "^qwen-vl-ocr(-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 0.07,
+   "out": 0.16,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens, Singapore region, no tiers",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "The dated snapshot row on the page has no price values; assumed same as alias. No cache support."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen3-Max (retired, last known list price)",
+   "ids": [
+    "qwen3-max",
+    "qwen3-max-preview",
+    "qwen3-max-2025-09-23",
+    "qwen3-max-2026-01-23",
+    "qwen3.6-max-preview"
+   ],
+   "pat": "^qwen3(\\.6)?-max(-preview|-\\d{4}-\\d{2}-\\d{2})?$",
+   "in": 1.2,
+   "out": 6,
+   "cw": 0,
+   "cr": 0.24,
+   "unit_note": "USD per 1M tokens, 0-32K tier; 32K-128K = 2.4 / 12; 128K-256K = 3 / 15 (last known)",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-depreciation",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "NOT on the live international pricing page any more. Alibaba's model-depreciation page lists qwen3-max / qwen3-max-preview / qwen3.6-max-preview as decommissioned (Sept 8 2026 on EN page; Oct 10 2026 batch on CN/ID pages), replacement qwen3.7-max. Tier prices come from a search-engine snippet of the official pricing page, not verifiable live."
+  },
+  {
+   "vendor": "Alibaba Cloud Model Studio",
+   "label": "Qwen (other)",
+   "ids": [],
+   "pat": "^(qwen(?!/)|qwq)",
+   "in": 0.4,
+   "out": 1.2,
+   "cw": 0,
+   "cr": 0.08,
+   "unit_note": "USD per 1M tokens - qwen-plus 0-256K non-thinking tier used as mid-tier default",
+   "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Vendor catch-all; place after all specific Qwen rows. Pattern tightened per verdict: qwen(?!/) so qwen/* host ids (Groq/Together/DeepInfra) are not caught."
+  },
+  {
+   "vendor": "Moonshot AI (Kimi)",
+   "label": "Kimi K3",
+   "ids": [
+    "kimi-k3"
+   ],
+   "pat": "^kimi-k3$",
+   "in": 3,
+   "out": 15,
+   "cw": 3,
+   "cr": 0.3,
+   "unit_note": "USD per 1M tokens; cache write 3.00 at default 5-min TTL (6.00 for 1-h TTL); prices exclude tax",
+   "source_url": "https://platform.kimi.ai/docs/pricing/chat",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "platform.moonshot.ai now 301-redirects to platform.kimi.ai. 1M context. Cache hits refresh TTL with no extra write charge."
+  },
+  {
+   "vendor": "Moonshot AI (Kimi)",
+   "label": "Kimi K2.7 Code",
+   "ids": [
+    "kimi-k2.7-code"
+   ],
+   "pat": "^kimi-k2\\.7-code$",
+   "in": 0.95,
+   "out": 4,
+   "cw": 0,
+   "cr": 0.19,
+   "unit_note": "USD per 1M tokens; no cache creation/storage fee listed",
+   "source_url": "https://platform.kimi.ai/docs/pricing/chat",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "256K context."
+  },
+  {
+   "vendor": "Moonshot AI (Kimi)",
+   "label": "Kimi K2.7 Code (high-speed)",
+   "ids": [
+    "kimi-k2.7-code-highspeed"
+   ],
+   "pat": "^kimi-k2\\.7-code-highspeed$",
+   "in": 1.9,
+   "out": 8,
+   "cw": 0,
+   "cr": 0.38,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://platform.kimi.ai/docs/pricing/chat",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Same model as kimi-k2.7-code, 2x price for ~180 tok/s output."
+  },
+  {
+   "vendor": "Moonshot AI (Kimi)",
+   "label": "Kimi K2.6",
+   "ids": [
+    "kimi-k2.6"
+   ],
+   "pat": "^kimi-k2\\.6$",
+   "in": 0.95,
+   "out": 4,
+   "cw": 0,
+   "cr": 0.16,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://platform.kimi.ai/docs/pricing/chat",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "General-purpose, thinking + non-thinking modes, 256K context."
+  },
+  {
+   "vendor": "Moonshot AI (Kimi)",
+   "label": "Kimi / Moonshot (other)",
+   "ids": [],
+   "pat": "^(kimi|moonshot(?!ai/))",
+   "in": 0.95,
+   "out": 4,
+   "cw": 0,
+   "cr": 0.16,
+   "unit_note": "USD per 1M tokens - kimi-k2.6 used as mid-tier default",
+   "source_url": "https://platform.kimi.ai/docs/pricing/chat",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Vendor catch-all. Pattern tightened per verdict: moonshot(?!ai/) so moonshotai/* host ids are not caught."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-5.3",
+   "ids": [
+    "glm-5.3"
+   ],
+   "pat": "^glm-5\\.3$",
+   "in": 1.4,
+   "out": 4.4,
+   "cw": 0,
+   "cr": 0.26,
+   "unit_note": "USD per 1M tokens; cached-input storage 'limited-time free'",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Id confirmed in chat-completion API reference enum."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-5.2",
+   "ids": [
+    "glm-5.2"
+   ],
+   "pat": "^glm-5\\.2$",
+   "in": 1.4,
+   "out": 4.4,
+   "cw": 0,
+   "cr": 0.26,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Id confirmed in API reference enum."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-5.1",
+   "ids": [
+    "glm-5.1"
+   ],
+   "pat": "^glm-5\\.1$",
+   "in": 1.4,
+   "out": 4.4,
+   "cw": 0,
+   "cr": 0.26,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Id confirmed in API reference enum."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-5",
+   "ids": [
+    "glm-5"
+   ],
+   "pat": "^glm-5$",
+   "in": 1,
+   "out": 3.2,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Id confirmed in API reference enum."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-5.3-Flash",
+   "ids": [
+    "glm-5.3-flash"
+   ],
+   "pat": "^glm-5\\.3-flash$",
+   "in": 0.15,
+   "out": 0.5,
+   "cw": 0,
+   "cr": 0.03,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Listed under the vision request schema in the API reference."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-5.3-FlashX",
+   "ids": [
+    "glm-5.3-flashx"
+   ],
+   "pat": "^glm-5\\.3-flashx$",
+   "in": 0.37,
+   "out": 1.25,
+   "cw": 0,
+   "cr": 0.075,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-4.7",
+   "ids": [
+    "glm-4.7"
+   ],
+   "pat": "^glm-4\\.7$",
+   "in": 0.6,
+   "out": 2.2,
+   "cw": 0,
+   "cr": 0.11,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Id confirmed in API reference enum."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-4.6",
+   "ids": [
+    "glm-4.6"
+   ],
+   "pat": "^glm-4\\.6$",
+   "in": 0.6,
+   "out": 2.2,
+   "cw": 0,
+   "cr": 0.11,
+   "unit_note": "USD per 1M tokens; no context-length tiers shown",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Id confirmed in API reference enum."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-4.7-FlashX",
+   "ids": [
+    "glm-4.7-flashx"
+   ],
+   "pat": "^glm-4\\.7-flashx$",
+   "in": 0.07,
+   "out": 0.4,
+   "cw": 0,
+   "cr": 0.01,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Pricing page shows display name only; lowercase id inferred (not in current API enum)."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-4.5",
+   "ids": [
+    "glm-4.5"
+   ],
+   "pat": "^glm-4\\.5$",
+   "in": 0.6,
+   "out": 2.2,
+   "cw": 0,
+   "cr": 0.11,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Id glm-4.5 confirmed on docs.z.ai/guides/llm/glm-4.5 examples; listed under 'Other Pricing'."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-4.5-X",
+   "ids": [
+    "glm-4.5-x"
+   ],
+   "pat": "^glm-4\\.5-x$",
+   "in": 2.2,
+   "out": 8.9,
+   "cw": 0,
+   "cr": 0.45,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Lowercase id inferred from display name."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-4.5-Air",
+   "ids": [
+    "glm-4.5-air"
+   ],
+   "pat": "^glm-4\\.5-air$",
+   "in": 0.2,
+   "out": 1.1,
+   "cw": 0,
+   "cr": 0.03,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Lowercase id inferred (matches glm-4.5 page 'as low as $0.2/$1.1' series floor); not in current API enum."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-4.5-AirX",
+   "ids": [
+    "glm-4.5-airx"
+   ],
+   "pat": "^glm-4\\.5-airx$",
+   "in": 1.1,
+   "out": 4.5,
+   "cw": 0,
+   "cr": 0.22,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Lowercase id inferred."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-4-32B-0414-128K",
+   "ids": [
+    "glm-4-32b-0414-128k"
+   ],
+   "pat": "^glm-4-32b-0414-128k$",
+   "in": 0.1,
+   "out": 0.1,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens; no cached-input price",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Lowercase id inferred."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM Flash (free tier: 4.7-Flash, 4.5-Flash, 4.6V-Flash)",
+   "ids": [
+    "glm-4.7-flash",
+    "glm-4.5-flash",
+    "glm-4.6v-flash"
+   ],
+   "pat": "^glm-4\\.(7|5|6v)-flash$",
+   "in": 0,
+   "out": 0,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "Free",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Pricing page lists these as Free/Free/Free. Ids inferred lowercase."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-4.6V",
+   "ids": [
+    "glm-4.6v"
+   ],
+   "pat": "^glm-4\\.6v$",
+   "in": 0.3,
+   "out": 0.9,
+   "cw": 0,
+   "cr": 0.05,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Vision model; id inferred."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-4.6V-FlashX",
+   "ids": [
+    "glm-4.6v-flashx"
+   ],
+   "pat": "^glm-4\\.6v-flashx$",
+   "in": 0.04,
+   "out": 0.4,
+   "cw": 0,
+   "cr": 0.004,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Vision model; id inferred."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-4.5V",
+   "ids": [
+    "glm-4.5v"
+   ],
+   "pat": "^glm-4\\.5v$",
+   "in": 0.6,
+   "out": 1.8,
+   "cw": 0,
+   "cr": 0.11,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Vision model; id inferred."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "GLM-OCR",
+   "ids": [
+    "glm-ocr"
+   ],
+   "pat": "^glm-ocr$",
+   "in": 0.03,
+   "out": 0.03,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Id inferred."
+  },
+  {
+   "vendor": "Z.ai (Zhipu)",
+   "label": "(other)",
+   "ids": [],
+   "pat": "^glm",
+   "in": 0.6,
+   "out": 2.2,
+   "cw": 0,
+   "cr": 0.11,
+   "unit_note": "USD per 1M tokens - GLM-4.6/4.7 mid-tier used as default",
+   "source_url": "https://docs.z.ai/guides/overview/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Vendor catch-all. open.bigmodel.cn/pricing (CNY) could not be rendered (JS-only shell); all figures from z.ai USD page."
+  },
+  {
+   "vendor": "MiniMax",
+   "label": "MiniMax-M3 (MiniMax API default)",
+   "ids": [
+    "MiniMax-M3"
+   ],
+   "pat": "^minimax-m3$",
+   "in": 0.3,
+   "out": 1.2,
+   "cw": 0,
+   "cr": 0.06,
+   "unit_note": "USD per 1M tokens, standard tier, input <= 512K; > 512K input = 0.60 / 2.40 / cache read 0.12; priority tier (service_tier=priority) = 1.5x; no cache-write price published",
+   "source_url": "https://platform.minimax.io/docs/guides/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Page says M3 prices reflect a permanent 50% discount. No cache-write price listed for M3. DEFAULT row for the shared id minimax-m3; SambaNova price is a platform override."
+  },
+  {
+   "vendor": "MiniMax",
+   "label": "MiniMax-M2.7",
+   "ids": [
+    "MiniMax-M2.7"
+   ],
+   "pat": "^minimax-m2\\.7$",
+   "in": 0.3,
+   "out": 1.2,
+   "cw": 0.375,
+   "cr": 0.06,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://platform.minimax.io/docs/guides/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Retirement schedule: closed to new users Oct 19 2026, retired Nov 18 2026 (pay-as-you-go)."
+  },
+  {
+   "vendor": "MiniMax",
+   "label": "MiniMax-M2.7-highspeed",
+   "ids": [
+    "MiniMax-M2.7-highspeed"
+   ],
+   "pat": "^minimax-m2\\.7-highspeed$",
+   "in": 0.6,
+   "out": 2.4,
+   "cw": 0.375,
+   "cr": 0.06,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://platform.minimax.io/docs/guides/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Same retirement schedule as M2.7."
+  },
+  {
+   "vendor": "MiniMax",
+   "label": "MiniMax-M2.5 (legacy)",
+   "ids": [
+    "MiniMax-M2.5"
+   ],
+   "pat": "^minimax-m2\\.5$",
+   "in": 0.3,
+   "out": 1.2,
+   "cw": 0.375,
+   "cr": 0.03,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://platform.minimax.io/docs/guides/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Legacy; retired Nov 18 2026."
+  },
+  {
+   "vendor": "MiniMax",
+   "label": "MiniMax-M2.5-highspeed (legacy)",
+   "ids": [
+    "MiniMax-M2.5-highspeed"
+   ],
+   "pat": "^minimax-m2\\.5-highspeed$",
+   "in": 0.6,
+   "out": 2.4,
+   "cw": 0.375,
+   "cr": 0.03,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://platform.minimax.io/docs/guides/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Legacy."
+  },
+  {
+   "vendor": "MiniMax",
+   "label": "MiniMax-M2.1 (legacy)",
+   "ids": [
+    "MiniMax-M2.1"
+   ],
+   "pat": "^minimax-m2\\.1$",
+   "in": 0.3,
+   "out": 1.2,
+   "cw": 0.375,
+   "cr": 0.03,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://platform.minimax.io/docs/guides/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Legacy."
+  },
+  {
+   "vendor": "MiniMax",
+   "label": "MiniMax-M2.1-highspeed (legacy)",
+   "ids": [
+    "MiniMax-M2.1-highspeed"
+   ],
+   "pat": "^minimax-m2\\.1-highspeed$",
+   "in": 0.6,
+   "out": 2.4,
+   "cw": 0.375,
+   "cr": 0.03,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://platform.minimax.io/docs/guides/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Legacy."
+  },
+  {
+   "vendor": "MiniMax",
+   "label": "MiniMax-M2 (legacy)",
+   "ids": [
+    "MiniMax-M2"
+   ],
+   "pat": "^minimax-m2$",
+   "in": 0.3,
+   "out": 1.2,
+   "cw": 0.375,
+   "cr": 0.03,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://platform.minimax.io/docs/guides/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Legacy; still in API enum."
+  },
+  {
+   "vendor": "MiniMax",
+   "label": "MiniMax (other)",
+   "ids": [],
+   "pat": "^minimax(?!ai/)",
+   "in": 0.3,
+   "out": 1.2,
+   "cw": 0.375,
+   "cr": 0.06,
+   "unit_note": "USD per 1M tokens - M2.7/M3 standard tier",
+   "source_url": "https://platform.minimax.io/docs/guides/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Vendor catch-all. Match lowercased ids (MiniMax ids are mixed-case). Pattern tightened per verdict: minimax(?!ai/) so minimaxai/* (Together) is not caught."
+  },
+  {
+   "vendor": "Baidu Qianfan (international)",
+   "label": "ERNIE 5.1",
+   "ids": [
+    "ernie-5.1"
+   ],
+   "pat": "^ernie-5\\.1$",
+   "in": 0.56,
+   "out": 2.53,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD ($/M tokens on international page), input <= 32k tier; 32k-128k input tier = 0.84 / 3.1; no cached price published",
+   "source_url": "https://intl.cloud.baidu.com/en/doc/qianfan/s/Jm8r1826a-intl-en",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Id from intl model list (7m95lyy43-intl-en). No cache-hit price listed. CN page (cloud.baidu.com/doc/qianfan/s/wmh4sv6ya) prices in CNY: 0.004/0.018 per 1K (<=32k), 0.006/0.022 (32k-128k)."
+  },
+  {
+   "vendor": "Baidu Qianfan (international)",
+   "label": "ERNIE 5.0 (text / vision / deep-thinking)",
+   "ids": [
+    "ernie-5.0"
+   ],
+   "pat": "^ernie-5\\.0",
+   "in": 0.84,
+   "out": 3.38,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD, text input <= 32k tier; 32k-128k = 1.4 / 5.6; visual-understanding and deep-thinking tables list 1.4 / 5.6; no cached price published",
+   "source_url": "https://intl.cloud.baidu.com/en/doc/qianfan/s/Jm8r1826a-intl-en",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Third-party trackers quote only the 1.4/5.6 tier. CN CNY: 0.006/0.024 per 1K (<=32k), 0.01/0.04 (32k-128k). ERNIE-5.0-Thinking-* variants exist on the CN page only."
+  },
+  {
+   "vendor": "Baidu Qianfan (international)",
+   "label": "ERNIE 4.5 Turbo (32K / 128K)",
+   "ids": [
+    "ernie-4.5-turbo-32k",
+    "ernie-4.5-turbo-128k"
+   ],
+   "pat": "^ernie-4\\.5-turbo-(32k|128k)(-preview)?$",
+   "in": 0.11,
+   "out": 0.45,
+   "cw": 0,
+   "cr": 0.03,
+   "unit_note": "USD per 1M tokens, no tiers",
+   "source_url": "https://intl.cloud.baidu.com/en/doc/qianfan/s/Jm8r1826a-intl-en",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "CN CNY: 0.0008 in / 0.0002 cache-hit / 0.0032 out per 1K tokens (= 0.8 / 0.2 / 3.2 CNY per 1M)."
+  },
+  {
+   "vendor": "Baidu Qianfan (international)",
+   "label": "ERNIE 4.5 Turbo VL",
+   "ids": [
+    "ernie-4.5-turbo-vl",
+    "ernie-4.5-turbo-vl-32k"
+   ],
+   "pat": "^ernie-4\\.5-turbo-vl(-32k)?$",
+   "in": 0.42,
+   "out": 1.27,
+   "cw": 0,
+   "cr": 0.11,
+   "unit_note": "USD per 1M tokens",
+   "source_url": "https://intl.cloud.baidu.com/en/doc/qianfan/s/Jm8r1826a-intl-en",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "CN CNY: 0.003 / 0.00075 / 0.009 per 1K."
+  },
+  {
+   "vendor": "Baidu Qianfan (international)",
+   "label": "(other)",
+   "ids": [],
+   "pat": "^ernie",
+   "in": 0.11,
+   "out": 0.45,
+   "cw": 0,
+   "cr": 0.03,
+   "unit_note": "USD per 1M tokens - ERNIE 4.5 Turbo used as mid-tier default",
+   "source_url": "https://intl.cloud.baidu.com/en/doc/qianfan/s/Jm8r1826a-intl-en",
+   "verified_on": "2026-10-15",
+   "confidence": "medium",
+   "notes": "Vendor catch-all."
+  },
+  {
+   "vendor": "cursor",
+   "label": "Composer 2.5 (Cursor)",
+   "ids": [
+    "composer-2.5"
+   ],
+   "pat": "^composer-2\\.5",
+   "in": 0.5,
+   "out": 2.5,
+   "cw": 0,
+   "cr": 0.2,
+   "unit_note": "USD/1M tokens; Fast variant 3.00 / 0.50 cached / 15.00",
+   "source_url": "https://cursor.com/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Only Cursor-owned Composer with a published per-token price. Cursor also lists Cursor-branded Grok 4.7/4.6/4.5 at xAI list (2/0.5/6; Fast 4/1/12)."
+  },
+  {
+   "vendor": "cursor",
+   "label": "Composer 1 (Cursor) (last known)",
+   "ids": [
+    "composer-1"
+   ],
+   "pat": "^composer-1",
+   "in": 1.25,
+   "out": 10,
+   "cw": 0,
+   "cr": 0.125,
+   "unit_note": "USD per 1M tokens; Oct 2025 launch price, no longer on cursor.com/docs/models",
+   "source_url": "https://cursor.com/docs/models",
+   "verified_on": "2026-10-15",
+   "confidence": "low",
+   "notes": "split out of C#106. cursor-small / cursor-fast were never per-token priced (included in plan) and are dropped."
+  },
+  {
+   "vendor": "fallback",
+   "label": "Unknown model",
+   "ids": [],
+   "pat": ".*",
+   "in": 3,
+   "out": 15,
+   "cw": 3.75,
+   "cr": 0.3,
+   "unit_note": "existing DEFAULT_PRICES row",
+   "source_url": null,
+   "verified_on": null,
+   "confidence": "existing",
+   "notes": "unchanged from v8 DEFAULT_PRICES"
+  }
+ ],
+ "overrides": [
+  {
+   "platform": "Groq",
+   "pat": "^qwen/qwen3-32b",
+   "label": "Qwen3 32B (Groq, last known)",
+   "ids": [
+    "qwen/qwen3-32b"
+   ],
+   "in": 0.29,
+   "out": 0.59,
+   "cw": 0,
+   "cr": 0,
+   "source_url": "https://console.groq.com/docs/deprecations",
+   "confidence": "low",
+   "notes": "Groq deprecated the model; default row for qwen/qwen3-32b is DeepInfra."
+  },
+  {
+   "platform": "DeepInfra",
+   "pat": "^deepseek-ai/deepseek-v4-pro",
+   "label": "DeepSeek V4 Pro 0813 (DeepInfra)",
+   "ids": [
+    "deepseek-ai/DeepSeek-V4-Pro-0813"
+   ],
+   "in": 1.3,
+   "out": 2.6,
+   "cw": 0,
+   "cr": 0.1,
+   "source_url": "https://deepinfra.com/pricing",
+   "confidence": "medium",
+   "notes": "from C#62 notes (verified today per researcher)."
+  },
+  {
+   "platform": "DeepInfra",
+   "pat": "^qwen/qwen3\\.5-397b-a17b$",
+   "label": "Qwen3.5-397B-A17B (DeepInfra)",
+   "ids": [
+    "Qwen/Qwen3.5-397B-A17B"
+   ],
+   "in": 0.45,
+   "out": 3,
+   "cw": 0,
+   "cr": 0.22,
+   "source_url": "https://deepinfra.com/pricing",
+   "confidence": "medium",
+   "notes": "from C#67 notes."
+  },
+  {
+   "platform": "Together AI",
+   "pat": "^meta-llama/llama-4-scout-17b-16e-instruct$",
+   "label": "Llama 4 Scout (Together, no longer serverless)",
+   "ids": [
+    "meta-llama/Llama-4-Scout-17B-16E-Instruct"
+   ],
+   "in": 0.18,
+   "out": 0.59,
+   "cw": 0,
+   "cr": 0,
+   "source_url": "https://www.together.ai/pricing",
+   "confidence": "low",
+   "notes": ""
+  },
+  {
+   "platform": "Together AI",
+   "pat": "^meta-llama/meta-llama-3\\.1-8b-instruct-turbo",
+   "label": "Llama 3.1 8B Instruct Turbo (Together) (last known)",
+   "ids": [
+    "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+   ],
+   "in": 0.18,
+   "out": 0.18,
+   "cw": 0,
+   "cr": 0,
+   "source_url": "https://www.together.ai/pricing",
+   "confidence": "low",
+   "notes": "Default row for this id is the verified live DeepInfra price (verifier note on C#70)."
+  },
+  {
+   "platform": "Together AI",
+   "pat": "^deepseek-ai/deepseek-r1$",
+   "label": "DeepSeek-R1 (Together) (last known)",
+   "ids": [
+    "deepseek-ai/DeepSeek-R1"
+   ],
+   "in": 3,
+   "out": 7,
+   "cw": 0,
+   "cr": 0,
+   "source_url": "https://www.together.ai/pricing",
+   "confidence": "low",
+   "notes": "Default row for deepseek-ai/deepseek-r1 is DeepInfra C#88."
+  },
+  {
+   "platform": "Together AI",
+   "pat": "^deepseek-ai/deepseek-v3$",
+   "label": "DeepSeek-V3 (Together) (last known)",
+   "ids": [
+    "deepseek-ai/DeepSeek-V3"
+   ],
+   "in": 1.25,
+   "out": 1.25,
+   "cw": 0,
+   "cr": 0,
+   "source_url": "https://www.together.ai/pricing",
+   "confidence": "low",
+   "notes": "Default row for deepseek-ai/deepseek-v3 is DeepInfra C#89."
+  },
+  {
+   "platform": "DeepInfra",
+   "pat": "^meta-llama/llama-3\\.3-70b-instruct-turbo",
+   "label": "Llama 3.3 70B Instruct Turbo (DeepInfra)",
+   "ids": [
+    "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+   ],
+   "in": 0.1,
+   "out": 0.32,
+   "cw": 0,
+   "cr": 0,
+   "source_url": "https://deepinfra.com/pricing",
+   "confidence": "high",
+   "notes": "USD/1M tokens base tier; priority x1.5, flex x0.8"
+  },
+  {
+   "platform": "DeepInfra",
+   "pat": "^meta-llama/llama-4-scout-17b-16e-instruct$",
+   "label": "Llama 4 Scout (DeepInfra)",
+   "ids": [
+    "meta-llama/Llama-4-Scout-17B-16E-Instruct"
+   ],
+   "in": 0.1,
+   "out": 0.3,
+   "cw": 0,
+   "cr": 0,
+   "source_url": "https://deepinfra.com/pricing",
+   "confidence": "high",
+   "notes": "USD/1M tokens; 320k context"
+  },
+  {
+   "platform": "DeepInfra",
+   "pat": "^openai/gpt-oss-120b",
+   "label": "gpt-oss-120b (DeepInfra)",
+   "ids": [
+    "openai/gpt-oss-120b"
+   ],
+   "in": 0.037,
+   "out": 0.17,
+   "cw": 0,
+   "cr": 0,
+   "source_url": "https://deepinfra.com/openai/gpt-oss-120b",
+   "confidence": "high",
+   "notes": "USD/1M tokens"
+  },
+  {
+   "platform": "DeepInfra",
+   "pat": "^openai/gpt-oss-20b",
+   "label": "gpt-oss-20b (DeepInfra)",
+   "ids": [
+    "openai/gpt-oss-20b"
+   ],
+   "in": 0.03,
+   "out": 0.14,
+   "cw": 0,
+   "cr": 0,
+   "source_url": "https://deepinfra.com/openai/gpt-oss-20b",
+   "confidence": "high",
+   "notes": "USD/1M tokens; priority 0.045/0.21, flex 0.024/0.112"
+  },
+  {
+   "platform": "DeepInfra",
+   "pat": "^moonshotai/kimi-k3",
+   "label": "Kimi-K3 (DeepInfra)",
+   "ids": [
+    "moonshotai/Kimi-K3"
+   ],
+   "in": 2.85,
+   "out": 14.25,
+   "cw": 0,
+   "cr": 0.285,
+   "source_url": "https://deepinfra.com/models/text-generation",
+   "confidence": "high",
+   "notes": "USD/1M tokens"
+  },
+  {
+   "platform": "SambaNova",
+   "pat": "^minimax-m3$",
+   "label": "MiniMax-M3 (SambaNova)",
+   "ids": [
+    "MiniMax-M3"
+   ],
+   "in": 0.6,
+   "out": 2.4,
+   "cw": 0,
+   "cr": 0.06,
+   "source_url": "https://cloud.sambanova.ai/pricing",
+   "confidence": "high",
+   "notes": ""
+  },
+  {
+   "platform": "SambaNova",
+   "pat": "^deepseek-r1$",
+   "label": "DeepSeek-R1 (SambaNova) (last known)",
+   "ids": [
+    "DeepSeek-R1"
+   ],
+   "in": 5,
+   "out": 7,
+   "cw": 0,
+   "cr": 0,
+   "source_url": "https://cloud.sambanova.ai/pricing",
+   "confidence": "low",
+   "notes": "Bare id is also used by Azure AI Foundry; default resolution = existing DeepSeek Reasoner row, so SambaNova is an override only."
+  },
+  {
+   "platform": "SambaNova",
+   "pat": "^deepseek-v3-0324$",
+   "label": "DeepSeek-V3-0324 (SambaNova) (last known)",
+   "ids": [
+    "DeepSeek-V3-0324"
+   ],
+   "in": 3,
+   "out": 4.5,
+   "cw": 0,
+   "cr": 0,
+   "source_url": "https://cloud.sambanova.ai/pricing",
+   "confidence": "low",
+   "notes": "Bare id also used by Azure AI Foundry; default resolution = DeepSeek chat (V3 list) row."
+  },
+  {
+   "platform": "SambaNova",
+   "pat": "^qwen3-32b$",
+   "label": "Qwen3-32B (SambaNova) (last known)",
+   "ids": [
+    "Qwen3-32B"
+   ],
+   "in": 0.4,
+   "out": 0.8,
+   "cw": 0,
+   "cr": 0,
+   "source_url": "https://cloud.sambanova.ai/pricing",
+   "confidence": "low",
+   "notes": "Bare id also an Alibaba open-weight id; default resolution = Qwen catch-all."
+  },
+  {
+   "platform": "Cerebras",
+   "pat": "^gpt-oss-120b$",
+   "label": "gpt-oss-120b (Cerebras)",
+   "ids": [
+    "gpt-oss-120b"
+   ],
+   "in": 0.25,
+   "out": 0.69,
+   "cw": 0,
+   "cr": 0,
+   "source_url": "https://www.cerebras.ai/blog/cerebras-launches-openai-s-gpt-oss-120b-at-a-blistering-3-000-tokens-sec",
+   "confidence": "low",
+   "notes": "USD/1M tokens (Cerebras launch blog Aug 05 2025); third-party trackers show 0.35/0.75 today"
+  }
+ ],
+ "dropped": [
+  {
+   "label": "C#10 o3-pro",
+   "reason": "duplicate of existing o3-pro row (existing kept per verdict)"
+  },
+  {
+   "label": "C#11 o3-mini",
+   "reason": "duplicate of existing o3-mini row (existing kept per verdict)"
+  },
+  {
+   "label": "C#14 o1-pro",
+   "reason": "duplicate of existing o1-pro row (existing kept per verdict)"
+  },
+  {
+   "label": "C#18 Gemini 2.5 Pro",
+   "reason": "duplicate of existing Gemini 2.5 Pro row (same price)"
+  },
+  {
+   "label": "C#19 Gemini 2.5 Flash",
+   "reason": "duplicate of existing Gemini 2.5 Flash row (same price)"
+  },
+  {
+   "label": "C#20 Gemini 2.5 Flash-Lite",
+   "reason": "duplicate of existing Gemini 2.5 Flash-Lite row (same price)"
+  },
+  {
+   "label": "C#51 Qwen3 32B (Groq)",
+   "reason": "moved to overrides (platform Groq): qwen/qwen3-32b default row is the verified live DeepInfra price (Groq id deprecated)"
+  },
+  {
+   "label": "C#56 Groq Compound",
+   "reason": "no token price published (Groq Compound billed at underlying model rates; shut down 2026-09-21)"
+  },
+  {
+   "label": "C#69 Llama 4 Scout (Together, no longer serverless)",
+   "reason": "moved to overrides (platform Together AI): meta-llama/llama-4-scout-17b-16e-instruct default row is Groq"
+  },
+  {
+   "label": "C#70 id meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo (Together)",
+   "reason": "moved to overrides (platform Together AI, last known 0.18/0.18); default row = DeepInfra C#86 (verified live)"
+  },
+  {
+   "label": "C#71 DeepSeek-R1 / V3 / Kimi-K2 (Together, legacy)",
+   "reason": "R1 and V3 moved to overrides (platform Together AI, last known); moonshotai/Kimi-K2-Instruct Together price (1.00/3.00) equals the Groq default row, so no override"
+  },
+  {
+   "label": "C#85 Llama 3.3 70B Instruct Turbo (DeepInfra)",
+   "reason": "moved to overrides (platform DeepInfra): meta-llama/llama-3.3-70b-instruct-turbo default row is Together"
+  },
+  {
+   "label": "C#87 Llama 4 Scout (DeepInfra)",
+   "reason": "moved to overrides (platform DeepInfra): meta-llama/llama-4-scout-17b-16e-instruct default row is Groq"
+  },
+  {
+   "label": "C#94 gpt-oss-120b (DeepInfra)",
+   "reason": "moved to overrides (platform DeepInfra): openai/gpt-oss-120b default row is Groq"
+  },
+  {
+   "label": "C#95 gpt-oss-20b (DeepInfra)",
+   "reason": "moved to overrides (platform DeepInfra): openai/gpt-oss-20b default row is Groq"
+  },
+  {
+   "label": "C#97 Kimi-K3 (DeepInfra)",
+   "reason": "moved to overrides (platform DeepInfra): moonshotai/kimi-k3 default row is Together"
+  },
+  {
+   "label": "C#103 MiniMax-M3 (SambaNova)",
+   "reason": "moved to overrides (platform SambaNova): minimax-m3 default row is MiniMax own API (B#52)"
+  },
+  {
+   "label": "C#104 ids DeepSeek-R1, DeepSeek-V3-0324, Qwen3-32B (SambaNova legacy)",
+   "reason": "bare ids shared with other platforms (Azure / Alibaba) -> SambaNova last-known prices emitted as overrides only; ids still resolve to vendor rows, not fallback"
+  },
+  {
+   "label": "C#82 gpt-oss-120b (Cerebras)",
+   "reason": "moved to overrides (platform Cerebras): bare gpt-oss-120b default row is SambaNova (only vendor-page-verified price)"
+  },
+  {
+   "label": "C#83 Qwen 3.8 27B (Cerebras)",
+   "reason": "no price retrievable (Cerebras pricing tables JS-rendered) and no last-known price in notes"
+  },
+  {
+   "label": "C#84 id llama-4-maverick-17b-128e-instruct (Cerebras legacy)",
+   "reason": "no last-known Cerebras price in notes; the bare id is covered by the SambaNova last-known row"
+  },
+  {
+   "label": "EXISTING#35 Grok fast/mini",
+   "reason": "replaced by the new xAI rows: xAI retired grok-4-fast/grok-4-1-fast on 2026-05-15 and bills them at grok-4.3 rates (1.25/2.50); grok-3-mini gets its own last-known row"
+  },
+  {
+   "label": "A#10 Command A+",
+   "reason": "Command A+ listed at $0 (free until rate limits) - dropped per verdict; its ids now resolve to the Cohere (other) catch-all"
+  },
+  {
+   "label": "A#12 Command A Vision / Reasoning / Translate",
+   "reason": "no public per-token price and no last-known price (Command A Vision/Reasoning/Translate); ids resolve to Cohere (other) catch-all"
+  },
+  {
+   "label": "A#25 Llama 4 / Llama 3.x on Meta Llama API (no longer offered)",
+   "reason": "no vendor list price; Llama ids are priced by their host rows (Groq/Together/Fireworks/DeepInfra/SambaNova/Cerebras) - aggregator ranges in notes are unverified"
+  },
+  {
+   "label": "B#24 Legacy Qwen ids no longer priced (qwen-turbo, qwq, qwen3-coder-plus, qwen-vl-max/plus, qwen3 open models)",
+   "reason": "no current international price and no last-known price in notes; ids resolve to the Qwen catch-all (see retired_aliases)"
+  },
+  {
+   "label": "B#30 Retired Kimi K2 / K1.5 / moonshot-v1 ids",
+   "reason": "discontinued ids with no price; mapped in retired_aliases (-> kimi-k2.6) and resolve to the Kimi catch-all"
+  },
+  {
+   "label": "B#60 MiniMax-M3.1-Flash-Preview (plan-only)",
+   "reason": "plan-only (M Plan / MiniMax Code), no pay-as-you-go price"
+  },
+  {
+   "label": "B#61 MiniMax-M1 / MiniMax-Text-01 (gone)",
+   "reason": "gone from pricing/model pages, no price; ids resolve to the MiniMax catch-all"
+  },
+  {
+   "label": "B#67 ERNIE X1 family (CN-only / retiring)",
+   "reason": "no international USD price; only a CNY price for ERNIE-X1.1-Preview (1/4 CNY per 1M) exists in notes - not converted; ids resolve to the ERNIE catch-all"
+  },
+  {
+   "label": "C#106 ids cursor-small, cursor-fast",
+   "reason": "never per-token priced (included in plan)"
+  },
+  {
+   "label": "C#107 Cursor third-party surcharge",
+   "reason": "empty pattern (would match every id); informational surcharge row, not a model price"
+  }
+ ],
+ "retired_aliases": [
+  {
+   "id": "grok-4",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-4-0709",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-4-latest",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-4-fast",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-4-fast-reasoning",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-4-fast-non-reasoning",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-4-fast-reasoning-latest",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-4-fast-non-reasoning-latest",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-4-1-fast",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-4-1-fast-reasoning",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-4-1-fast-non-reasoning",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-3",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-3-latest",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-3-beta",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-3-fast",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-3-fast-latest",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "grok-3-fast-beta",
+   "successor": "grok-4.3",
+   "note": "Retired 2026-05-15; xAI routes requests to grok-4.3 and bills at grok-4.3 rates (1.25/2.50, cr 0.20). Dedicated rows at those rates exist in rows[]."
+  },
+  {
+   "id": "kimi-k2.5",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "kimi-k2-0905-preview",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "kimi-k2-0711-preview",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "kimi-k2-turbo-preview",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "kimi-k2-thinking",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "kimi-k2-thinking-turbo",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "kimi-latest",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "kimi-thinking-preview",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "moonshot-v1-8k",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "moonshot-v1-32k",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "moonshot-v1-128k",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "moonshot-v1-auto",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "moonshot-v1-8k-vision-preview",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "moonshot-v1-32k-vision-preview",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "moonshot-v1-128k-vision-preview",
+   "successor": "kimi-k2.6",
+   "note": "Discontinued (K2 series 2026-05-25; K2.5 and moonshot-v1-* 2026-08-31). Vendor names kimi-k3 as replacement; mapped to kimi-k2.6 as the like-for-like price class (0.95/4.00) - the Kimi catch-all already prices them at that rate."
+  },
+  {
+   "id": "qwen-turbo",
+   "successor": "qwen-flash",
+   "note": "Alibaba names qwen-flash the successor of qwen-turbo; today these resolve to the Qwen catch-all (qwen-plus mid-tier 0.40/1.20)."
+  },
+  {
+   "id": "qwen-turbo-latest",
+   "successor": "qwen-flash",
+   "note": "Alibaba names qwen-flash the successor of qwen-turbo; today these resolve to the Qwen catch-all (qwen-plus mid-tier 0.40/1.20)."
+  },
+  {
+   "id": "qwen3-coder-plus",
+   "successor": "qwen3.7-plus",
+   "note": "Alibaba depreciation page names qwen3.7-plus as the replacement; resolves to the Qwen catch-all today."
+  },
+  {
+   "id": "qwq-plus",
+   "successor": "qwen-plus",
+   "note": "Retired from Model Studio international with no named successor (depreciation page points at the qwen3.7/3.6 series); resolve to the Qwen catch-all."
+  },
+  {
+   "id": "qwq-32b",
+   "successor": "qwen-plus",
+   "note": "Retired from Model Studio international with no named successor (depreciation page points at the qwen3.7/3.6 series); resolve to the Qwen catch-all."
+  },
+  {
+   "id": "qwen3-coder-480b-a35b-instruct",
+   "successor": "qwen-plus",
+   "note": "Retired from Model Studio international with no named successor (depreciation page points at the qwen3.7/3.6 series); resolve to the Qwen catch-all."
+  },
+  {
+   "id": "qwen3-coder-30b-a3b-instruct",
+   "successor": "qwen-plus",
+   "note": "Retired from Model Studio international with no named successor (depreciation page points at the qwen3.7/3.6 series); resolve to the Qwen catch-all."
+  },
+  {
+   "id": "qwen-vl-max",
+   "successor": "qwen-plus",
+   "note": "Retired from Model Studio international with no named successor (depreciation page points at the qwen3.7/3.6 series); resolve to the Qwen catch-all."
+  },
+  {
+   "id": "qwen-vl-plus",
+   "successor": "qwen-plus",
+   "note": "Retired from Model Studio international with no named successor (depreciation page points at the qwen3.7/3.6 series); resolve to the Qwen catch-all."
+  },
+  {
+   "id": "qwen3-vl-flash",
+   "successor": "qwen-plus",
+   "note": "Retired from Model Studio international with no named successor (depreciation page points at the qwen3.7/3.6 series); resolve to the Qwen catch-all."
+  },
+  {
+   "id": "qwen3-235b-a22b",
+   "successor": "qwen-plus",
+   "note": "Retired from Model Studio international with no named successor (depreciation page points at the qwen3.7/3.6 series); resolve to the Qwen catch-all."
+  },
+  {
+   "id": "qwen3-next-80b-a3b",
+   "successor": "qwen-plus",
+   "note": "Retired from Model Studio international with no named successor (depreciation page points at the qwen3.7/3.6 series); resolve to the Qwen catch-all."
+  },
+  {
+   "id": "qwen3-30b-a3b",
+   "successor": "qwen-plus",
+   "note": "Retired from Model Studio international with no named successor (depreciation page points at the qwen3.7/3.6 series); resolve to the Qwen catch-all."
+  },
+  {
+   "id": "qwen3-32b",
+   "successor": "qwen-plus",
+   "note": "Retired from Model Studio international with no named successor (depreciation page points at the qwen3.7/3.6 series); resolve to the Qwen catch-all."
+  },
+  {
+   "id": "qwen3-max",
+   "successor": "qwen3.7-max",
+   "note": "Decommissioned 2026-09-08; replacement qwen3.7-max. Kept as a priced row at the last-known Qwen3-Max list price (B#23) because usage before retirement was billed at that price."
+  },
+  {
+   "id": "qwen3-max-preview",
+   "successor": "qwen3.7-max",
+   "note": "Decommissioned 2026-09-08; replacement qwen3.7-max. Kept as a priced row at the last-known Qwen3-Max list price (B#23) because usage before retirement was billed at that price."
+  },
+  {
+   "id": "qwen3-max-2025-09-23",
+   "successor": "qwen3.7-max",
+   "note": "Decommissioned 2026-09-08; replacement qwen3.7-max. Kept as a priced row at the last-known Qwen3-Max list price (B#23) because usage before retirement was billed at that price."
+  },
+  {
+   "id": "qwen3-max-2026-01-23",
+   "successor": "qwen3.7-max",
+   "note": "Decommissioned 2026-09-08; replacement qwen3.7-max. Kept as a priced row at the last-known Qwen3-Max list price (B#23) because usage before retirement was billed at that price."
+  },
+  {
+   "id": "qwen3.6-max-preview",
+   "successor": "qwen3.7-max",
+   "note": "Decommissioned 2026-09-08; replacement qwen3.7-max. Kept as a priced row at the last-known Qwen3-Max list price (B#23) because usage before retirement was billed at that price."
+  },
+  {
+   "id": "MiniMax-M1",
+   "successor": "MiniMax-M2",
+   "note": "Gone from MiniMax pricing/model pages; resolve to the MiniMax catch-all (M2.x standard tier)."
+  },
+  {
+   "id": "MiniMax-Text-01",
+   "successor": "MiniMax-M2",
+   "note": "Gone from MiniMax pricing/model pages; resolve to the MiniMax catch-all (M2.x standard tier)."
+  },
+  {
+   "id": "MiniMax-M2.5",
+   "successor": "MiniMax-M3.1-Flash-Preview",
+   "note": "From 2026-10-19 MiniMax routes M2.5/M2.7 PLAN traffic to M3.1-Flash-Preview (plan-only, no per-token price). Pay-as-you-go M2.5/M2.7 rows remain priced."
+  },
+  {
+   "id": "MiniMax-M2.7",
+   "successor": "MiniMax-M3.1-Flash-Preview",
+   "note": "From 2026-10-19 MiniMax routes M2.5/M2.7 PLAN traffic to M3.1-Flash-Preview (plan-only, no per-token price). Pay-as-you-go M2.5/M2.7 rows remain priced."
+  },
+  {
+   "id": "groq/compound",
+   "successor": null,
+   "note": "Groq Compound shut down 2026-09-21; billed at underlying model rates + tool fees, no successor row - falls to the Unknown model row."
+  },
+  {
+   "id": "groq/compound-mini",
+   "successor": null,
+   "note": "Groq Compound shut down 2026-09-21; billed at underlying model rates + tool fees, no successor row - falls to the Unknown model row."
+  },
+  {
+   "id": "mistral-large-2411",
+   "successor": "mistral-large-latest",
+   "note": "Retired 2026-05-31; mistral-large-latest = Mistral Large 3 (0.50/1.50). Resolve to the Mistral catch-all today."
+  },
+  {
+   "id": "pixtral-large-2411",
+   "successor": "mistral-large-latest",
+   "note": "Retired 2026-05-31; mistral-large-latest = Mistral Large 3 (0.50/1.50). Resolve to the Mistral catch-all today."
+  },
+  {
+   "id": "mistral-medium-2505",
+   "successor": "mistral-medium-latest",
+   "note": "Medium 3/3.1 retired 2026-08-31; were priced 0.40/2.00 so deliberately excluded from the Medium 3.5 row - they resolve to the Mistral catch-all (1.50/7.50)."
+  },
+  {
+   "id": "mistral-medium-2508",
+   "successor": "mistral-medium-latest",
+   "note": "Medium 3/3.1 retired 2026-08-31; were priced 0.40/2.00 so deliberately excluded from the Medium 3.5 row - they resolve to the Mistral catch-all (1.50/7.50)."
+  },
+  {
+   "id": "mistral-small-2506",
+   "successor": "mistral-small-latest",
+   "note": "Small 3.2 retired 2026-07-31; resolves to the Mistral catch-all."
+  },
+  {
+   "id": "codestral-2501",
+   "successor": "codestral-latest",
+   "note": "Retired 2025-11-30; resolves to the Mistral catch-all."
+  },
+  {
+   "id": "ministral-8b-2410",
+   "successor": "ministral-8b-latest / ministral-3b-latest",
+   "note": "Retired 2025-12-31; resolve to the Mistral catch-all."
+  },
+  {
+   "id": "ministral-3b-2410",
+   "successor": "ministral-8b-latest / ministral-3b-latest",
+   "note": "Retired 2025-12-31; resolve to the Mistral catch-all."
+  },
+  {
+   "id": "zai-glm-5-2",
+   "successor": "zai-glm-5-3",
+   "note": "Deprecated on La Plateforme, retires 2026-10-31; resolves to the Mistral catch-all today."
+  },
+  {
+   "id": "command-a-plus-05-2026",
+   "successor": "command-a-03-2025",
+   "note": "Command A+ row dropped ($0 free tier); the id resolves to the Cohere (other) catch-all at the Command A price."
+  },
+  {
+   "id": "sonar-reasoning",
+   "successor": "sonar-reasoning-pro",
+   "note": "Retired; kept as its own last-known row (1.00/5.00)."
+  }
+ ]
+}
