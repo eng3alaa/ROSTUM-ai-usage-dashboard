@@ -203,8 +203,8 @@ export async function run() {
       opt.status === 204 && corsOk(opt) && corsOk(st), `status ${opt.status} · ${JSON.stringify(opt.headers)}`);
 
     const page = await request(a.port, 'GET', '/');
-    add('collector: GET / → 200 text/html serving AI Usage Dashboard.html (contains "<title>AI Usage")',
-      page.status === 200 && /^text\/html/i.test(page.headers['content-type'] || '') && page.body.toString('utf8').includes('<title>AI Usage'),
+    add('collector: GET / → 200 text/html serving AI Usage Dashboard.html (contains "<title>ROSTUM - AI Usage")',
+      page.status === 200 && /^text\/html/i.test(page.headers['content-type'] || '') && page.body.toString('utf8').includes('<title>ROSTUM - AI Usage'),
       `status ${page.status} ct=${page.headers['content-type']} ${page.body.length} bytes`);
     // review m7: hardening headers on every answer; Host allow-list (DNS rebinding: a name resolving to 127.0.0.1 must reach neither the API nor the page)
     const hardened = (r) => r.headers['x-frame-options'] === 'DENY' && r.headers['x-content-type-options'] === 'nosniff';

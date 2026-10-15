@@ -136,7 +136,7 @@ for (let i = 0; i < argv.length; i++) {
   else { console.error(`ai-usage-collector: unknown option "${a}" (try --help)`); process.exit(2); }
 }
 function printHelp() {
-  console.log(`ai-usage-collector v${VERSION} — serves this machine's AI log folders to the AI Usage Dashboard on 127.0.0.1
+  console.log(`ai-usage-collector v${VERSION} — serves this machine's AI log folders to ROSTUM (the AI Usage Dashboard) on 127.0.0.1
 usage: node docs/tools/ai-usage-collector.mjs [--port <n>] [--root <id>=<path>]... [--no-<id>]... [--html <path>]
   --port <n>          listen port (env COLLECTOR_PORT; default 11436; 0 = any free port)
   --root <id>=<path>  use <path> for tool <id> instead of auto-discovery (repeatable; required for aider / tgwebui)

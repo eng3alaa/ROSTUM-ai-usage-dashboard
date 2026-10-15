@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI Usage &amp; Cost Monitor</title>
+<title>ROSTUM - AI Usage &amp; Cost Monitor</title>
 <style>
 /* ============ Palette & theme (dataviz reference palette) ============ */
 :root {
@@ -386,6 +386,7 @@ progress { width: 160px; height: 8px; }
   .grid { grid-template-columns: 1fr; }
   .wrap { padding: 14px 14px 48px; }
 }
+  .brand-sub { font-weight: 400; opacity: .75; }
 </style>
 </head>
 <body>
@@ -396,7 +397,7 @@ progress { width: 160px; height: 8px; }
   <!-- ================= Header ================= -->
   <header class="topbar">
     <div class="title-block">
-      <h1>AI Usage &amp; Cost Monitor</h1>
+      <h1>ROSTUM <span class="brand-sub">AI Usage &amp; Cost Monitor</span></h1>
       <div class="subtitle" id="last-updated">No data yet — connect an account above.</div>
     </div>
     <div class="top-actions">
@@ -794,7 +795,7 @@ progress { width: 160px; height: 8px; }
 <script>
 'use strict';
 /* =================================================================
- * AI Usage & Cost Monitor — single-file local dashboard
+ * ROSTUM - AI Usage & Cost Monitor — single-file local dashboard
  * Part 1: utilities, theme, pricing, state store
  * ================================================================= */
 
