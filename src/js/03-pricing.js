@@ -36,6 +36,17 @@ function validPriceRows(list) {
  * are the NEW rows it never saw — never removals (a deliberate deletion cannot be told apart in that shape; delete again). Rows are identified by
  * pattern: editing a pattern turns a default into an added rule (and the default comes back as removed on the next save). ---------- */
 const PRICE_FIELDS = ['pat', 'label', 'in', 'out', 'cw', 'cr'];
+/** A row's confidence pill: the generated c (high / medium / low / existing), 'user' for an edited or added row (no c at all = the editor's own row). */
+const priceConfidence = (row) => row.c || 'user';
+/** at: null on a bundled row = the Aug 2026 list's number, never re-verified (the generated block documents it that way). */
+const PRICE_UNVERIFIED_TEXT = 'unverified since Aug 2026';
+const PRICE_CONFIDENCE_TITLE = {
+  high: 'Read from the vendor\'s pricing page on the verified date',
+  medium: 'Read from a vendor page that lists the model indirectly (a deprecation or migration note)',
+  low: 'Last known price — the vendor page no longer lists this model',
+  existing: 'Carried over from the Aug 2026 list; not re-verified since',
+  user: 'Your own edit or row — not a verified vendor list price',
+};
 const stripPriceRow = (r) => Object.fromEntries(PRICE_FIELDS.map(k => [k, r[k]]));
 const samePrice = (a, b) => PRICE_FIELDS.every(k => a[k] === b[k]);
 function priceEditsFromList(rows, trackRemovals) {
@@ -62,7 +73,7 @@ function applyPriceEdits(edits) {
     const { after, ...row } = a;
     let at = Math.max(0, rows.length - 1);
     if (after === null) at = 0; else { const j = rows.findIndex(r => r.pat === after); if (j >= 0) at = j + 1; }
-    rows.splice(at, 0, row);
+    rows.splice(at, 0, { ...row, at: null, c: 'user', src: null });
   }
   return rows;
 }
@@ -77,7 +88,18 @@ const Pricing = {
     this._cache.clear();
     if (legacy) this.save();
   },
-  save() { LS.set('prices', priceEditsFromList(this.rows, true)); this._cache.clear(); },
+  save() { LS.set('prices', priceEditsFromList(this.rows, true)); this._stampProvenance(); this._cache.clear(); },
+  /** After an edit the in-memory rows carry the provenance a reload would give them: a row equal to its default keeps the vendor's verified
+   *  date / confidence / source, an edited or added row reads c: 'user' with none (that provenance belonged to the vendor's number). */
+  _stampProvenance() {
+    const byPat = new Map(DEFAULT_PRICES.map(d => [d.pat, d]));
+    for (const r of this.rows) {
+      const d = byPat.get(r.pat);
+      Object.assign(r, d && samePrice(r, d) ? { at: d.at, c: d.c, src: d.src } : { at: null, c: 'user', src: null });
+    }
+  },
+  /** Plan 10 T3b: how many rows differ from the bundled set (edited + added + removed) — "N user edits" on the KPI footer and the CSV line. */
+  editCount() { const e = priceEditsFromList(this.rows, true); return e.edited.length + e.added.length + e.removed.length; },
   reset() { this.rows = JSON.parse(JSON.stringify(DEFAULT_PRICES)); this.save(); },
   /** Plan 6: the catch-all row — the one whose pattern is '.*' (a user may edit or reorder the list), else the last row (what resolve() falls back to). */
   fallbackRow() { return this.rows.find(r => r.pat === '.*') || this.rows[this.rows.length - 1] || null; },
@@ -96,7 +118,9 @@ const Pricing = {
    *  (the host's own price for that exact id is the most specific fact we have, so it beats a vendor retirement) → MODEL_ALIASES (retired
    *  id → successor; the result carries aliasOf = successor) → that platform's override for the successor → DEFAULT_PRICES (this.rows,
    *  the user-editable list) first match → the '.*' fallback. Returns a shallow COPY of the matched row — aliasOf / fallback are set on
-   *  the copy, never on a row in this.rows — cached per model|platform (save()/load() clear the cache). */
+   *  the copy, never on a row in this.rows — cached per model|platform (save()/load() clear the cache). Plan 9 A2: the copy also says which
+   *  rate won — source 'override' (+ overrideFor = the platform) when a PRICE_OVERRIDES row did, 'user' when the row is the user's own edit
+   *  or addition, 'default' for a bundled row — so the UI can disclose it (an override makes an edit of the vendor row ineffective). */
   resolve(model, platform) {
     const raw = String(model || '').toLowerCase(), key = raw + '|' + (platform || '');
     if (this._cache.has(key)) return this._cache.get(key);
@@ -109,12 +133,15 @@ const Pricing = {
       if (overrides.length) hit = this._first(overrides, m, n);
       if (!hit) hit = this._first(this.rows, m, n);
     }
+    const fromOverride = !!hit && overrides.includes(hit);
     let fallback = false;
-    if (!hit) { hit = this.rows[this.rows.length - 1] || { pat: '.*', in: 3, out: 15, cw: 3.75, cr: 0.3, label: 'Unknown model' }; fallback = true; }
+    if (!hit) { hit = this.rows[this.rows.length - 1] || { pat: '.*', in: 3, out: 15, cw: 3.75, cr: 0.3, label: 'Unknown model', c: 'existing' }; fallback = true; }
     else if (hit === this.fallbackRow()) fallback = true;
     const out = Object.assign({}, hit);
     if (aliasOf) out.aliasOf = aliasOf;
     if (fallback) out.fallback = true;
+    if (fromOverride) out.overrideFor = platform;
+    out.source = fromOverride ? 'override' : priceConfidence(hit) === 'user' ? 'user' : 'default';
     this._cache.set(key, out);
     return out;
   },

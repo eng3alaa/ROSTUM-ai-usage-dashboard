@@ -136,6 +136,8 @@ export async function run({ browser, ok }) {
       !!un.text && /2 models are priced at the fallback rate \(\$3 in \/ \$15 out per M\): gpt-6-astra \(5,730 msgs, \$4\.50\), codex-auto-review \(3 msgs, \$0\.300\) — set their prices in the API price list\./.test(un.text) && /serious/.test(un.level) && un.buttons.join() === 'Set prices,Dismiss',
       JSON.stringify([un.text, un.level, un.buttons]));
     ok('unpriced: totals unchanged — the fallback price is still applied (breakdown total $6.80)', un.total === '$6.80', String(un.total));
+    ok('unpriced (Plan 10 T3b): a second sentence discloses the models priced from an unverified or user-edited row — claude-sonnet-5 is an Aug-2026 row carried over unverified (c: existing), with its count, message count and cost',
+      /API price list\. 1 model is priced from an unverified or user-edited row, so its cost is an estimate: claude-sonnet-5 \(unverified since Aug 2026, 1 msg, \$2\.00\)\./.test(un.text || ''), String(un.text));
 
     const fbRow = await page.evaluate(() => {
       const fb = Pricing.rows.find(r => r.pat === '.*'); const was = fb.in; fb.in = 4; Pricing.save();
@@ -184,6 +186,30 @@ export async function run({ browser, ok }) {
       return { before, after, collapsed: View.isCollapsed('pricing'), scrolledTo };
     });
     ok('unpriced: "Set prices" expands a collapsed price list and scrolls to it', sp.before && !sp.after && !sp.collapsed && sp.scrolledTo === 'pricing-title', JSON.stringify(sp));
+
+    // Plan 10 T3b: with no fallback-priced model at all the notice still discloses the estimates — a user-edited row and a low-confidence bundled
+    // row are named with their reason; the level is info (not serious), the dismissal key is estimates:<sorted set>; a high-confidence verified row raises nothing
+    const est = await page.evaluate(() => {
+      LS.set('dismissedAlerts', {}); Store.sources = {}; LS.del('prices'); Pricing.load();
+      Store.setSource('csv', [
+        { d: todayKey(), platform: 'Anthropic API', model: 'claude-sonnet-5', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 1 },   // c: existing → unverified since Aug 2026
+        { d: todayKey(), platform: 'xAI', model: 'grok-4.3', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 2 },                   // c: high, verified → not listed
+        { d: todayKey(), platform: 'Cursor', model: 'composer-1', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 3 },               // c: low → low confidence
+      ], {});
+      Pricing.rows.find(x => x.pat === '^grok-4\\.5').in = 1; Pricing.save();
+      Store.setSource('csv2', [{ d: todayKey(), platform: 'xAI', model: 'grok-4.5', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 4 }], {});   // user-edited row → user price
+      App._render();
+      const a = document.querySelector('#alerts .alert[data-kind="unpriced"]');
+      const out = { text: a && a.textContent, cls: a && a.className, buttons: a ? [...a.querySelectorAll('button')].map(b => b.textContent) : [] };
+      if (a) a.querySelector('.alert-dismiss').click();
+      out.keys = Object.keys(LS.get('dismissedAlerts', {}));
+      App._render(); out.gone = !document.querySelector('#alerts .alert[data-kind="unpriced"]');
+      LS.set('dismissedAlerts', {}); Store.sources = {}; LS.del('prices'); Pricing.load(); App._render();
+      return out;
+    });
+    ok('unpriced (T3b): estimates alone — "3 models are priced from an unverified or user-edited row, so their cost is an estimate: claude-sonnet-5 (unverified since Aug 2026, 1 msg, $2.00), composer-1 (low confidence, 3 msgs, $1.25), grok-4.5 (user price, 4 msgs, $1.00)." — no fallback sentence, level info, Set prices + Dismiss, key estimates:<set>, dismissal hides it; the verified grok-4.3 row is not listed',
+      !!est.text && !/fallback rate/.test(est.text) && /^⚠ 3 models are priced from an unverified or user-edited row, so their cost is an estimate: claude-sonnet-5 \(unverified since Aug 2026, 1 msg, \$2\.00\), composer-1 \(low confidence, 3 msgs, \$1\.25\), grok-4\.5 \(user price, 4 msgs, \$1\.00\)\./.test(est.text)
+      && /\binfo\b/.test(est.cls) && !/serious/.test(est.cls) && est.buttons.join() === 'Set prices,Dismiss' && est.keys.join() === 'estimates:claude-sonnet-5,composer-1,grok-4.5' && est.gone, JSON.stringify(est));
   } finally {
     await page.close();
   }

@@ -102,6 +102,8 @@
         <li>Local runners are $0, and so are coding-tool requests that name a local backend (Continue + Ollama, Codex OSS models and the like).</li>
         <li>A model the price list does not know is priced at the fallback row and named in a notice above the KPIs: never guessed silently.</li>
       </ul>
+      <h3>How prices work</h3>
+      <p>Each row of your data is priced by the first rule that fits: the model id is lowercased and normalised (the vendors' spellings of one Claude model become one id); a retired id is priced as its successor (the Model breakdown says <i>priced as …</i>); a <b>platform override</b> — a host's own rate for a model it bills differently from the vendor (Groq, DeepInfra, SambaNova, Together AI, Cerebras) — beats the vendor row for data from that platform; then the first matching row of the API price list wins; a model no row knows falls to the Unknown model row. The bundled list was verified on <code id="help-prices-date"></code>; the banner above the list counts the days since. To change a price, edit any cell or add a row in the API price list: edits are stored in this browser only, read <i>user</i> in the list and in the breakdown, and carry no verified date. A platform override is a fixed built-in rate that an edit of the vendor row cannot change — the list says <i>wins for &lt;platform&gt;</i> where that applies.</p>
       <h3>If something looks wrong</h3>
       <dl class="help-fix">
         <dt>Local collector card says "Not running at http://127.0.0.1:11436"</dt><dd>Start it: <code>node docs/tools/ai-usage-collector.mjs</code>. With <code>--port</code>, put the printed URL in the card's Collector URL field.</dd>
@@ -157,6 +159,7 @@
       <div class="delta" id="kpi-billed-note">Connect Anthropic/OpenAI admin keys</div>
     </div>
   </div>
+  <div class="kpi-foot note" id="kpi-foot"></div>
 
   <!-- ================= Insights row ================= -->
   <div class="row-head" id="insights-head"><h2>Insights</h2><span id="insights-chips"></span></div>
@@ -389,18 +392,14 @@
   <!-- ================= Pricing ================= -->
   <div class="section-title" id="pricing-title">
     <h2>API price list</h2>
-    <span class="hint">USD per million tokens — list prices as of Aug 2026, editable; first matching pattern wins. Patterns also match a normalized Claude id (dots→hyphens, family-first for 4+, trailing date and the Bedrock anthropic.…-v1:0 / Vertex …@date wrappers stripped), so vendor spellings like claude-opus-4.1 / claude-4.1-opus / claude-opus-4-1-20250805 / anthropic.claude-opus-4-1-20250805-v1:0 all hit the same row.</span>
+    <span class="hint">USD per million tokens, editable. A pattern is a regular expression tried against the lowercased model id and its normalised form (claude-opus-4.1 / claude-4.1-opus / claude-opus-4-1-20250805 / the Bedrock anthropic.…-v1:0 and Vertex …@date wrappers all hit one row); the first matching row wins. Retired ids are priced as their successor. A platform override — a host's own rate, listed at the bottom — wins over the vendor row for data from that platform, whatever you set there; such rows say “wins for &lt;platform&gt;”.</span>
     <span class="spacer" style="flex:1"></span>
     <button class="btn small" id="add-price">+ Add model</button>
     <button class="btn small" id="reset-prices">Reset to defaults</button>
   </div>
   <div class="card" id="card-pricing" style="overflow-x:auto">
-    <table class="data" id="pricing-table">
-      <thead>
-        <tr><th>Model (match pattern)</th><th>Label</th><th>Input</th><th>Output</th><th>Cache write</th><th>Cache read</th><th></th></tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+    <div class="prices-banner" id="prices-verified" role="status"></div>
+    <div id="pricing-groups"></div>
     <div class="note">Cache write is billed at the 5-minute-TTL rate where a provider distinguishes TTLs. Anthropic cache reads ≈ 10% of input price; OpenAI cached input ≈ 10%, cache writes free. Edit any cell — totals recalculate instantly.</div>
   </div>
 

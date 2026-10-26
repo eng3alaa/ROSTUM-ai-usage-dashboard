@@ -222,10 +222,13 @@ input[type="date"], input[type="text"], input[type="password"], input[type="sear
 
 /* ============ Alerts & budgets ============ */
 #alerts .alert { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin: 0 0 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-1); font-size: 13px; }
-#alerts .alert.serious { border-left: 4px solid var(--serious); } #alerts .alert.critical { border-left: 4px solid var(--critical); }
+#alerts .alert.serious { border-left: 4px solid var(--serious); } #alerts .alert.critical { border-left: 4px solid var(--critical); } #alerts .alert.info { border-left: 4px solid var(--accent); }   /* Plan 10 T3b: estimates-only notice */
 #alerts .alert .alert-dismiss { margin-left: auto; }
 #alerts .alert .alert-action { margin-left: auto; } #alerts .alert .alert-action + .alert-dismiss { margin-left: 0; }   /* Plan 6: "Set prices" sits beside Dismiss on the unpriced-models notice */
-#breakdown-table td.name .badge.fallback-price { font-size: 9px; padding: 0 5px; margin-left: 6px; color: var(--serious); vertical-align: middle; }   /* Plan 6: model priced at the '.*' fallback row */
+#breakdown-table td.name .badge { font-size: 9px; padding: 0 5px; margin-left: 6px; vertical-align: middle; }
+#breakdown-table td.name .badge.fallback-price { color: var(--serious); }   /* Plan 6: model priced at the '.*' fallback row */
+#breakdown-table td.name .badge.price-note { color: var(--ink-2); text-transform: none; letter-spacing: 0; }   /* Plan 9 A2: priced as <successor> / <platform> rate / user price */
+.kpi-foot { margin: -6px 0 14px; }   /* Plan 10 T3b: "prices: bundled set of <date>" under the KPI tiles */
 .budget-row { display: grid; grid-template-columns: 1fr 120px 1fr; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--grid); }
 .budget-row:first-child { border-top: 0; }
 .budget-bar { height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; margin-top: 6px; }
@@ -364,14 +367,31 @@ pre.cmd {
 .note { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
 progress { width: 160px; height: 8px; }
 
-/* pricing table */
-#pricing-table input.price {
+/* pricing list (Plan 9 A2: vendor groups, provenance, override disclosure) */
+.prices-banner { font-size: 12.5px; color: var(--ink-2); padding: 8px 12px; margin: 0 0 10px; border-radius: 8px; border: 1px solid var(--border); border-left: 4px solid var(--good-text); background: var(--surface-1); }
+.prices-banner.stale { border-left-color: var(--serious); color: var(--ink); }
+details.price-group { border-top: 1px solid var(--grid); }
+details.price-group > summary { cursor: pointer; padding: 7px 4px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); list-style: none; }
+details.price-group > summary::-webkit-details-marker { display: none; }
+details.price-group > summary::before { content: '▸'; display: inline-block; width: 14px; color: var(--muted); }
+details.price-group[open] > summary::before { content: '▾'; }
+details.price-group table { margin: 0 0 8px; }
+#pricing-groups tr.matched td { background: var(--wash); }
+#pricing-groups input.price {
   width: 76px; text-align: right; font-variant-numeric: tabular-nums;
   background: var(--page); border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px; font-size: 12px;
   color: var(--ink);
 }
-#pricing-table input.pat { width: 200px; font-size: 11.5px; font-family: ui-monospace, monospace; }
-#pricing-table td { padding: 4px 8px; }
+#pricing-groups input.pat, #pricing-groups code.pat { font-size: 11.5px; font-family: ui-monospace, monospace; }
+#pricing-groups input.pat { width: 200px; }
+#pricing-groups td { padding: 4px 8px; vertical-align: top; }
+#pricing-groups td.num { text-align: right; font-variant-numeric: tabular-nums; }
+#pricing-groups td.prov { font-size: 11px; color: var(--muted); white-space: nowrap; }
+#pricing-groups .pill { font-size: 9.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; margin-left: 6px; color: var(--ink-2); }
+#pricing-groups .pill.c-high { color: var(--good-text); } #pricing-groups .pill.c-low, #pricing-groups .pill.c-existing { color: var(--serious); } #pricing-groups .pill.c-user { color: var(--accent); }
+#pricing-groups a.src { margin-left: 6px; color: var(--accent); }
+#pricing-groups .matched-models, #pricing-groups .wins-for { font-size: 10.5px; color: var(--ink-2); margin-top: 2px; white-space: normal; }
+#pricing-groups .wins-for { color: var(--serious); font-weight: 600; }
 
 .footer { margin-top: 34px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--grid); padding-top: 14px; }
 

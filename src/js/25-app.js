@@ -103,6 +103,7 @@ const App = {
     this.renderBreakdown(rows, hasEst);
     this.renderProjects(win);
     this.renderSubtitle(rows);
+    this.refreshPricingOnDataChange();
   },
 
   renderSubtitle(rows) {
@@ -131,35 +132,61 @@ const App = {
     }
     if (all.length > MAX) box.appendChild(el('div', { class: 'note', text: `+${all.length - MAX} more — see Budgets` }));
   },
-  /* ---------- Plan 6: unpriced models — models the price list does not know are priced at the fallback row; say so, never guess silently ---------- */
-  /** Rows whose model id resolves to the fallback ('.*') row, grouped by model → [{ model, platforms: [..], msgs, tokens, cost }] sorted by
-   *  cost desc. Local rows (platform in LOCAL_PLATFORMS, or local:1 from a coding-tool parser) are $0 by rule and are never "guessed", so
-   *  they are skipped. Totals and KPIs are NOT changed — the fallback price still applies; this only names what was guessed. */
-  unpricedModels(rows) {
+  /* ---------- Plan 6: unpriced models — models the price list does not know are priced at the fallback row; say so, never guess silently.
+   *            Plan 10 T3b: the same notice also names the models whose price is only an estimate (a user-edited row, an unverified bundled row). ---------- */
+  /** rows → one entry per model id { model, why, platforms: [..], msgs, tokens, cost } sorted by cost desc; tag(r) returns a reason string to
+   *  include the row or null to skip it. Local rows (platform in LOCAL_PLATFORMS, or local:1 from a coding-tool parser) are $0 by rule and are
+   *  never "guessed", so they are skipped. Totals and KPIs are NOT changed — this only names what was guessed or estimated. */
+  _modelTotals(rows, tag) {
     const by = new Map();
     for (const r of rows) {
-      if (r.local || LOCAL_PLATFORMS.has(r.platform) || !Pricing.isFallback(r.model, r.platform)) continue;
+      if (r.local || LOCAL_PLATFORMS.has(r.platform)) continue;
+      const why = tag(r); if (!why) continue;
       const m = String(r.model || '');
       let e = by.get(m);
-      if (!e) { e = { model: m, platforms: [], msgs: 0, tokens: 0, cost: 0 }; by.set(m, e); }
+      if (!e) { e = { model: m, why, platforms: [], msgs: 0, tokens: 0, cost: 0 }; by.set(m, e); }
       if (!e.platforms.includes(r.platform)) e.platforms.push(r.platform);
       e.msgs += r.msgs || 0; e.tokens += (r.in || 0) + (r.cw || 0) + (r.cr || 0) + (r.out || 0); e.cost += Pricing.cost(r.model, r);
     }
     return [...by.values()].sort((a, b) => b.cost - a.cost);
   },
-  /** The #alerts notice, over ALL stored rows (like Budgets.alerts — it is about the price list vs the data you have, not the
-   *  date window). The fallback prices are read from the fallback row. Dismissal keys on the sorted SET of model names
-   *  ('unpriced:<a,b,c>' in LS 'dismissedAlerts'), so a new unknown model re-raises it. Text reaches the DOM via textContent. */
+  /** Rows whose model id resolves to the fallback ('.*') row (the fallback price still applies; this only names what was guessed). */
+  unpricedModels(rows) { return this._modelTotals(rows, r => Pricing.isFallback(r.model, r.platform) ? 'fallback' : null); },
+  /** Rows priced by a row the user edited or added, or by a bundled row that is not a verified list price (confidence low / existing). */
+  estimatedPriceModels(rows) { return this._modelTotals(rows, r => this._estimateReason(Pricing.resolve(r.model, r.platform))); },
+  _estimateReason(p) {
+    if (p.fallback) return null;   // the first sentence has it
+    if (p.source === 'user') return 'user price';
+    if (p.c === 'existing') return PRICE_UNVERIFIED_TEXT;
+    if (p.c === 'low') return 'low confidence';
+    return null;
+  },
+  /** The #alerts notice, over ALL stored rows (like Budgets.alerts — it is about the price list vs the data you have, not the date window):
+   *  first the fallback-priced models (serious), then the estimates. Dismissal keys on the sorted SET of model names — 'unpriced:<a,b,c>'
+   *  when anything is fallback-priced, else 'estimates:<a,b,c>' (info level) — so a new model re-raises it. Text reaches the DOM via textContent. */
   unpricedAlert() {
-    const list = this.unpricedModels(Store.allRows());
-    if (!list.length) return null;
-    const key = 'unpriced:' + list.map(u => u.model).sort().join(',');
+    const rows = Store.allRows();
+    const guessed = this.unpricedModels(rows), estimated = this.estimatedPriceModels(rows);
+    if (!guessed.length && !estimated.length) return null;
+    const names = (list) => list.map(u => u.model).sort().join(',');
+    const key = guessed.length ? 'unpriced:' + names(guessed) : 'estimates:' + names(estimated);
     if (LS.get('dismissedAlerts', {})[key]) return null;
-    const fb = Pricing.fallbackRow() || { in: 0, out: 0 };
-    const n = list.length, MAXN = 5;
-    const shown = list.slice(0, MAXN).map(u => `${u.model || '(no model id)'} (${fmtCompact(u.msgs)} msg${u.msgs === 1 ? '' : 's'}, ${fmtUSD(u.cost)})`);
-    const msg = `${n} model${n === 1 ? ' is' : 's are'} priced at the fallback rate ($${+fb.in || 0} in / $${+fb.out || 0} out per M): ${shown.join(', ')}${n > MAXN ? `, +${n - MAXN} more` : ''} — set their prices in the API price list.`;
-    return { kind: 'unpriced', key, msg, level: 'serious', models: list };
+    const msg = [guessed.length ? this._guessedSentence(guessed) : '', estimated.length ? this._estimatedSentence(estimated) : ''].filter(Boolean).join(' ');
+    return { kind: 'unpriced', key, msg, level: guessed.length ? 'serious' : 'info', models: guessed };
+  },
+  _namedModels(list, detail) {
+    const MAXN = 5;
+    const shown = list.slice(0, MAXN).map(u => `${u.model || '(no model id)'} (${detail(u)}${fmtCompact(u.msgs)} msg${u.msgs === 1 ? '' : 's'}, ${fmtUSD(u.cost)})`);
+    return shown.join(', ') + (list.length > MAXN ? `, +${list.length - MAXN} more` : '');
+  },
+  /** the fallback prices are read from the fallback row, never hard-coded */
+  _guessedSentence(list) {
+    const fb = Pricing.fallbackRow() || { in: 0, out: 0 }, n = list.length;
+    return `${n} model${n === 1 ? ' is' : 's are'} priced at the fallback rate ($${+fb.in || 0} in / $${+fb.out || 0} out per M): ${this._namedModels(list, () => '')} — set their prices in the API price list.`;
+  },
+  _estimatedSentence(list) {
+    const n = list.length;
+    return `${n} model${n === 1 ? ' is' : 's are'} priced from an unverified or user-edited row, so ${n === 1 ? 'its' : 'their'} cost is an estimate: ${this._namedModels(list, u => u.why + ', ')}.`;
   },
   /** "Set prices" — expand the price list section if it is collapsed and bring it into view. */
   showPricing() {
@@ -727,6 +754,7 @@ const App = {
     $('kpi-tokens').textContent = fmtCompact(metricTotals.tok);
     $('kpi-output').textContent = fmtCompact(metricTotals.out);
     $('kpi-msgs').textContent = fmtCompact(metricTotals.msgs);
+    $('kpi-foot').textContent = 'Costs are API-equivalent at the currently loaded list prices — ' + this.priceSetLine();
 
     // deltas vs previous window of equal length
     const len = days.length;
@@ -937,6 +965,17 @@ const App = {
   },
 
   /* ---------- breakdown table ---------- */
+  /** Plan 6 + Plan 9 A2: which rate priced this line — the fallback row, a retired id's successor, a platform's own PRICE_OVERRIDES rate, a
+   *  user-edited row. Local-only lines ($0 by rule) carry none. */
+  priceBadges(b) {
+    if (!b.priced) return [];
+    const p = Pricing.resolve(b.model, b.platform), out = [];
+    if (p.fallback) out.push(el('span', { class: 'badge fallback-price', text: 'fallback price', title: 'No price row matches this model — priced at the Unknown-model row; add a row in the API price list' }));
+    if (p.aliasOf) out.push(el('span', { class: 'badge price-note alias-price', text: 'priced as ' + p.aliasOf, title: `${b.model} is retired — the vendor routes and bills it as ${p.aliasOf}, so that row prices it` }));
+    if (p.overrideFor) out.push(el('span', { class: 'badge price-note override-price', text: p.overrideFor + ' rate', title: `${p.overrideFor} bills this model at its own rate (${p.label}) — the vendor row in the price list does not apply to this data` }));
+    if (p.source === 'user') out.push(el('span', { class: 'badge price-note user-price', text: 'user price', title: 'Priced by a row you edited or added in the API price list — not a verified vendor list price' }));
+    return out;
+  },
   renderBreakdown(rows, hasEst) {
     const map = new Map();
     const candidates = Store.platforms();
@@ -961,7 +1000,7 @@ const App = {
         el('td', { class: 'name' },
           el('span', { class: 'swdot', style: { background: ColorMap.colorOf('platform', b.platform, candidates) } }),
           document.createTextNode(b.model + (b.est ? ' (est.)' : '')),
-          b.priced && Pricing.isFallback(b.model, b.platform) ? el('span', { class: 'badge fallback-price', text: 'fallback price', title: 'No price row matches this model — priced at the Unknown-model row; add a row in the API price list' }) : null),   // Plan 6
+          ...this.priceBadges(b)),
         el('td', { text: b.platform }),
         el('td', { text: fmtCompact(b.in) }),
         el('td', { text: fmtCompact(b.cw) }),
@@ -2127,43 +2166,163 @@ const App = {
     this.render();
   },
 
-  exportCSV() {
-    const win = this.window();
+  /** Plan 10 T3b: "prices: bundled set of <PRICES_VERIFIED_ON>[, N user edits]" — the KPI footer and the CSV export's first line. */
+  priceSetLine() {
+    const n = Pricing.editCount();
+    return `prices: bundled set of ${PRICES_VERIFIED_ON}${n ? `, ${n} user edit${n === 1 ? '' : 's'}` : ''}`;
+  },
+  /** The export text: a '#' provenance line (price set + the list-price caveat), the column header, one line per row in the window (date asc). */
+  csvExportText(win) {
     const rows = this.rowsIn(win).slice().sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : 0);
-    const head = 'date,platform,model,input_tokens,cache_write_tokens,cache_read_tokens,output_tokens,messages,estimated,cost_usd_api_equiv';
-    const lines = [head];
+    const lines = [`# ROSTUM export · ${this.priceSetLine()} · costs are API-equivalent at the currently loaded list prices; historical price changes are not applied`,
+      'date,platform,model,input_tokens,cache_write_tokens,cache_read_tokens,output_tokens,messages,estimated,cost_usd_api_equiv'];
     for (const r of rows) {
       lines.push([r.d, csvCell(r.platform), csvCell(r.model), r.in || 0, r.cw || 0, r.cr || 0, r.out || 0, r.msgs || 0, r.est ? 1 : 0, Pricing.cost(r.model, r).toFixed(4)].join(','));
     }
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    return lines.join('\n');
+  },
+  exportCSV() {
+    const win = this.window();
+    const blob = new Blob([this.csvExportText(win)], { type: 'text/csv' });
     const a = el('a', { href: URL.createObjectURL(blob), download: `ai-usage-${win.from}-to-${win.to}.csv` });
     document.body.appendChild(a); a.click(); a.remove();
   },
 
-  /* =================== pricing UI =================== */
+  /* =================== pricing UI (Plan 9 A2) =================== */
+  /** The list grouped by vendor (<details>, open only where the user's data lands or an override beats a row; rows of a closed group are built on
+   *  first open), the read-only Platform overrides group last, the verified banner above. Re-run by the editor (add / delete / reset) and by
+   *  refreshPricingOnDataChange() — never under an edit in progress. */
   renderPricing() {
-    const tbody = document.querySelector('#pricing-table tbody');
-    clear(tbody);
-    Pricing.rows.forEach((r, i) => {
-      const mk = (key, cls) => {
-        const inp = el('input', { class: cls, value: String(r[key]), 'aria-label': key });
-        inp.addEventListener('change', () => {
-          r[key] = cls === 'price' ? (parseFloat(inp.value) || 0) : inp.value;
-          Pricing.save(); this.render();
-        });
-        return inp;
-      };
-      const del = el('button', { class: 'btn small', text: '✕', title: 'Remove row' });
-      del.addEventListener('click', () => { Pricing.rows.splice(i, 1); Pricing.save(); this.renderPricing(); this.render(); });
-      tbody.appendChild(el('tr', {},
-        el('td', {}, mk('pat', 'pat')),
-        el('td', {}, mk('label', 'label-i')),
-        el('td', {}, mk('in', 'price')),
-        el('td', {}, mk('out', 'price')),
-        el('td', {}, mk('cw', 'price')),
-        el('td', {}, mk('cr', 'price')),
-        el('td', {}, del)));
+    this.renderPriceBanner();
+    const matches = this.priceMatches(Store.allRows());
+    const host = clear($('pricing-groups'));
+    for (const g of this.priceGroups(matches)) host.appendChild(this.renderPriceGroup(g, matches));
+    host.appendChild(this.renderPriceGroup(this.overrideGroup(matches), matches));
+    this._priceDataSig = this._priceDataSignature();
+  },
+  /** "Prices verified <date> — N days ago." (amber past 90 days) + the list-price sentence; the clock is Date.now() (the harness shims it). */
+  renderPriceBanner() {
+    const days = Math.max(0, Math.floor((Date.now() - Date.parse(PRICES_VERIFIED_ON + 'T00:00:00Z')) / 86400000));
+    const b = $('prices-verified');
+    b.textContent = `Prices verified ${PRICES_VERIFIED_ON} — ${days} day${days === 1 ? '' : 's'} ago. Costs are API-equivalent at the currently loaded list prices; historical price changes are not applied.`;
+    b.classList.toggle('stale', days > 90);
+  },
+  _priceDataSignature() { const keys = new Set(); for (const r of Store.allRows()) keys.add(r.platform + '|' + r.model); return [...keys].sort().join('\n'); },
+  /** the matched marks and counts follow the stored data — re-render only when the set of platform|model pairs changed */
+  refreshPricingOnDataChange() { if (this._priceDataSignature() !== this._priceDataSig) this.renderPricing(); },
+  /** Where the user's own data lands: for every distinct platform|model pair in the stored (non-local) rows, the row it resolves to gains the
+   *  model id — rowModels by pattern, overrideModels by platform|pattern. When a PRICE_OVERRIDES row wins, the vendor row the id would otherwise
+   *  hit records the winning rate in overriddenBy (pattern → Map platform|pattern → the override): "wins for <platform>" — an edit of that vendor
+   *  row changes nothing for data from that platform. */
+  priceMatches(rows) {
+    const seen = new Set(), rowModels = new Map(), overrideModels = new Map(), overriddenBy = new Map();
+    const push = (map, key, model) => { const list = map.get(key) || []; if (!list.includes(model)) list.push(model); map.set(key, list); };
+    for (const r of rows) {
+      if (r.local || LOCAL_PLATFORMS.has(r.platform)) continue;
+      const key = r.platform + '|' + r.model; if (seen.has(key)) continue; seen.add(key);
+      const hit = Pricing.resolve(r.model, r.platform), model = String(r.model || '');
+      if (!hit.overrideFor) { push(rowModels, hit.pat, model); continue; }
+      push(overrideModels, hit.overrideFor + '|' + hit.pat, model);
+      const base = Pricing.resolve(r.model);
+      if (base.fallback) continue;
+      const winners = overriddenBy.get(base.pat) || new Map();
+      winners.set(hit.overrideFor + '|' + hit.pat, hit); overriddenBy.set(base.pat, winners);
+    }
+    return { rowModels, overrideModels, overriddenBy };
+  },
+  /** Pricing.rows → vendor groups in list order (first appearance; the spec's two spellings of a vendor fold into one), each with its rows
+   *  matched-first (stable) and the counts for the summary; rows without a vendor (the editor's own) form "Your rows", always open. */
+  priceGroups(matches) {
+    const groups = new Map();
+    for (const r of Pricing.rows) {
+      const name = this._vendorGroupName(r.v);
+      let g = groups.get(name);
+      if (!g) { g = { name, kind: 'editable', rows: [], matched: 0, overridden: 0, alwaysOpen: !r.v }; groups.set(name, g); }
+      g.rows.push(r);
+      if (matches.rowModels.has(r.pat)) g.matched++;
+      if (matches.overriddenBy.has(r.pat)) g.overridden++;
+    }
+    for (const g of groups.values()) g.rows.sort((a, b) => Number(matches.rowModels.has(b.pat)) - Number(matches.rowModels.has(a.pat)));
+    return [...groups.values()];
+  },
+  _vendorGroupName(v) { return v ? (PRICE_VENDOR_NAMES[String(v).toLowerCase()] || v) : 'Your rows'; },
+  overrideGroup(matches) {
+    const hit = (o) => matches.overrideModels.has(o.platform + '|' + o.pat);
+    const rows = PRICE_OVERRIDES.slice().sort((a, b) => Number(hit(b)) - Number(hit(a)));
+    return { name: 'Platform overrides', kind: 'overrides', rows, matched: rows.filter(hit).length, overridden: 0, alwaysOpen: false };
+  },
+  renderPriceGroup(g, matches) {
+    const open = g.alwaysOpen || g.matched > 0 || g.overridden > 0;
+    const d = el('details', { class: 'price-group', 'data-group': g.name, open: open ? '' : null }, el('summary', { text: this._priceGroupSummary(g) }));
+    const tbody = el('tbody'), renderRow = g.kind === 'overrides' ? this.renderOverrideRow : this.renderPriceRow;
+    d.appendChild(el('table', { class: 'data price-table ' + g.kind }, this._priceTableHead(g.kind), tbody));
+    const fill = () => { for (const r of g.rows) tbody.appendChild(renderRow.call(this, r, matches)); };
+    if (open) fill(); else d.addEventListener('toggle', fill, { once: true });
+    return d;
+  },
+  _priceGroupSummary(g) {
+    const n = g.rows.length;
+    return `${g.name} · ${n} row${n === 1 ? '' : 's'} · ${g.matched} matched your data${g.overridden ? ` · ${g.overridden} overridden by a platform rate` : ''}`;
+  },
+  _priceTableHead(kind) { return el('thead', {}, el('tr', {}, ...PRICE_TABLE_COLUMNS[kind].map(c => el('th', { text: c })))); },
+  /** an editable row: pattern (+ the model ids that landed on it), label, the four prices, provenance, delete */
+  renderPriceRow(r, matches) {
+    const models = matches.rowModels.get(r.pat) || [], winners = matches.overriddenBy.get(r.pat);
+    const prov = el('td', { class: 'prov' });
+    const refresh = () => this._fillProvenance(prov, r, winners);
+    refresh();
+    return el('tr', { class: models.length ? 'matched' : null },
+      el('td', {}, this._priceInput(r, 'pat', 'pat', refresh), this._matchedModels(models)),
+      el('td', {}, this._priceInput(r, 'label', 'label-i', refresh)),
+      ...['in', 'out', 'cw', 'cr'].map(k => el('td', {}, this._priceInput(r, k, 'price', refresh))),
+      prov,
+      el('td', {}, this._deleteRowButton(r)));
+  },
+  /** a PRICE_OVERRIDES row (constant — no inputs): platform, pattern (+ the ids that landed), label, prices, provenance */
+  renderOverrideRow(o, matches) {
+    const models = matches.overrideModels.get(o.platform + '|' + o.pat) || [];
+    const prov = el('td', { class: 'prov' });
+    this._fillProvenance(prov, o, null);
+    return el('tr', { class: models.length ? 'matched' : null },
+      el('td', { class: 'platform', text: o.platform }),
+      el('td', {}, el('code', { class: 'pat', text: o.pat }), this._matchedModels(models)),
+      el('td', { class: 'label', text: o.label }),
+      ...['in', 'out', 'cw', 'cr'].map(k => el('td', { class: 'num', text: String(o[k]) })),
+      prov);
+  },
+  /** an edit saves at once (save() re-stamps the row's provenance: it now reads "user"), refreshes that row's provenance cell in place and
+   *  re-renders the dashboard — never the list itself, so the next input keeps focus */
+  _priceInput(r, key, cls, refreshProvenance) {
+    const inp = el('input', { class: cls, value: String(r[key]), 'aria-label': key });
+    inp.addEventListener('change', () => {
+      r[key] = cls === 'price' ? (parseFloat(inp.value) || 0) : inp.value;
+      Pricing.save(); refreshProvenance(); this.render();
     });
+    return inp;
+  },
+  _matchedModels(models) {
+    if (!models.length) return null;
+    return el('div', { class: 'matched-models', text: 'in your data: ' + models.join(', '), title: 'Model ids in your stored rows that this row prices' });
+  },
+  _deleteRowButton(r) {
+    const del = el('button', { class: 'btn small del', text: '✕', title: 'Remove row' });
+    del.addEventListener('click', () => { const i = Pricing.rows.indexOf(r); if (i >= 0) Pricing.rows.splice(i, 1); Pricing.save(); this.renderPricing(); this.render(); });
+    return del;
+  },
+  /** "verified <date>" / "unverified since Aug 2026" / "your edit" · the confidence pill · the source host (link) · the platform rates that beat this row */
+  _fillProvenance(td, r, winners) {
+    clear(td);
+    const c = priceConfidence(r);
+    td.appendChild(el('span', { class: 'verified', text: c === 'user' ? 'your edit' : r.at ? 'verified ' + r.at : PRICE_UNVERIFIED_TEXT }));
+    td.appendChild(el('span', { class: 'pill c-' + c, text: c, title: PRICE_CONFIDENCE_TITLE[c] }));
+    if (r.src && c !== 'user') td.appendChild(this._sourceLink(r.src));
+    for (const w of (winners ? winners.values() : [])) {
+      td.appendChild(el('div', { class: 'wins-for', text: `wins for ${w.platform}: $${w.in} in / $${w.out} out`,
+        title: `${w.label} — ${w.platform} bills this model at its own rate, so your ${w.platform} data is priced by that override; editing this row does not change it.` }));
+    }
+  },
+  _sourceLink(src) {
+    return el('a', { class: 'src', href: src, target: '_blank', rel: 'noopener', text: URL.canParse(src) ? new URL(src).hostname : src, title: src });
   },
 
   /* =================== wiring =================== */
@@ -2228,6 +2387,7 @@ const App = {
   init() {
     View.load(); Pricing.load(); ColorMap.load(); Store.load(); Budgets.load();
     initTheme(); Tooltip.init();
+    $('help-prices-date').textContent = PRICES_VERIFIED_ON;
     this.renderPricing();
     this.wireCollapsibles();
     this.wireInsightHides();
@@ -2342,7 +2502,7 @@ const App = {
     $('refresh-all').addEventListener('click', () => this.refreshAll());
     $('add-price').addEventListener('click', () => {
       Pricing.rows.splice(Math.max(0, Pricing.rows.length - 1), 0, { pat: 'my-model', label: 'New model', in: 0, out: 0, cw: 0, cr: 0 });
-      Pricing.save(); this.renderPricing();
+      Pricing.save(); this.renderPricing(); this.render();
     });
     $('reset-prices').addEventListener('click', () => { if (confirm('Reset all prices to the built-in list (verified ' + PRICES_VERIFIED_ON + ')?')) { Pricing.reset(); this.renderPricing(); this.render(); } });
 

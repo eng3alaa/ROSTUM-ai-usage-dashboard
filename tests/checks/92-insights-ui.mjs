@@ -60,6 +60,31 @@ export async function run({ browser, ok }) {
       /No price row matches this model/.test(badge['gpt-6-astra']) && /API price list/.test(badge['gpt-6-astra']) && badge['claude-sonnet-5'] === false, JSON.stringify(badge));
     ok('breakdown: local rows are never flagged (Ollama platform row; Cline row with local:1)',
       badge['llama-mystery'] === false && badge['weird-local-model'] === false, JSON.stringify(badge));
+
+    // Plan 9 A2: the breakdown also says WHICH rate priced a line — a retired id priced as its successor ("priced as grok-4.3"), a platform's own
+    // PRICE_OVERRIDES rate ("SambaNova rate"), a user-edited row ("user price"); a plain vendor row carries no badge; "fallback price" is unchanged
+    const which = await page.evaluate(() => {
+      Store.sources = {}; LS.del('prices'); Pricing.load();
+      App.filters.range = '30'; App._drill = null; App.filters.hiddenPlatforms = new Set();
+      const r = (platform, model) => ({ d: '2026-08-10', platform, model, in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 1 });
+      Store.setSource('csv', [r('xAI', 'grok-4'), r('SambaNova', 'minimax-m3'), r('MiniMax', 'minimax-m3'), r('Anthropic API', 'claude-sonnet-5'), r('OpenAI Codex CLI', 'gpt-6-astra')], {});
+      Pricing.rows.find(x => x.pat === 'claude-sonnet-5').in = 3; Pricing.save();   // a user edit of a bundled row
+      App._render();
+      const out = {};
+      for (const tr of document.querySelectorAll('#breakdown-table tbody tr:not(.total)')) {
+        const name = tr.querySelector('td.name');
+        const model = [...name.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim();
+        out[model + '@' + tr.children[1].textContent] = [...name.querySelectorAll('.badge')].map(b => [b.className, b.textContent, b.title]);
+      }
+      LS.del('prices'); Pricing.load(); Store.sources = {};
+      return out;
+    });
+    const only = (k, cls, text) => Array.isArray(which[k]) && which[k].length === 1 && which[k][0][0] === 'badge price-note ' + cls && which[k][0][1] === text && which[k][0][2].length > 20;
+    ok('breakdown (A2): grok-4 on xAI carries "priced as grok-4.3" (.badge.price-note.alias-price with a title), minimax-m3 on SambaNova "SambaNova rate" (.override-price), the user-edited claude-sonnet-5 "user price" (.user-price)',
+      only('grok-4@xAI', 'alias-price', 'priced as grok-4.3') && only('minimax-m3@SambaNova', 'override-price', 'SambaNova rate') && only('claude-sonnet-5@Anthropic API', 'user-price', 'user price'), JSON.stringify(which));
+    ok('breakdown (A2): the same minimax-m3 on the MiniMax platform (vendor row, no override) carries no badge; gpt-6-astra keeps exactly the "fallback price" badge',
+      Array.isArray(which['minimax-m3@MiniMax']) && which['minimax-m3@MiniMax'].length === 0 && Array.isArray(which['gpt-6-astra@OpenAI Codex CLI']) && which['gpt-6-astra@OpenAI Codex CLI'].length === 1 && which['gpt-6-astra@OpenAI Codex CLI'][0][1] === 'fallback price' && /fallback-price/.test(which['gpt-6-astra@OpenAI Codex CLI'][0][0]),
+      JSON.stringify(which));
   } finally {
     await page.close();
   }

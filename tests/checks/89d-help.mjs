@@ -39,12 +39,14 @@ export async function run({ browser, ok }) {
         fixRows: q('dl.help-fix dt').length,
         links: q('a[href]').map(a => ({ href: a.getAttribute('href'), rel: a.rel, target: a.target })),
         text: dlg.textContent,
+        pricesDate: (dlg.querySelector('#help-prices-date') || {}).textContent, verifiedOn: PRICES_VERIFIED_ON,
+        pricesPara: (h => h && h.nextElementSibling && h.nextElementSibling.tagName === 'P' ? h.nextElementSibling.textContent : null)(q('h3').find(h => h.textContent.trim() === 'How prices work')),
       };
     });
     ok('help (Plan 8): click opens the dialog with showModal() (open + :modal), aria-labelledby → #help-title "Help" inside the same .modal-head + .modal-close as the connector modal',
       opened.open === true && opened.modal === true && opened.labelledby === 'help-title' && opened.title === 'Help' && opened.head, JSON.stringify({ open: opened.open, modal: opened.modal, labelledby: opened.labelledby, title: opened.title, head: opened.head }));
-    const HEADS = ['Start here', 'What the badges mean', 'Where the numbers come from', 'If something looks wrong', 'Keyboard', 'More'];
-    ok('help (Plan 8): the six <h3> sections in order — Start here / What the badges mean / Where the numbers come from / If something looks wrong / Keyboard / More',
+    const HEADS = ['Start here', 'What the badges mean', 'Where the numbers come from', 'How prices work', 'If something looks wrong', 'Keyboard', 'More'];
+    ok('help (Plan 8 + T3b): the seven <h3> sections in order — Start here / What the badges mean / Where the numbers come from / How prices work / If something looks wrong / Keyboard / More',
       JSON.stringify(opened.heads) === JSON.stringify(HEADS), JSON.stringify(opened.heads));
     ok('help (Plan 8): Start here carries the collector command in <code id="help-cmd"> with a "Copy" button and names Validate & connect, the Admin key path and the chat-app exports',
       opened.cmd === 'node docs/tools/ai-usage-collector.mjs' && opened.copyBtn === 'Copy' && /Validate & connect/.test(opened.text) && /Admin key/.test(opened.text) && /ChatGPT/.test(opened.text) && /Takeout/.test(opened.text) && /Imports/.test(opened.text),
@@ -55,6 +57,10 @@ export async function run({ browser, ok }) {
         && /4 characters per token/.test(opened.text) && /more than 7 days/.test(opened.text), JSON.stringify({ badges: opened.badges, ql: opened.ql, dots: opened.dots, dotSized: opened.dotSized }));
     ok('help (Plan 8): cost rules name API-equivalent cost (list price, not an invoice), Actual billed (vendors that report money), est. rows never mixing silently, local runners $0, unpriced models named in a notice',
       /API-equivalent cost/.test(opened.text) && /not an invoice/.test(opened.text) && /Actual billed/.test(opened.text) && /est\./.test(opened.text) && /\$0/.test(opened.text) && /notice/.test(opened.text), '');
+    ok('help (Plan 10 T3b): "How prices work" is one paragraph — the resolution order in plain words (lowercased + normalised id, a retired id priced as its successor, a platform override beats the vendor row, first matching row, the Unknown-model fallback), the bundled set\'s verified date filled from PRICES_VERIFIED_ON (#help-prices-date), how to edit (the API price list, stored in this browser, "user" pill), what a platform override is ("wins for")',
+      typeof opened.pricesPara === 'string' && /normalised/.test(opened.pricesPara) && /successor/.test(opened.pricesPara) && /platform override/.test(opened.pricesPara) && /first matching/.test(opened.pricesPara) && /Unknown model/.test(opened.pricesPara)
+      && /verified on /.test(opened.pricesPara) && opened.pricesDate === opened.verifiedOn && /^\d{4}-\d{2}-\d{2}$/.test(opened.pricesDate || '') && /API price list/.test(opened.pricesPara) && /this browser/.test(opened.pricesPara) && /wins for/.test(opened.pricesPara) && opened.pricesPara.length < 1200,
+      JSON.stringify({ pricesDate: opened.pricesDate, verifiedOn: opened.verifiedOn, para: opened.pricesPara }));
     ok('help (Plan 8): troubleshooting is a six-row <dl class="help-fix"> — Not running at 127.0.0.1:11436, Token rejected + collector.token, Ollama CORS + OLLAMA_ORIGINS, Azure/Vertex token expired, folder picker, numbers changed after an update',
       opened.fixRows === 6 && /Not running at/.test(opened.text) && /127\.0\.0\.1:11436/.test(opened.text) && /Token rejected/.test(opened.text) && /collector\.token/.test(opened.text) && /OLLAMA_ORIGINS/.test(opened.text)
         && /token expired/.test(opened.text) && /folder picker/i.test(opened.text) && /re-scan/i.test(opened.text), JSON.stringify({ fixRows: opened.fixRows }));

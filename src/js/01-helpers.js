@@ -208,6 +208,18 @@ const View = {
   onConnectorChange(id, prev, next) { if (prev === 'off' && next !== 'off' && this.isCardHidden(id)) this.revealCard(id); },
 };
 
+/* Plan 9 A2: the generated price rows name some vendors by a lowercase slug ('xai', 'together') and others by their display name ('xAI',
+ * 'Perplexity') — the price list groups by the display name, so each slug maps to one. */
+const PRICE_VENDOR_NAMES = {
+  xai: 'xAI', openai: 'OpenAI', google: 'Google', together: 'Together AI', deepinfra: 'DeepInfra', sambanova: 'SambaNova',
+  groq: 'Groq', cerebras: 'Cerebras', perplexity: 'Perplexity', fireworks: 'Fireworks AI', cursor: 'Cursor', fallback: 'Fallback',
+};
+/* the two price-list table shapes: the editable vendor rows and the constant platform overrides */
+const PRICE_TABLE_COLUMNS = {
+  editable: ['Model (match pattern)', 'Label', 'Input', 'Output', 'Cache write', 'Cache read', 'Verified', ''],
+  overrides: ['Platform', 'Model (match pattern)', 'Label', 'Input', 'Output', 'Cache write', 'Cache read', 'Verified'],
+};
+
 /* Sections with a ▾/▸ toggle. head = element that IS (or contains) the .card-head/.section-title/.row-head; body = ids hidden when collapsed. */
 const SECTIONS = [
   { id: 'insights',  label: 'Insights',        head: 'insights-head',  body: ['insights'] },
