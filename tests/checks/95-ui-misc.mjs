@@ -266,7 +266,7 @@ export async function run({ browser, ok }) {
     const shaped = await page.evaluate(() => {
       const out = { rows: Store.sources.csv.rows.map(r => r.d), junkSource: 'junk' in Store.sources, nometa: !!(Store.sources.nometa && Store.sources.nometa.meta), billed: Store.billedRows('csv').map(b => b.d + '|' + b.amount), badBilled: 'bad' in Store.billed,
         projects: Array.isArray(Store.projects) && Store.projects.length === 0, projectsBy: (Store.projectsBy.csv || []).length, connectors: Object.keys(Store.connectors), banner: (document.getElementById('data-warning') || {}).textContent || null,
-        prices: Pricing.rows.map(r => r.pat), mine: Pricing.resolve('mine').label, budgets: Budgets.limits, mins: document.getElementById('auto-refresh-mins').value, timer: !!App._timer };
+        prices: Pricing.rows.map(r => r.pat), defaults: DEFAULT_PRICES.length, pricesBanner: (document.getElementById('prices-warning') || {}).textContent || null, mine: Pricing.resolve('mine').label, budgets: Budgets.limits, mins: document.getElementById('auto-refresh-mins').value, timer: !!App._timer };
       localStorage.removeItem('aiusage:prices'); localStorage.removeItem('aiusage:budgets'); localStorage.removeItem('aiusage:autoRefresh'); localStorage.removeItem('aiusage:autoRefreshMins');
       if (App._timer) clearInterval(App._timer);
       Store.sources = {}; Store.billed = {}; Store.projectsBy = {}; Store.connectors = {}; Store.persist(); Pricing.load(); Budgets.load();
@@ -275,8 +275,9 @@ export async function run({ browser, ok }) {
     ok('store (A0 #23): rows without a day / with a non-numeric count / non-objects are dropped (1 of 5 kept), a non-source value and a non-object connector entry are dropped, a source without meta gains one, billed rows without a day or amount are dropped (1 of 3), a non-array projects list resets; the banner counts what was dropped',
       JSON.stringify(shaped.rows) === JSON.stringify(['2026-08-10']) && !shaped.junkSource && shaped.nometa && JSON.stringify(shaped.billed) === JSON.stringify(['2026-08-10|1.5']) && !shaped.badBilled && shaped.projects && shaped.projectsBy === 1
       && JSON.stringify(shaped.connectors) === JSON.stringify(['csv']) && /dropped/.test(shaped.banner || '') && /4 usage rows/.test(shaped.banner || '') && /2 billed amounts/.test(shaped.banner || ''), JSON.stringify(shaped));
-    ok('prices / budgets / auto-refresh (A0 #23): a price row without a pattern or with a non-numeric price is dropped (^mine$ and .* kept, ^mine$ resolves), budgets keep only finite positive numbers ({ Gemini: 5, Str: 7 }), a non-numeric autoRefreshMins falls back to 15 (the timer runs)',
-      JSON.stringify(shaped.prices) === JSON.stringify(['^mine$', '.*']) && shaped.mine === 'Mine' && JSON.stringify(shaped.budgets) === JSON.stringify({ Gemini: 5, Str: 7 }) && shaped.mins === '15' && shaped.timer, JSON.stringify({ prices: shaped.prices, mine: shaped.mine, budgets: shaped.budgets, mins: shaped.mins, timer: shaped.timer }));
+    ok('prices / budgets / auto-refresh (A0 #23): a price row without a pattern or with a non-numeric price is dropped (banner: 3 rows) while ^mine$ lands over the merged defaults and resolves (.* last), budgets keep only finite positive numbers ({ Gemini: 5, Str: 7 }), a non-numeric autoRefreshMins falls back to 15 (the timer runs)',
+      shaped.prices[0] === '^mine$' && shaped.prices[shaped.prices.length - 1] === '.*' && shaped.prices.length === shaped.defaults + 1 && /3 stored price rows/.test(shaped.pricesBanner || '') && shaped.mine === 'Mine'
+      && JSON.stringify(shaped.budgets) === JSON.stringify({ Gemini: 5, Str: 7 }) && shaped.mins === '15' && shaped.timer, JSON.stringify({ prices: shaped.prices.length, first: shaped.prices[0], banner: shaped.pricesBanner, mine: shaped.mine, budgets: shaped.budgets, mins: shaped.mins, timer: shaped.timer }));
   } finally {
     await page.close();
   }

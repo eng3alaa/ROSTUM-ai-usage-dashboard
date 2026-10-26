@@ -4964,16 +4964,6 @@
    "note": "Gone from MiniMax pricing/model pages; resolve to the MiniMax catch-all (M2.x standard tier)."
   },
   {
-   "id": "MiniMax-M2.5",
-   "successor": "MiniMax-M3.1-Flash-Preview",
-   "note": "From 2026-10-19 MiniMax routes M2.5/M2.7 PLAN traffic to M3.1-Flash-Preview (plan-only, no per-token price). Pay-as-you-go M2.5/M2.7 rows remain priced."
-  },
-  {
-   "id": "MiniMax-M2.7",
-   "successor": "MiniMax-M3.1-Flash-Preview",
-   "note": "From 2026-10-19 MiniMax routes M2.5/M2.7 PLAN traffic to M3.1-Flash-Preview (plan-only, no per-token price). Pay-as-you-go M2.5/M2.7 rows remain priced."
-  },
-  {
    "id": "groq/compound",
    "successor": null,
    "note": "Groq Compound shut down 2026-09-21; billed at underlying model rates + tool fees, no successor row - falls to the Unknown model row."

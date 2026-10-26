@@ -62,19 +62,46 @@ export async function run({ browser, ok }) {
       const o0 = json.overrides[0]; const M = { in: 1e6, out: 1e6, cw: 0, cr: 0 };
       const costOv = Pricing.cost(o0.ids[0], { ...M, platform: o0.platform }), costNo = Pricing.cost(o0.ids[0], M);
       const d0 = Pricing.resolve(o0.ids[0]);
-      // (7) a user-edited LS 'prices' list replaces the rows only — overrides and aliases stay constant; reset restores the generated rows
+      // (7) A0 #32: a legacy full-list LS 'prices' blob (pre-Plan 9 shape) is MERGED over DEFAULT_PRICES — its own rows land (^mine$ first, as it was listed
+      //     first), every default it never saw still resolves, overrides and aliases stay constant, the blob migrates to the edits shape; reset restores the generated rows
       LS.set('prices', [{ pat: '^mine$', label: 'Mine', in: 1, out: 2, cw: 0, cr: 0 }, { pat: '.*', label: 'Unknown model', in: 3, out: 15, cw: 3.75, cr: 0.3 }]);
       Pricing.load();
-      const user = { mine: Pricing.resolve('mine').label, rows: Pricing.rows.length, aliasStill: Pricing.resolve('grok-4').aliasOf || null, ovStill: Pricing.resolve(o0.ids[0], o0.platform).label, fbStill: Pricing.isFallback('zzz-never') };
+      const migrated = LS.get('prices', null);
+      const user = { mine: Pricing.resolve('mine').label, rows: Pricing.rows.length, first: Pricing.rows[0].pat, gpt: Pricing.resolve('gpt-5.4').label, aliasStill: Pricing.resolve('grok-4').aliasOf || null, ovStill: Pricing.resolve(o0.ids[0], o0.platform).label, fbStill: Pricing.isFallback('zzz-never'),
+        migrated: { v: migrated && migrated.v, added: migrated && migrated.added && migrated.added.map(r => r.pat), edited: migrated && migrated.edited && migrated.edited.length, removed: migrated && migrated.removed && migrated.removed.length } };
       Pricing.reset();
       user.afterReset = Pricing.rows.length; user.resetLast = Pricing.rows[Pricing.rows.length - 1].pat;
+      // (8) A0 #32: a legacy list carrying ONE edited default (first row, in: 99) and nothing else → all generated rows reach the user, the edited price wins and
+      //     is marked user-edited (c: 'user', no verified date / source), the migrated blob records exactly that edit — legacy migration never records removals
+      const r0 = json.rows.findIndex(r => r.ids.some(id => !succOf(id)));   // a row with an id that is not also a retired alias (an alias id prices as its successor, by design)
+      const d0row = DEFAULT_PRICES[r0], plainId = json.rows[r0].ids.find(id => !succOf(id));
+      LS.set('prices', [{ pat: d0row.pat, label: d0row.label, in: 99, out: d0row.out, cw: d0row.cw, cr: d0row.cr }]);
+      Pricing.load();
+      const legacyEdit = { rows: Pricing.rows.length, in: Pricing.rows[r0].in, c: Pricing.rows[r0].c, at: Pricing.rows[r0].at, src: Pricing.rows[r0].src, pat: Pricing.rows[r0].pat, resolvedIn: Pricing.resolve(plainId).in,
+        blob: (({ v, edited, added, removed }) => ({ v, edited: edited.map(r => r.pat + '|' + r.in), added: added.length, removed: removed.length }))(LS.get('prices', null)) };
+      // (9) A0 #32: the editor's own operations on the merged list — delete a default row, add a row after a given row, edit another — survive save + load
+      //     through the edits shape (removed / added-with-anchor / edited) with the row order kept; reset forgets them all
+      LS.del('prices'); Pricing.load();
+      const victim = Pricing.rows[5].pat, anchor = Pricing.rows[10].pat, editedPat = Pricing.rows[20].pat;
+      Pricing.rows.splice(5, 1);
+      Pricing.rows.splice(10, 0, { pat: '^added-after-ten$', label: 'Added', in: 7, out: 8, cw: 0, cr: 0 });   // right after what is now rows[9] (the anchor)
+      Pricing.rows[20].out = 123;   // rows[20] after the splices above
+      const editedPat2 = Pricing.rows[20].pat;
+      Pricing.save();
+      const blob = LS.get('prices', null);
+      Pricing.load();
+      const edits = { rows: Pricing.rows.length, victimGone: !Pricing.rows.some(r => r.pat === victim), addedAt: Pricing.rows.findIndex(r => r.pat === '^added-after-ten$'), anchorAt: Pricing.rows.findIndex(r => r.pat === anchor),
+        addedResolves: Pricing.resolve('added-after-ten').label, editedOut: Pricing.rows.find(r => r.pat === editedPat2).out, editedC: Pricing.rows.find(r => r.pat === editedPat2).c,
+        blob: { v: blob.v, removed: blob.removed, added: blob.added.map(r => [r.pat, r.after]), edited: blob.edited.map(r => [r.pat, r.out]) }, sameEditedPat: editedPat !== victim && editedPat2 !== '^added-after-ten$' };
+      Pricing.reset();
+      edits.afterReset = Pricing.rows.length; edits.resetBlob = LS.get('prices', null);
       LS.del('prices'); Pricing.load();
       return {
         ids, aliased, rowBad: rowBad.slice(0, 10), rowBadN: rowBad.length, ovIds, ovBad, alIds, noSucc, alBad: alBad.slice(0, 10), alBadN: alBad.length, legacy,
         verifiedOn: VERIFIED, defaults: DEFAULT_PRICES.length, lastPat: DEFAULT_PRICES[DEFAULT_PRICES.length - 1].pat, lastRow: JSON.stringify((({ pat, label, in: i, out, cw, cr }) => ({ pat, label, in: i, out, cw, cr }))(DEFAULT_PRICES[DEFAULT_PRICES.length - 1])),
         ovN: ovr ? ovr.length : null, alN: al ? Object.keys(al).length : null, alKeysLower,
         grokAlias: grok.aliasOf || null, grokAlias2: grok2.aliasOf || null, grokLabel: grok.label, rowHasAlias, copy: grok !== Pricing.rows.find(r => r.label === grok.label),
-        costOv, costNo, costOvWant: o0.in + o0.out, costNoWant: d0.in + d0.out, user,
+        costOv, costNo, costOvWant: o0.in + o0.out, costNoWant: d0.in + d0.out, user, legacyEdit, edits,
       };
     }, json);
     const nSucc = json.retired_aliases.filter(a => a.successor).length;
@@ -96,9 +123,21 @@ export async function run({ browser, ok }) {
       res.grokAlias === 'grok-4.3' && res.grokAlias2 === 'grok-4.3' && !res.rowHasAlias && res.copy, JSON.stringify({ grokAlias: res.grokAlias, grokAlias2: res.grokAlias2, grokLabel: res.grokLabel, rowHasAlias: res.rowHasAlias, copy: res.copy }));
     ok('prices: Pricing.cost(model, t) passes t.platform — an overridden id costs the override rate with the platform and the default rate without',
       Math.abs(res.costOv - res.costOvWant) < 1e-9 && Math.abs(res.costNo - res.costNoWant) < 1e-9 && res.costOv !== res.costNo, JSON.stringify({ costOv: res.costOv, costNo: res.costNo, costOvWant: res.costOvWant, costNoWant: res.costNoWant }));
-    ok('prices: a user-edited LS "prices" list replaces the rows only (2 rows, ^mine$ resolves) while aliases/overrides stay constant; reset restores the generated rows with .* last',
-      res.user.mine === 'Mine' && res.user.rows === 2 && res.user.aliasStill === 'grok-4.3' && res.user.ovStill === json.overrides[0].label && res.user.fbStill === true
+    ok(`prices (A0 #32): a legacy full-list LS "prices" blob merges over the generated rows — ^mine$ lands first and resolves, the ${json.rows.length} defaults it never saw still resolve (gpt-5.4), aliases/overrides stay constant; the blob migrates to { v: 2, added: [^mine$] } with no edits / removals; reset restores the generated rows with .* last`,
+      res.user.mine === 'Mine' && res.user.rows === json.rows.length + 1 && res.user.first === '^mine$' && res.user.gpt === 'GPT-5.4' && res.user.aliasStill === 'grok-4.3' && res.user.ovStill === json.overrides[0].label && res.user.fbStill === true
+      && res.user.migrated.v === 2 && JSON.stringify(res.user.migrated.added) === JSON.stringify(['^mine$']) && res.user.migrated.edited === 0 && res.user.migrated.removed === 0
       && res.user.afterReset === json.rows.length && res.user.resetLast === '.*', JSON.stringify(res.user));
+    ok(`prices (A0 #32): a legacy list holding one edited default row (in: 99) → all ${json.rows.length} rows present, the edit wins (resolve(id).in === 99) and reads c: 'user' with no verified date / source; the migrated blob records that one edit and no removals`,
+      res.legacyEdit.rows === json.rows.length && res.legacyEdit.in === 99 && res.legacyEdit.resolvedIn === 99 && res.legacyEdit.c === 'user' && res.legacyEdit.at === null && res.legacyEdit.src === null
+      && res.legacyEdit.blob.v === 2 && JSON.stringify(res.legacyEdit.blob.edited) === JSON.stringify([res.legacyEdit.pat + '|99']) && res.legacyEdit.blob.added === 0 && res.legacyEdit.blob.removed === 0, JSON.stringify(res.legacyEdit));
+    ok('prices (A0 #32): editor operations survive save + load through the edits shape — a deleted default stays deleted (removed), an added row keeps its place right after its anchor (added + after) and resolves, an edited row keeps its new price (edited, c: user); reset forgets them (empty edits blob)',
+      res.edits.sameEditedPat && res.edits.rows === json.rows.length && res.edits.victimGone && res.edits.addedAt === res.edits.anchorAt + 1 && res.edits.addedResolves === 'Added' && res.edits.editedOut === 123 && res.edits.editedC === 'user'
+      && res.edits.blob.v === 2 && res.edits.blob.removed.length === 1 && res.edits.blob.added.length === 1 && res.edits.blob.added[0][0] === '^added-after-ten$' && res.edits.blob.edited.length === 1 && res.edits.blob.edited[0][1] === 123
+      && res.edits.afterReset === json.rows.length && res.edits.resetBlob && res.edits.resetBlob.added.length === 0 && res.edits.resetBlob.edited.length === 0 && res.edits.resetBlob.removed.length === 0, JSON.stringify(res.edits));
+    const mm = await page.evaluate(() => { LS.del('prices'); Pricing.load(); const r = (id) => { const h = Pricing.resolve(id); return { label: h.label, alias: h.aliasOf || null, fallback: !!h.fallback }; }; return { m25: r('MiniMax-M2.5'), m27: r('MiniMax-M2.7'), aliasKeys: Object.keys(MODEL_ALIASES).filter(k => /minimax-m2\.[57]/.test(k)) }; });
+    ok('prices (A0 data fix): MiniMax-M2.5 / M2.7 are priced by their own rows (the vendor still lists them) — no alias key, aliasOf null, not the fallback',
+      mm.m25.label === 'MiniMax-M2.5 (legacy)' && mm.m25.alias === null && !mm.m25.fallback && mm.m27.label === 'MiniMax-M2.7' && mm.m27.alias === null && !mm.m27.fallback && mm.aliasKeys.length === 0
+      && !json.retired_aliases.some(a => /^MiniMax-M2\.[57]$/.test(a.id)), JSON.stringify(mm));
   } finally {
     await page.close();
   }
