@@ -229,6 +229,21 @@ export async function run({ browser, ok }) {
       cl.in === 1700 && cl.out === 380 && cl.cw === 100 && cl.cr === 900 && cl.msgs === 2 && cl.files === 2 && cl.badLines === 1 && cl.model === 'claude-sonnet-4.5' && Math.abs(cl.extCost - 0.016) < 1e-9
       && cl.sid === '1786352400000' && cl.hourOk, JSON.stringify(cl));
     ok('cline/roo: one shared parser, two entries with their own platform strings and cards', cl.sameParser && cl.p1 === 'Cline' && cl.p2 === 'Roo Code' && cl.cards && cl.cats, JSON.stringify(cl));
+    // A0 #15: a corrupt task_metadata.json and an api_req_started whose text is not JSON are counted (badLines), never swallowed
+    const clBad = await page.evaluate(async () => {
+      const ui = JSON.stringify([
+        { ts: 1786352400000, say: 'api_req_started', text: '{not json' },
+        { ts: 1786352401000, say: 'api_req_started', text: JSON.stringify({ tokensIn: 100, tokensOut: 10, cacheWrites: 0, cacheReads: 0, cost: 0 }) },
+      ]);
+      const mk = () => [
+        { path: 'tasks/1786352900000/ui_messages.json', file: new File([ui], 'ui_messages.json', { lastModified: 1754000000000 }) },
+        { path: 'tasks/1786352900000/task_metadata.json', file: new File(['{"model_usage": [}'], 'task_metadata.json', { lastModified: 1754000000000 }) },
+      ];
+      const r = await parseClineTasks(mk().slice(0, 1), null, new Set(), connectorById('cline'), mk());
+      return { msgs: r.meta.msgs, badLines: r.meta.badLines, lines: r.meta.lines, model: r.rows[0] && r.rows[0].model, in: r.rows.reduce((a, x) => a + x.in, 0) };
+    });
+    ok('cline (A0 #15): a corrupt task_metadata.json and a non-JSON api_req_started text are each counted in badLines (2) while the good request lands (msgs 1, in 100, model "unknown")',
+      clBad.msgs === 1 && clBad.badLines === 2 && clBad.lines === 1 && clBad.model === 'unknown' && clBad.in === 100, JSON.stringify(clBad));
 
     // ---- T11b: tokensIn semantics (inclusive vs exclusive) + per-request model attribution from model_usage[] ----
     const rooA = read('roo', 'tasks', '1786352600000', 'ui_messages.json'), rooM = read('roo', 'tasks', '1786352600000', 'task_metadata.json');

@@ -268,6 +268,45 @@ export async function run({ browser, ok }) {
     ok('vllm/llamacpp copy: card note + both qualityNotes say the counters keep growing on the server while the tab is hidden and the first tick after you return books that period (no "catch-up"/"discard"); vLLM note says the baseline is per server URL and in = prompt − prompt_tokens_cached_total (uncached)',
       vf.copy.card && vf.copy.lcCard && vf.copy.note && vf.copy.lcNote && vf.copy.noteUrl && vf.copy.noteUncached, JSON.stringify(vf.copy));
 
+    // ---- A0 #2 / #3: a failing poll tick is attention on the card (serverErr/err, "Needs attention"), the loop keeps running, the next good tick clears it; a throwing first tick is not swallowed by connectServer ----
+    const pf = await page.evaluate(async ({ A, B }) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      LS.del('poll:vllm'); LS.del('url:vllm');
+      const c = connectorById('vllm');
+      const origFetch = window.fetch;
+      let metrics = A, down = false;
+      window.fetch = async (url) => {
+        const u = String(url);
+        if (down) throw new TypeError('Failed to fetch');
+        if (u.endsWith('/metrics')) return new Response(metrics, { status: 200, headers: { 'content-type': 'text/plain; version=0.0.4' } });
+        if (u.endsWith('/v1/models')) return new Response(JSON.stringify({ object: 'list', data: [{ id: 'meta-llama/Llama-3.1-8B-Instruct' }] }), { status: 200 });
+        throw new TypeError('Failed to fetch');
+      };
+      const line = () => document.getElementById('vllm-status').textContent;
+      const st = () => ({ err: (Store.connectors.vllm || {}).err || null, serverErr: (Store.connectors.vllm || {}).serverErr || null, status: Store.connectorStatus(c), has: !!Store.connectors.vllm, timer: !!App._pollTimers.vllm, rows: ((Store.sources.vllm || {}).rows || []).length, text: line() });
+      document.getElementById('vllm-url').value = c.baseUrl;
+      await App.connectServer(c);
+      const ok0 = st();
+      down = true; await App._pollTick(c);
+      const failed = st();
+      down = false; metrics = B; await App._pollTick(c);
+      const recovered = st();
+      // #3: a first tick that THROWS (a programming error, not a fetch failure) must not leave the card green behind a swallowed promise
+      App.stopPoll(c);
+      const origTick = App._pollTick; App._pollTick = async () => { throw new Error('tick boom'); };
+      await App.connectServer(c);
+      const thrown = { status: Store.connectorStatus(c), text: line(), connectedLine: /● Connected/.test(line()) };
+      App._pollTick = origTick; App.stopPoll(c);
+      window.fetch = origFetch; LS.del('poll:vllm'); LS.del('url:vllm');
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist(); App._render();
+      return { ok0, failed, recovered, thrown };
+    }, { A: vA, B: vB });
+    ok('vllm (A0 #2): a tick whose /metrics fetch fails sets serverErr + err on the entry (warn) and writes "Needs attention: … trying again in 60 s" — entry and rows kept, the loop keeps running; the next good tick clears the error (ok) and books the growth',
+      pf.ok0.status === 'ok' && pf.ok0.err === null && pf.failed.status === 'warn' && /Failed to fetch/.test(pf.failed.err || '') && pf.failed.serverErr === pf.failed.err && pf.failed.has && pf.failed.timer && /Needs attention/.test(pf.failed.text) && /trying again in 60 s/.test(pf.failed.text)
+      && pf.recovered.status === 'ok' && pf.recovered.err === null && pf.recovered.serverErr === null && pf.recovered.rows === 1 && /Connected/.test(pf.recovered.text), JSON.stringify(pf));
+    ok('vllm (A0 #3): connectServer no longer swallows a throwing first poll (startPoll().catch removed) — the card does not read connected / ok after "tick boom"',
+      pf.thrown.status !== 'ok' && !pf.thrown.connectedLine, JSON.stringify(pf.thrown));
+
     // ---- T5c: llama.cpp — counters without a model label (model from /props), validate via /props, metrics off → honest detail + answered error ----
     const lcText = read('wave2', 'llamacpp-metrics.txt');
     const lc = await page.evaluate(async (text) => {
@@ -291,7 +330,7 @@ export async function run({ browser, ok }) {
       metricsOn = false;
       let pollErr = null; try { await pollLlamaCpp('http://localhost:8080'); } catch (e) { pollErr = { msg: e.message, answered: !!e.answered }; }
       await App.connectServer(c);
-      const off = { label: (Store.connectors.llamacpp || {}).label || '', status: Store.connectorStatus(c), text: document.getElementById('llamacpp-status').textContent, base: LS.get('poll:llamacpp', null), pollErr };
+      const off = { label: (Store.connectors.llamacpp || {}).label || '', status: Store.connectorStatus(c), text: document.getElementById('llamacpp-status').textContent, base: LS.get('poll:llamacpp', null), pollErr, timer: !!App._pollTimers.llamacpp };
       App.stopPoll(c);
       window.fetch = origFetch;
       Store.sources = {}; Store.connectors = {}; Store.persist();
@@ -303,8 +342,8 @@ export async function run({ browser, ok }) {
     ok('llamacpp: /metrics counters (no model label) land under the /props model_path basename (Qwen3-8B-Q4_K_M in=4321 out=876); validate labels the model, starts the poll, baseline seeded',
       JSON.stringify(lc.on.counters) === JSON.stringify({ 'Qwen3-8B-Q4_K_M': { in: 4321, out: 876 } }) && lc.on.label === 'Qwen3-8B-Q4_K_M · counts while this page is open' && lc.on.status === 'ok'
       && /Connected/.test(lc.on.text) && /Qwen3-8B-Q4_K_M/.test(lc.on.text) && lc.on.baseIn === 4321 && lc.on.timer, JSON.stringify(lc.on));
-    ok('llamacpp: --metrics off → validate still ok via /props, detail says "--metrics", no baseline; pollLlamaCpp throws an answered "--metrics" error; registry local-server/local/exact poll pollLlamaCpp @8080; CORS hint names --tools/--agent/--mcp-servers; honest note',
-      lc.off.status === 'ok' && /--metrics/.test(lc.off.text) && lc.off.base === null && lc.off.pollErr && lc.off.pollErr.answered && /--metrics/.test(lc.off.pollErr.msg)
+    ok('llamacpp: --metrics off → validate still ok via /props, detail says "--metrics", no baseline and NO poll started (pollable: false — A0 #2 would otherwise flag every tick); pollLlamaCpp throws an answered "--metrics" error; registry local-server/local/exact poll pollLlamaCpp @8080; CORS hint names --tools/--agent/--mcp-servers; honest note',
+      lc.off.status === 'ok' && /--metrics/.test(lc.off.text) && lc.off.base === null && !lc.off.timer && lc.off.pollErr && lc.off.pollErr.answered && /--metrics/.test(lc.off.pollErr.msg)
       && lc.kind === 'local-server' && lc.cat === 'local' && lc.quality === 'exact' && lc.poll === 'pollLlamaCpp' && lc.base === 'http://localhost:8080' && JSON.stringify(lc.srcIds) === JSON.stringify(['llamacpp']) && lc.statusEl === 'llamacpp-status'
       && lc.card && lc.cors && lc.note, JSON.stringify({ off: lc.off, cors: lc.cors, note: lc.note, card: lc.card }));
     // ---- T6 (4b): GPT4All validate-only local-server ----

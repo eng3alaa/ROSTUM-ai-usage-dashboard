@@ -55,7 +55,8 @@
  *                                   files / newestMtime move whenever a file is added or modified, so the page's change detection works.
  *   GET /api/list?tool=<id>         { tool, name, root, roots, scannedAt, files: [{ path, size, mtime }] } — ALL regular files, paths relative,
  *                                   forward slashes; when a tool has more than one root each path is prefixed with that root's folder name
- *   GET /api/file?tool=<id>&path=<rel>   the file bytes, streamed, with Content-Length + Last-Modified (404 when missing). Waits only for the
+ *   GET /api/file?tool=<id>&path=<rel>   the file bytes, streamed, with Content-Length + Last-Modified (404 when missing) — exactly Content-Length
+ *                                   bytes even when the file grows while it streams (a CLI appending to its live log). Waits only for the
  *                                   tool's FIRST walk (or one in flight) — it never triggers a dirty re-walk (that is /api/status's job), so a
  *                                   file streams now even when the tool just changed
  *   GET /                           the dashboard HTML (404 with a hint when the file is not where expected); /favicon.ico → 204
@@ -266,24 +267,26 @@ const rootsChanged = (t, s) => resolveRoots(t).roots.map((r) => r.dir).join('\0'
 async function refreshTool(t) {
   const s = state.get(t.id);
   if (s.walking) return s.walking;
-  s.walking = (async () => {
-    try {
-      // events that arrived before this point describe changes already on disk — this walk sees them, so the pending mark is dropped;
-      // an event DURING the walk arms a fresh timer and the next status re-walks
-      if (s.dirtyTimer) { clearTimeout(s.dirtyTimer); s.dirtyTimer = null; }
-      s.dirty = false;
-      const t0 = Date.now();
-      if (opts.disabled.has(t.id)) { closeWatchers(s); Object.assign(s, { roots: [], candidates: [], found: false, files: [], bytes: 0, newestMtime: null, scannedAt: Date.now(), walkMs: 0, watch: null }); return; }
-      const { roots, candidates } = resolveRoots(t);
-      armWatchers(t, s, roots);
-      const multi = roots.length > 1;
-      let files = [], bytes = 0, newest = 0;
-      for (const r of roots) { const w = await walkRoot(r.dir, multi ? r.label + '/' : ''); files = files.concat(w.files); bytes += w.bytes; if (w.newest > newest) newest = w.newest; }
-      files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-      Object.assign(s, { roots, candidates, found: roots.length > 0, files, bytes, newestMtime: files.length ? newest : null, scannedAt: Date.now(), walkMs: Date.now() - t0 });
-    } finally { s.walking = null; }
-  })();
+  // the "walk in flight" slot is cleared by a promise reaction (.finally — always asynchronous): a tool with NO roots has no await in its walk, so an
+  // inline finally would run before the assignment and leave a resolved promise behind that ensureFresh / ensureWalkedOnce then return forever —
+  // a tool folder created after startup was never discovered (found while writing the A0 #8 check)
+  s.walking = walkTool(t, s).finally(() => { s.walking = null; });
   return s.walking;
+}
+async function walkTool(t, s) {
+  // events that arrived before this point describe changes already on disk — this walk sees them, so the pending mark is dropped;
+  // an event DURING the walk arms a fresh timer and the next status re-walks
+  if (s.dirtyTimer) { clearTimeout(s.dirtyTimer); s.dirtyTimer = null; }
+  s.dirty = false;
+  const t0 = Date.now();
+  if (opts.disabled.has(t.id)) { closeWatchers(s); Object.assign(s, { roots: [], candidates: [], found: false, files: [], bytes: 0, newestMtime: null, scannedAt: Date.now(), walkMs: 0, watch: null }); return; }
+  const { roots, candidates } = resolveRoots(t);
+  armWatchers(t, s, roots);
+  const multi = roots.length > 1;
+  let files = [], bytes = 0, newest = 0;
+  for (const r of roots) { const w = await walkRoot(r.dir, multi ? r.label + '/' : ''); files = files.concat(w.files); bytes += w.bytes; if (w.newest > newest) newest = w.newest; }
+  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  Object.assign(s, { roots, candidates, found: roots.length > 0, files, bytes, newestMtime: files.length ? newest : null, scannedAt: Date.now(), walkMs: Date.now() - t0 });
 }
 // re-walk when: forced, never walked, a walk is already in flight (join it), the root set changed, the tool is dirty, or — polling fallback only — the cache is older than the TTL
 function ensureFresh(t, force) {
@@ -406,10 +409,10 @@ async function handle(req, res, url) {
     const r = await resolveFile(t, url.searchParams.get('path'));
     if (r.error) return sendJson(res, r.status, { error: r.error });
     res.writeHead(200, { 'Content-Type': CT[path.extname(r.abs).toLowerCase()] || 'application/octet-stream', 'Content-Length': r.st.size, 'Last-Modified': r.st.mtime.toUTCString() });
-    if (req.method === 'HEAD') { res.end(); return 0; }
+    if (req.method === 'HEAD' || r.st.size === 0) { res.end(); return 0; }
     return new Promise((resolve) => {
       let sent = 0;
-      const stream = fs.createReadStream(r.abs);
+      const stream = fs.createReadStream(r.abs, { end: r.st.size - 1 });   // exactly the bytes Content-Length announced — a log growing while it streams must not break the keep-alive framing (A0 #8)
       stream.on('data', (c) => { sent += c.length; });
       stream.on('error', () => { res.destroy(); resolve(sent); });   // vanished mid-stream: the client sees a cut connection, never a wrong file
       stream.on('end', () => resolve(sent));

@@ -149,6 +149,20 @@ export async function run({ browser, ok }) {
       !disconnectLocalDelete.sourcesLocalAfterRefresh,
       JSON.stringify(disconnectLocalDelete));
 
+    // A0 #1: a denied re-grant on the remembered Claude Code folder is a message, never a fall-through to the folder picker
+    const denied = await page.evaluate(async () => {
+      let picks = 0;
+      const origPick = App.pickFolder, origHandle = App.dirHandle;
+      App.pickFolder = async () => { picks++; };
+      App.dirHandle = { queryPermission: async () => 'prompt', requestPermission: async () => 'denied' };
+      await App.rescan();
+      const out = { picks, text: document.getElementById('local-status').textContent };
+      App.pickFolder = origPick; App.dirHandle = origHandle;
+      return out;
+    });
+    ok('rescan (A0 #1): permission denied on the stored handle → "Permission denied — click Choose .claude folder… to pick the folder again." and the picker is NOT opened',
+      denied.picks === 0 && /Permission denied/.test(denied.text) && /Choose \.claude folder/.test(denied.text), JSON.stringify(denied));
+
     // I4: syncing a key-bearing connector with no usable key anywhere (not in the
     // input, not remembered in LS) must surface the connect modal instead of
     // silently calling the fetch method (which would just no-op or hit the network).

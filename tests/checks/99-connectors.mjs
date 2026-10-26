@@ -50,15 +50,66 @@ export async function run({ browser, ok }) {
       Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
       window.fetchJSON = async (url) => {
         if (String(url).endsWith('/user')) return { login: 'alaa-dev' };
-        throw new Error('HTTP 404');
+        throw Object.assign(new Error('HTTP 404 — Not Found'), { status: 404 });   // fetchJSON's contract: the HTTP status rides on the error
       };
       await App.fetchCopilot();
       return { label: Store.connectors.copilot.label, err: Store.connectors.copilot.err || null,
         statusText: document.getElementById('copilot-status').textContent };
     });
-    ok('copilot: usage endpoint missing degrades to validated-only, no error state',
+    ok('copilot: usage endpoint missing (404) degrades to validated-only, no error state',
       cpNoUsage.label === 'alaa-dev' && cpNoUsage.err === null && /no usage data|validated/i.test(cpNoUsage.statusText),
       JSON.stringify(cpNoUsage));
+    // A0 #4: only 404 means "endpoint not available" — a 403 / 5xx / network failure on the usage endpoint is the card's error, never "no usage data"
+    const cpDenied = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      window.fetchJSON = async (url) => {
+        if (String(url).endsWith('/user')) return { login: 'alaa-dev' };
+        throw Object.assign(new Error('HTTP 403 — Resource not accessible by personal access token'), { status: 403 });
+      };
+      await App.fetchCopilot();
+      return { err: (Store.connectors.copilot || {}).err || null, status: Store.connectorStatus(connectorById('copilot')), statusText: document.getElementById('copilot-status').textContent, hasSrc: !!Store.sources.copilot };
+    });
+    ok('copilot (A0 #4): a 403 on the usage endpoint is reported as the card\'s error (warn, "HTTP 403 …"), not read as "no usage data"; nothing lands',
+      /HTTP 403/.test(cpDenied.err || '') && cpDenied.status === 'warn' && /HTTP 403/.test(cpDenied.statusText) && !cpDenied.hasSrc, JSON.stringify(cpDenied));
+    // A0 #5: a sync whose usage endpoint answers with ZERO Copilot items replaces the stored rows and billed ([] = truthful empty); a 404 afterwards leaves the rows and marks billed stale
+    const cpEmpty = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      const items = [{ date: '2026-08-10', product: 'copilot', sku: 'copilot_premium_request', quantity: 14, netAmount: 0.56 }];
+      let usage = { usageItems: items };
+      window.fetchJSON = async (url) => {
+        if (String(url).endsWith('/user')) return { login: 'alaa-dev' };
+        if (usage === null) throw Object.assign(new Error('HTTP 404 — Not Found'), { status: 404 });
+        return usage;
+      };
+      await App.fetchCopilot();
+      const first = { rows: Store.sources.copilot.rows.length, billed: Store.billedRows('copilot').length };
+      usage = { usageItems: [] };
+      await App.fetchCopilot();
+      const empty = { rows: ((Store.sources.copilot || {}).rows || []).length, billed: Store.billedRows('copilot').length, stale: (Store.billed.copilot || {}).stale, text: document.getElementById('copilot-status').textContent };
+      usage = { usageItems: items };
+      await App.fetchCopilot();
+      usage = null;
+      await App.fetchCopilot();
+      const gone = { rows: ((Store.sources.copilot || {}).rows || []).length, billed: Store.billedRows('copilot').length, stale: (Store.billed.copilot || {}).stale, err: Store.connectors.copilot.err || null };
+      return { first, empty, gone };
+    });
+    ok('copilot (A0 #5): zero usage items → the old rows are replaced (0 rows) and billed is a fresh truthful empty (0 days, not stale); a later 404 keeps the rows and marks billed stale, no error',
+      cpEmpty.first.rows === 1 && cpEmpty.first.billed === 1 && cpEmpty.empty.rows === 0 && cpEmpty.empty.billed === 0 && cpEmpty.empty.stale === false && /no Copilot usage/.test(cpEmpty.empty.text)
+      && cpEmpty.gone.rows === 1 && cpEmpty.gone.billed === 1 && cpEmpty.gone.stale === true && cpEmpty.gone.err === null, JSON.stringify(cpEmpty));
+    // A0 #24: day keys never read "undefined-undefined-01"; the login is URL-encoded in the usage path
+    const cpDays = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      let usageUrl = null;
+      window.fetchJSON = async (url) => {
+        const u = String(url); if (u.endsWith('/user')) return { login: 'name with/slash' };
+        usageUrl = u;
+        return { usageItems: [{ year: 2026, month: 8, product: 'copilot', sku: 'copilot_premium_request', quantity: 3, netAmount: 0.12 }, { product: 'copilot', sku: 'copilot_premium_request', quantity: 9, netAmount: 0.36 }] };
+      };
+      await App.fetchCopilot();
+      return { days: Store.sources.copilot.rows.map(r => r.d), msgs: Store.sources.copilot.rows.reduce((a, r) => a + r.msgs, 0), usageUrl };
+    });
+    ok('copilot (A0 #24): an item with year/month but no date lands on the 1st of that month, an item with neither is skipped (no "undefined-undefined-01" row); the login is URL-encoded in the usage path',
+      JSON.stringify(cpDays.days) === JSON.stringify(['2026-08-01']) && cpDays.msgs === 3 && /\/users\/name%20with%2Fslash\//.test(cpDays.usageUrl || ''), JSON.stringify(cpDays));
 
     const or = await page.evaluate(async () => {
       Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
@@ -96,9 +147,96 @@ export async function run({ browser, ok }) {
       return { err: Store.connectors.openrouter.err || null, hasSrc: !!Store.sources.openrouter,
         statusText: document.getElementById('openrouter-status').textContent };
     });
-    ok('openrouter: activity denied degrades to credits-only, no error state',
-      orNoActivity.err === null && !orNoActivity.hasSrc && /credits/i.test(orNoActivity.statusText),
+    ok('openrouter (A0 #4): a 403 on activity is the card\'s error (warn, "HTTP 403 …") — never read as "activity not available"; nothing lands',
+      /HTTP 403/.test(orNoActivity.err || '') && !orNoActivity.hasSrc && /HTTP 403/.test(orNoActivity.statusText),
       JSON.stringify(orNoActivity));
+    const orNotAvail = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      window.fetchJSON = async (url) => {
+        const u = String(url);
+        if (u.endsWith('/api/v1/key')) return { data: { label: 'rostum-key' } };
+        if (u.endsWith('/api/v1/credits')) return { data: { total_credits: 50, total_usage: 12.5 } };
+        throw Object.assign(new Error('HTTP 404 — Not Found'), { status: 404 });
+      };
+      await App.fetchOpenrouter();
+      return { err: Store.connectors.openrouter.err || null, hasSrc: !!Store.sources.openrouter, statusText: document.getElementById('openrouter-status').textContent };
+    });
+    ok('openrouter (A0 #4): a 404 on activity (endpoint not available for this key type) degrades to credits-only with no error state',
+      orNotAvail.err === null && !orNotAvail.hasSrc && /credits/i.test(orNotAvail.statusText) && /not available/i.test(orNotAvail.statusText), JSON.stringify(orNotAvail));
+    // A0 #5: an activity answer with zero rows is a truthful empty — it replaces the stored rows and billed
+    const orEmpty = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      let activity = { data: [{ date: '2026-08-10', model: 'x-ai/grok-5', usage: 0.42, requests: 12, prompt_tokens: 90000, completion_tokens: 12000 }] };
+      window.fetchJSON = async (url) => {
+        const u = String(url);
+        if (u.endsWith('/api/v1/key')) return { data: { label: 'rostum-key' } };
+        if (u.endsWith('/api/v1/credits')) return { data: { total_credits: 50, total_usage: 12.5 } };
+        return activity;
+      };
+      await App.fetchOpenrouter();
+      const first = { rows: Store.sources.openrouter.rows.length, billed: Store.billedRows('openrouter').length };
+      activity = { data: [] };
+      await App.fetchOpenrouter();
+      return { first, rows: ((Store.sources.openrouter || {}).rows || []).length, billed: Store.billedRows('openrouter').length, stale: (Store.billed.openrouter || {}).stale, err: Store.connectors.openrouter.err || null };
+    });
+    ok('openrouter (A0 #5): an activity answer with zero rows replaces the stored rows (0) and billed ([] fresh, not stale) — never keeps the old rows marked fresh',
+      orEmpty.first.rows === 1 && orEmpty.first.billed === 1 && orEmpty.rows === 0 && orEmpty.billed === 0 && orEmpty.stale === false && orEmpty.err === null, JSON.stringify(orEmpty));
+    // A0 #6: an error on the Anthropic / OpenAI admin cards re-renders — the hub dot turns amber instead of staying as it was
+    const legacyErr = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      App._render();
+      const dot = (id) => (document.querySelector('#accounts-hub .acct[data-connector="' + id + '"] .dot') || {}).className || '';
+      const before = { anthropic: dot('anthropic'), openai: dot('openai') };
+      const origA = window.fetchAnthropicAll, origO = window.fetchOpenAIAll;
+      window.fetchAnthropicAll = async () => { throw new Error('HTTP 401 — invalid x-api-key'); };
+      window.fetchOpenAIAll = async () => { throw new Error('HTTP 401 — Incorrect API key'); };
+      document.getElementById('anthropic-key').value = 'sk-ant-admin-x'; document.getElementById('openai-key').value = 'sk-admin-x';
+      await App.fetchAnthropic(); await App.fetchOpenAI();
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));   // App.render() is rAF-batched
+      const after = { anthropic: dot('anthropic'), openai: dot('openai'), errA: Store.connectors.anthropic.err, errO: Store.connectors.openai.err };
+      window.fetchAnthropicAll = origA; window.fetchOpenAIAll = origO;
+      document.getElementById('anthropic-key').value = ''; document.getElementById('openai-key').value = '';
+      Store.connectors = {}; Store.persist(); App._render();
+      return { before, after };
+    });
+    ok('legacy cards (A0 #6): a failed Anthropic / OpenAI fetch re-renders the hub — both dots read warn after the error (off before)',
+      /\boff\b/.test(legacyErr.before.anthropic) && /\boff\b/.test(legacyErr.before.openai) && /\bwarn\b/.test(legacyErr.after.anthropic) && /\bwarn\b/.test(legacyErr.after.openai), JSON.stringify(legacyErr));
+    // A0 #11: Remember persists a key only after the fetch accepted it — a rejected key is never written (refreshAll would replay it after a reload)
+    const rememberLate = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      const out = {};
+      // (a) legacy card (Gemini): Remember checked, validation fails → nothing stored; then succeeds → stored
+      const gk = document.getElementById('gemini-key'), grem = document.getElementById('remember-gemini');
+      LS.del('key:gemini'); gk.value = 'AIza-bad'; grem.checked = true;
+      window.fetchJSON = async () => { throw Object.assign(new Error('HTTP 400 — API key not valid'), { status: 400 }); };
+      await App.fetchGemini(); out.geminiAfterFail = LS.get('key:gemini', null);
+      window.fetchJSON = async () => ({ models: [{ name: 'models/gemini-3-pro' }] });
+      gk.value = 'AIza-good'; await App.fetchGemini(); out.geminiAfterOk = LS.get('key:gemini', null);
+      LS.del('key:gemini'); gk.value = ''; grem.checked = false;
+      // (b) the generic key driver (connectKey): same rule
+      const c = CONNECTORS.find(x => x.fetch && !x.sessionOnly && x.keyLS);
+      const ki = document.getElementById(c.id + '-key'), rem = document.getElementById('remember-' + c.id), orig = globalThis[c.fetch];
+      LS.del(c.keyLS); ki.value = 'k-bad'; rem.checked = true;
+      window[c.fetch] = async () => { throw new Error('HTTP 401 — bad key'); };
+      await App.connectKey(c); out.keyAfterFail = LS.get(c.keyLS, null);
+      window[c.fetch] = async () => ({ label: 'stub', detail: '' });
+      ki.value = 'k-good'; await App.connectKey(c); out.keyAfterOk = LS.get(c.keyLS, null);
+      window[c.fetch] = orig; LS.del(c.keyLS); ki.value = ''; rem.checked = false;
+      // (c) the collector (connectCollector): a 401 never persists the token; a good status does
+      const cc = connectorById('collector'), ck = document.getElementById('collector-key'), crem = document.getElementById('remember-collector');
+      const origFetch = window.fetch;
+      let reject = true;
+      window.fetch = async () => new Response(JSON.stringify(reject ? { error: 'unauthorized' } : { version: '7', tools: [] }), { status: reject ? 401 : 200, headers: { 'Content-Type': 'application/json' } });
+      LS.del('key:collector'); ck.value = 'tok-bad'; crem.checked = true;
+      await App.connectCollector(cc); out.collectorAfterFail = LS.get('key:collector', null);
+      reject = false; ck.value = 'tok-good'; await App.connectCollector(cc); out.collectorAfterOk = LS.get('key:collector', null);
+      App.stopCollectorWatch(cc); window.fetch = origFetch; LS.del('key:collector'); LS.del('url:collector'); ck.value = ''; crem.checked = false;
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist(); App._render();
+      return out;
+    });
+    ok('remember (A0 #11): a rejected key is never persisted (Gemini legacy card, the generic key driver, the collector token) — only the key the fetch accepted is written to LS',
+      rememberLate.geminiAfterFail === null && rememberLate.geminiAfterOk === 'AIza-good' && rememberLate.keyAfterFail === null && rememberLate.keyAfterOk === 'k-good'
+      && rememberLate.collectorAfterFail === null && rememberLate.collectorAfterOk === 'tok-good', JSON.stringify(rememberLate));
     // 4b T1: link-only entries never fetch, never get connector state, never prompt (refreshAll / sync / disconnect are no-ops)
     const lo = await page.evaluate(async () => {
       Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};

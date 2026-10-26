@@ -242,7 +242,7 @@ input[type="date"], input[type="text"], input[type="password"], input[type="sear
 /* ============ Print report ============ */
 .report-meta { font-size: 12px; color: var(--ink-2); margin: 0 0 12px; }
 @media print {
-  .topbar .top-actions, .filterbar, #accounts-hub, #sources, .sources, #card-budgets, #card-pricing, #alerts, #storage-warning, .toggle, .btn, #hub-bar, .acct-hide, .collapse-btn, .insight-hide, #insights-chips, #sources-title, #pricing-title, #help-btn, #help-modal { display: none !important; }
+  .topbar .top-actions, .filterbar, #accounts-hub, #sources, .sources, #card-budgets, #card-pricing, #alerts, .storage-banner, .toggle, .btn, #hub-bar, .acct-hide, .collapse-btn, .insight-hide, #insights-chips, #sources-title, #pricing-title, #help-btn, #help-modal { display: none !important; }
   /* an open <dialog> renders in the top layer, above the normal document flow — hiding its
      ancestors via the print stylesheet does not hide it, so it needs its own rule */
   dialog { display: none !important; }
@@ -350,8 +350,8 @@ table.data tr.total td { font-weight: 650; border-top: 1px solid var(--baseline)
 .src input[type="password"], .src input[type="text"] { flex: 1; min-width: 120px; }
 .status { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
 .status .ok { color: var(--good-text); font-weight: 600; }
-.status .err, #storage-warning { color: var(--critical); font-weight: 600; }
-#storage-warning { margin: 8px 0; }
+.status .err, .storage-banner { color: var(--critical); font-weight: 600; }
+.storage-banner { margin: 8px 0; }
 .badge {
   font-size: 10.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase;
   color: var(--ink-2); border: 1px solid var(--border); padding: 1px 7px; border-radius: 999px;
@@ -900,6 +900,16 @@ function bucketDays(days, maxCols = 160) {
 const fmtDayShort = (key) => { const d = new Date(key + 'T12:00:00'); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
 
 /* ---------- persistent settings ---------- */
+/** One role="alert" banner per id at the top of the page (created on first use, its text replaced after) — textContent only. */
+function showStorageBanner(id, text) {
+  let s = document.getElementById(id);
+  if (!s) {
+    const wrap = document.querySelector('.wrap') || document.body;
+    s = el('div', { id, class: 'err storage-banner', role: 'alert' });
+    wrap.insertBefore(s, wrap.firstChild);
+  }
+  s.textContent = text;
+}
 const LS = {
   get(k, fallback) { try { const v = localStorage.getItem('aiusage:' + k); return v == null ? fallback : JSON.parse(v); } catch { return fallback; } },
   set(k, v) {
@@ -908,13 +918,7 @@ const LS = {
       console.warn('localStorage full?', e);
       // Dedicated banner — NOT #import-status, which handleImportFiles clears at the
       // end of every import (Task 13), which would wipe a mid-import quota warning.
-      let s = document.getElementById('storage-warning');
-      if (!s) {
-        const wrap = document.querySelector('.wrap') || document.body;
-        s = el('div', { id: 'storage-warning', class: 'err', role: 'alert' });
-        wrap.insertBefore(s, wrap.firstChild);
-      }
-      s.textContent = 'Warning: browser storage is full — new data may not persist. Export a CSV backup, or Clear stored data.';
+      showStorageBanner('storage-warning', 'Warning: browser storage is full — new data may not persist. Export a CSV backup, or Clear stored data.');
     }
   },
   del(k) { try { localStorage.removeItem('aiusage:' + k); } catch {} }
@@ -1936,8 +1940,9 @@ const Store = {
   projects: [],      // [{name, msgs, in, cw, cr, out, cost}] from local logs
   projectsBy: {},    // connectorId → [{project, model, in, cw, cr, out, msgs, platform, local?}] from folder-log scans (Codex cwd, Gemini CLI project hash, Copilot CLI cwd, Junie project dir)
   connectors: {},    // connectorId -> { label, lastSync, err }
+  _frozen: false,    // A0 #16: true when a corrupt blob could not be backed up — persist() then leaves it alone (the banner says so)
   load() {
-    const saved = LS.get('data', null);
+    const saved = this._readSaved();
     if (saved) { this.sources = saved.sources || {}; this.billed = saved.billed || {}; this.projects = saved.projects || []; this.projectsBy = saved.projectsBy || {}; this.connectors = saved.connectors || {}; }
     // migrate v1 billed arrays to {rows, at, stale} envelopes
     for (const [k, v] of Object.entries(this.billed)) {
@@ -1947,6 +1952,22 @@ const Store = {
     // writes the key, even as {}). Running this unconditionally on every load would resurrect
     // a keep-data disconnect (connectors[id] deleted, sources kept) as 'stored data'/ok again.
     if (saved && !('connectors' in saved)) this.migrateConnectors();
+  },
+  /** The persisted blob, parsed — or null when there is none. A blob that no longer parses is quarantined (A0 #16): kept byte-for-byte under
+   *  'data.corrupt' so nothing is lost, announced in a banner, and this load starts empty; persist() then writes a fresh blob beside it. */
+  _readSaved() {
+    let raw = null;
+    try { raw = localStorage.getItem('aiusage:data'); }
+    catch (e) { showStorageBanner('data-warning', 'Browser storage is not readable (' + (e.message || e) + ') — nothing is loaded or saved in this tab.'); return null; }
+    if (raw == null) return null;
+    try { return JSON.parse(raw); } catch { this._quarantine(raw); return null; }
+  },
+  _quarantine(raw) {
+    let kept = true;
+    try { localStorage.setItem('aiusage:data.corrupt', raw); } catch { kept = false; this._frozen = true; }
+    showStorageBanner('data-warning', 'Stored usage data could not be read (corrupt JSON) and was not loaded. '
+      + (kept ? 'The raw blob is kept under the browser-storage key aiusage:data.corrupt — copy it out (DevTools → Application → Local Storage) before you clear data; syncing again starts a fresh store.'
+        : 'It could not be backed up either (storage full), so nothing is saved in this tab until storage is freed — the blob stays as it is.'));
   },
   // v1.1-shaped stores (data present, no per-connector state entry) synthesize a labeled
   // connected card instead of reading as truly disconnected forever.
@@ -1995,6 +2016,7 @@ const Store = {
     this.persist();
   },
   persist() {
+    if (this._frozen) return;   // A0 #16: never overwrite a corrupt blob that has no backup
     try { LS.set('data', { sources: this.sources, billed: this.billed, projects: this.projects, projectsBy: this.projectsBy, connectors: this.connectors }); }
     catch (e) { console.warn('persist failed', e); }
   },
@@ -2135,7 +2157,7 @@ async function collectJsonlFromHandle(dirHandle, path = '', out = [], depth = 0)
     else if (name.endsWith('.jsonl')) files.push([name, h]);
   }
   for (const [name, h] of files) {
-    try { out.push({ path: path + name, file: await h.getFile() }); } catch {}
+    try { out.push({ path: path + name, file: await h.getFile() }); } catch { out.unreadable = (out.unreadable || 0) + 1; }   // locked / vanished file: counted (parseFolderCached folds it into badFiles), never fatal (A0 #13)
   }
   // if this level has a "projects" (or ".claude") dir, that's the target — don't crawl siblings
   const target = dirs.find(([n]) => /^projects$/i.test(n)) || dirs.find(([n]) => /^\.claude$/i.test(n));
@@ -2203,7 +2225,7 @@ async function parseClaudeLogs(files, onProgress, seen = new Set()) {
       if (cw == null && u.cache_creation && typeof u.cache_creation === 'object') {
         cw = Object.values(u.cache_creation).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
       }
-      const t = { in: u.input_tokens || 0, cw: cw || 0, cr: u.cache_read_input_tokens || 0, out: u.output_tokens || 0, msgs: 1 };
+      const t = { in: finTok(+u.input_tokens || 0), cw: finTok(+cw || 0), cr: finTok(+u.cache_read_input_tokens || 0), out: finTok(+u.output_tokens || 0), msgs: 1 };   // finite non-negative numbers only — a string count would concatenate (A0 #14)
       const ts = obj.timestamp ? new Date(obj.timestamp) : null;
       const d = dayKey(ts || file.lastModified);
       const hour = ts && !isNaN(ts) ? ts.getHours() : undefined;
@@ -2603,7 +2625,7 @@ async function parseClineTasks(files, onProgress, seen = new Set(), c, siblingFi
     const taskId = dir.split('/').filter(Boolean).pop() || (path.replace(/\.json$/i, ''));
     let usage = [];   // task_metadata.json model_usage[], sorted by ts (entries without ts sort first = "from the start")
     const mf = metaByDir.get(dir);
-    if (mf) { try { const mo = JSON.parse(await mf.text()); const mu = mo && mo.model_usage; if (Array.isArray(mu)) usage = mu.filter(u => u && u.model_id).map(u => ({ ts: Number.isFinite(+u.ts) ? +u.ts : -Infinity, model: String(u.model_id), provider: String(u.model_provider_id || '').toLowerCase() })).sort((x, y) => x.ts - y.ts); } catch {} }
+    if (mf) { try { const mo = JSON.parse(await mf.text()); const mu = mo && mo.model_usage; if (Array.isArray(mu)) usage = mu.filter(u => u && u.model_id).map(u => ({ ts: Number.isFinite(+u.ts) ? +u.ts : -Infinity, model: String(u.model_id), provider: String(u.model_provider_id || '').toLowerCase() })).sort((x, y) => x.ts - y.ts); } catch { badLines++; } }   // a corrupt task_metadata.json is counted, not swallowed — the task's requests still land as "unknown" (A0 #15)
     const usageAt = (t) => {   // greatest ts <= t; first entry before the first switch; last entry when t is missing
       if (!usage.length) return null;
       if (t == null || Number.isNaN(t)) return usage[usage.length - 1];
@@ -2615,7 +2637,7 @@ async function parseClineTasks(files, onProgress, seen = new Set(), c, siblingFi
     lines++;
     for (const m of arr) {
       if (!m || m.say !== 'api_req_started' || typeof m.text !== 'string') continue;
-      let info; try { info = JSON.parse(m.text); } catch { continue; }
+      let info; try { info = JSON.parse(m.text); } catch { badLines++; continue; }   // a request record whose text is not JSON is counted (A0 #15)
       if (!info || (info.tokensIn == null && info.tokensOut == null)) continue;   // request still in flight when the file was written
       if (m.ts != null) { const id = taskId + ':' + m.ts; if (seen.has(id)) { dupIds.push(id); continue; } seen.add(id); addedIds.push(id); }
       const ts = m.ts != null ? new Date(+m.ts) : null, okTs = ts && !isNaN(ts);
@@ -3033,7 +3055,7 @@ function textOfChatGPTMessage(msg) {
 
 function parseChatGPTExport(convs) {
   const agg = makeAgg();
-  let msgs = 0;
+  let msgs = 0, skipped = 0;
   for (const conv of convs) {
     if (!conv || typeof conv !== 'object' || !conv.mapping) continue;
     // Follow only the ACTIVE branch: walk the parent chain up from current_node.
@@ -3060,19 +3082,19 @@ function parseChatGPTExport(convs) {
       const chars = text.length;
       if (m.author.role === 'assistant') {
         const model = (m.metadata && m.metadata.model_slug) || 'chatgpt';
-        const ts = m.create_time ? m.create_time * 1000 : (conv.create_time ? conv.create_time * 1000 : Date.now());
-        agg.add(dayKey(new Date(ts)), 'ChatGPT', model, { in: estTok(cum), out: estTok(chars), msgs: 1, est: 1 });
-        msgs++;
+        const secs = m.create_time || conv.create_time;   // the conversation's time stands in for an undated reply; no date at all → skipped + counted, never booked as today (A0 #7)
+        if (secs) { agg.add(dayKey(new Date(secs * 1000)), 'ChatGPT', model, { in: estTok(cum), out: estTok(chars), msgs: 1, est: 1 }); msgs++; }
+        else skipped++;
       }
       cum += chars;
     }
   }
-  return { rows: agg.rows(), meta: { msgs, convs: convs.length } };
+  return { rows: agg.rows(), meta: { msgs, convs: convs.length, skipped } };
 }
 
 function parseClaudeAiExport(convs, assumedModel) {
   const agg = makeAgg();
-  let msgs = 0;
+  let msgs = 0, skipped = 0;
   for (const conv of convs) {
     const list = conv && conv.chat_messages;
     if (!Array.isArray(list)) continue;
@@ -3083,13 +3105,14 @@ function parseClaudeAiExport(convs, assumedModel) {
       if (!text && Array.isArray(m.content)) text = m.content.map(c => (c && c.text) || '').join('\n');
       const chars = text.length;
       if (m.sender === 'assistant') {
-        agg.add(dayKey(m.created_at || conv.created_at || Date.now()), 'Claude.ai', assumedModel, { in: estTok(cum), out: estTok(chars), msgs: 1, est: 1 });
-        msgs++;
+        const d = dayKey(m.created_at || conv.created_at || NaN);   // the conversation's time stands in for an undated reply; no date at all → skipped + counted, never booked as today (A0 #7)
+        if (d) { agg.add(d, 'Claude.ai', assumedModel, { in: estTok(cum), out: estTok(chars), msgs: 1, est: 1 }); msgs++; }
+        else skipped++;
       }
       cum += chars;
     }
   }
-  return { rows: agg.rows(), meta: { msgs, convs: convs.length } };
+  return { rows: agg.rows(), meta: { msgs, convs: convs.length, skipped } };
 }
 
 /** Google Takeout — My Activity/Gemini Apps/MyActivity.json: array of activity records {header:'Gemini Apps',
@@ -3487,6 +3510,15 @@ async function parseDeepSeekUsageZip(entries) {
     meta: { rows: n, rejected, files: amountFiles + costFiles, amountFiles, costFiles, currency, billedFrom: costFiles ? 'cost CSV' : (priceBilled.size ? 'price column' : 'none') } };
 }
 
+/** A0 #9 — per-month bookkeeping behind Store.sources['deepseek-usage-zip'].meta: each import replaces the { rows, files } of the month(s) its
+ *  rows cover, so meta.rows / meta.files (the sums) describe the stored months and never inflate when a month is imported again. */
+function deepSeekMonthCounts(prevMeta, res) {
+  const months = { ...((prevMeta || {}).months || {}) };
+  months[[...new Set(res.rows.map(r => r.d.slice(0, 7)))].sort().join(',')] = { rows: res.meta.rows, files: res.meta.files };
+  const sum = (k) => Object.values(months).reduce((a, m) => a + (m[k] || 0), 0);
+  return { months, rows: sum('rows'), files: sum('files') };
+}
+
 /* Microsoft Copilot (consumer) activity-history CSV — account.microsoft.com/privacy → Copilot → Export all activity history. Columns are
  * not documented (prompts + responses with timestamps, an app/surface column on some exports) → matched tolerantly: a date/time column,
  * a prompt/query/request/user column, a response/answer/copilot/bot column, optional app/surface/product; a CSV with any token column is
@@ -3601,14 +3633,20 @@ function parseOpenAICost(payload) {
 }
 
 /* ---------- direct fetchers (may be blocked by CORS → caller shows fallback) ---------- */
+/** JSON GET. A non-2xx answer throws Error('HTTP <status>[ — <server message>]') with .status set, so callers can tell 404 (not available) from
+ *  everything else (a real error for the card). */
 async function fetchJSON(url, headers) {
   const res = await fetch(url, { headers });
   if (!res.ok) {
     let detail = '';
-    try { const j = await res.json(); detail = (j.error && (j.error.message || j.error.type)) || ''; } catch {}
-    throw new Error(`HTTP ${res.status}${detail ? ' — ' + detail : ''}`);
+    try { const j = await res.json(); detail = (j.error && (j.error.message || j.error.type)) || ''; } catch { /* no JSON body: no detail */ }
+    const e = new Error(`HTTP ${res.status}${detail ? ' — ' + detail : ''}`); e.status = res.status; throw e;
   }
   return res.json();
+}
+/** GET an endpoint an account may lack: the JSON, or null on 404 (not available). Any other failure (403, 5xx, network) propagates to the card (A0 #4). */
+async function fetchJSONOrNotFound(url, headers) {
+  try { return await fetchJSON(url, headers); } catch (e) { if (e.status === 404) return null; throw e; }
 }
 /** Opaque reachability probe: resolves true if SOMETHING answers at url (even without CORS headers), false if
  *  the connection fails. Lets connectServer tell "running but CORS-blocked" from "not running". */
@@ -3835,10 +3873,10 @@ async function pollLlamaCpp(base) {
 async function validateLlamaCpp(base) {
   const model = await llamaCppModelName(base);
   if (!model) await fetchJSON(base + '/health', {});   // neither /props nor /health → throws → connectServer's CORS / not-running handling
-  let metricsNote;
+  let metricsNote, pollable = true;
   try { const p = await pollLlamaCpp(base); metricsNote = `counting tokens from /metrics while this page is open (${p.label})`; }
-  catch (e) { metricsNote = `${e.message || e} — tokens are NOT counted until then`; }
-  return { label: model || 'llama-server', detail: `${model ? 'model ' + model : 'llama-server healthy'} · ${metricsNote} · no history on the server` };
+  catch (e) { metricsNote = `${e.message || e} — tokens are NOT counted until then`; pollable = false; }   // --metrics off: connectServer starts no poll (every tick would fail the same way)
+  return { label: model || 'llama-server', detail: `${model ? 'model ' + model : 'llama-server healthy'} · ${metricsNote} · no history on the server`, pollable };
 }
 
 /** GPT4All live validate: GET /v1/models on the app's Local API Server (off by default; CORS * when on). No history endpoint. */
@@ -4228,44 +4266,46 @@ async function fetchBedrock(key, fields, opts = {}) {
     rows, billed, meta: { days, region, models: models.length } };
 }
 
+/** GitHub Copilot — PAT. /user validates; the billing usage endpoint feeds rows + billed. rows / billed are null when GitHub has no usage endpoint
+ *  for this account (404) and [] when it answered with no Copilot items (a truthful empty); any other failure is the card's error (A0 #4, #5). */
 async function fetchCopilotAll(token) {
   const h = { 'Authorization': 'Bearer ' + token, 'X-GitHub-Api-Version': '2022-11-28', 'Accept': 'application/vnd.github+json' };
   const user = await fetchJSON('https://api.github.com/user', h);
-  let items = null;
-  try {
-    const y = new Date().getUTCFullYear();
-    const u = await fetchJSON('https://api.github.com/users/' + user.login + '/settings/billing/usage?year=' + y, h);
-    items = u.usageItems || u.usage_items || [];
-  } catch (e) { console.warn('copilot billing usage unavailable', e); }
+  const usage = await fetchJSONOrNotFound('https://api.github.com/users/' + encodeURIComponent(user.login) + '/settings/billing/usage?year=' + new Date().getUTCFullYear(), h);
+  if (usage === null) return { login: user.login, rows: null, billed: null };
   const agg2 = makeAgg(); const billed = new Map();
-  for (const it of items || []) {
+  for (const it of usage.usageItems || usage.usage_items || []) {
     if (!String(it.product || '').toLowerCase().includes('copilot')) continue;
-    const d = String(it.date || '').slice(0, 10) || (it.year + '-' + String(it.month).padStart(2, '0') + '-01');
+    const d = copilotItemDay(it); if (!d) continue;
     agg2.add(d, 'GitHub Copilot', it.sku || 'copilot', { msgs: finTok(it.quantity), est: 1 });
     billed.set(d, (billed.get(d) || 0) + finAmt(it.netAmount ?? it.net_amount ?? 0));
   }
-  return { login: user.login, hadUsage: items !== null,
-    rows: agg2.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })) };
+  return { login: user.login, rows: agg2.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })) };
+}
+/** YYYY-MM-DD of a GitHub billing usage item: its date, else the 1st of its year/month; null when it carries neither (never 'undefined-undefined-01', A0 #24). */
+function copilotItemDay(it) {
+  const d = String(it.date || '').slice(0, 10);
+  if (RE_DATEONLY.test(d)) return d;
+  if (Number.isInteger(+it.year) && it.year != null && Number.isInteger(+it.month) && it.month != null) return it.year + '-' + String(it.month).padStart(2, '0') + '-01';
+  return null;
 }
 
+/** OpenRouter — API key. /key validates; /credits and /activity may be missing for a key type (404 → null); rows / billed are [] when activity
+ *  answered with no days (a truthful empty). Any other failure is the card's error (A0 #4, #5). */
 async function fetchOpenRouterAll(key) {
   const h = { 'Authorization': 'Bearer ' + key };
   const info = await fetchJSON('https://openrouter.ai/api/v1/key', h);
-  let credits = null;
-  try { credits = (await fetchJSON('https://openrouter.ai/api/v1/credits', h)).data || null; } catch (e) { console.warn('openrouter credits unavailable', e); }
-  let rows = [], billed = [], hadActivity = false;
-  try {
-    const act = await fetchJSON('https://openrouter.ai/api/v1/activity', h);
-    hadActivity = true;
-    const agg2 = makeAgg(); const bm = new Map();
-    for (const a of act.data || []) {
-      const d = String(a.date || '').slice(0, 10);
-      agg2.add(d, 'OpenRouter', a.model || 'openrouter', { in: finTok(a.prompt_tokens), out: finTok(a.completion_tokens), msgs: finTok(a.requests) });
-      bm.set(d, (bm.get(d) || 0) + finAmt(a.usage || 0));
-    }
-    rows = agg2.rows(); billed = [...bm.entries()].map(([d, amount]) => ({ d, amount }));
-  } catch (e) { console.warn('openrouter activity unavailable', e); }
-  return { label: (info.data && info.data.label) || 'OpenRouter key', credits, rows, billed, hadActivity };
+  const credits = await fetchJSONOrNotFound('https://openrouter.ai/api/v1/credits', h);
+  const act = await fetchJSONOrNotFound('https://openrouter.ai/api/v1/activity', h);
+  const out = { label: (info.data && info.data.label) || 'OpenRouter key', credits: (credits && credits.data) || null, rows: null, billed: null };
+  if (act === null) return out;
+  const agg2 = makeAgg(); const bm = new Map();
+  for (const a of act.data || []) {
+    const d = String(a.date || '').slice(0, 10);
+    agg2.add(d, 'OpenRouter', a.model || 'openrouter', { in: finTok(a.prompt_tokens), out: finTok(a.completion_tokens), msgs: finTok(a.requests) });
+    bm.set(d, (bm.get(d) || 0) + finAmt(a.usage || 0));
+  }
+  return { ...out, rows: agg2.rows(), billed: [...bm.entries()].map(([d, amount]) => ({ d, amount })) };
 }
 
 async function fetchAnthropicAll(key, days) {
@@ -4465,6 +4505,9 @@ async function readZipEntries(file) {
   }
   return entries;
 }
+
+/** "; N undated replies skipped" for a chat-export note, '' when none were (A0 #7). */
+const undatedNote = (meta) => meta.skipped ? `; ${meta.skipped} undated ${meta.skipped === 1 ? 'reply' : 'replies'} skipped` : '';
 
 /* ---------- import router (drop zone) ---------- */
 /** Content sniff for ONE parsed .jsonl line dropped on Imports: which registered log format wrote it. Decisive shapes only — anything
@@ -5954,13 +5997,11 @@ const App = {
       $('rescan-local').hidden = false;
       status.textContent = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
-      status.appendChild(document.createTextNode(`${res.meta.files} log files · ${fmtInt(res.meta.msgs)} messages · scanned ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`));
+      status.appendChild(document.createTextNode(`${res.meta.files} log files · ${fmtInt(res.meta.msgs)} messages · scanned ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` + this._unreadableNote(res.meta)));
       this.render();
     } catch (e) {
       if (gen !== this._gen.local) return;   // superseded by a newer scan
-      status.textContent = '';
-      status.appendChild(el('span', { class: 'err', text: 'Scan failed: ' }));
-      status.appendChild(document.createTextNode(e.message || String(e)));
+      this._localScanFailed(status, e);
     } finally {
       prog.hidden = true;
       document.querySelectorAll('.card').forEach(c => c.classList.remove('stale'));
@@ -5986,14 +6027,24 @@ const App = {
       if (opts.fromCollector) $('rescan-local').hidden = false;   // v7 T3: Re-scan goes through the collector while it is connected (rescan() routes it)
       status.textContent = '';
       status.appendChild(el('span', { class: 'ok', text: '● Loaded. ' }));
-      status.appendChild(document.createTextNode(`${res.meta.files} log files · ${fmtInt(res.meta.msgs)} messages` + (opts.fromCollector ? ' · via collector' : ' (one-time load — pick again to refresh)')));
+      status.appendChild(document.createTextNode(`${res.meta.files} log files · ${fmtInt(res.meta.msgs)} messages` + this._unreadableNote(res.meta) + (opts.fromCollector ? ' · via collector' : ' (one-time load — pick again to refresh)')));
       this.render();
       return true;
     } catch (err) {
       if (gen !== this._gen.local) return;
-      status.textContent = 'Scan failed: ' + (err.message || err);
+      this._localScanFailed(status, err);
     } finally { prog.hidden = true; }
   },
+  /** A0 #13 — a failed Claude Code scan is attention on the card (err on the entry, like scanFiles' scanErr), not a status line alone. */
+  _localScanFailed(status, e) {
+    const msg = (e && e.message) || String(e);
+    Store.setConnector('local', { err: msg.slice(0, 80) });
+    status.textContent = '';
+    status.appendChild(el('span', { class: 'err', text: 'Scan failed: ' }));
+    status.appendChild(document.createTextNode(msg));
+    this.render();
+  },
+  _unreadableNote(meta) { return meta.badFiles ? ` · ${fmtInt(meta.badFiles)} file(s) unreadable` : ''; },
   /* =================== generic folder-log / local-server connectors =================== */
   /** Renders the hidden source card for a registry entry (statusEl target + Manage-modal body). Idempotent. */
   ensureSourceCard(c) {
@@ -6224,7 +6275,10 @@ const App = {
       status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
       status.appendChild(document.createTextNode(res.detail || ''));
-      if (c.poll) await this.startPoll(c).catch(() => {});   // 4b metrics-poll: (re)start the /metrics loop; the first tick seeds or diffs the counter baseline
+      // 4b metrics-poll: (re)start the /metrics loop (the first tick seeds or diffs the counter baseline) — unless the validator already found the counters
+      // unavailable (res.pollable === false: llama.cpp without --metrics — its detail says how to enable them; a running loop stops). A fetch failure
+      // inside a tick is _pollTick's own attention state; a tick that THROWS surfaces through the catch below instead of being swallowed (A0 #3)
+      if (c.poll) { if (res.pollable === false) this.stopPoll(c); else await this.startPoll(c); }
       this.render();
     } catch (e) {
       if (gen !== this._gen[slot]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }
@@ -6284,14 +6338,14 @@ const App = {
     const fields = {};
     for (const f of c.fields || []) { const fe = $(c.id + '-f-' + f.id); fields[f.id] = fe ? fe.value.trim() : ''; }
     const rem = $('remember-' + c.id);
-    const remember = !c.sessionOnly && !!(rem && rem.checked);
-    if (remember) LS.set(c.keyLS, key);
+    const remember = !c.sessionOnly && !!(rem && rem.checked);   // honoured below, once the fetcher accepted the key (A0 #11)
     status.textContent = 'Validating…'; status.dataset.gen = String(gen);
     try {
       const fn = globalThis[c.fetch];
       if (typeof fn !== 'function') throw new Error('No fetcher registered: ' + c.fetch);
       const res = (await fn(key, fields, { days: 90 })) || {};
       if (gen !== this._gen[c.id]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
+      if (remember) LS.set(c.keyLS, key);   // a rejected key is never remembered — refreshAll would replay it after a reload (A0 #11)
       if (Array.isArray(res.rows)) Store.setSource(c.id, res.rows, res.meta || {});
       if (res.billed !== undefined) Store.setBilled(c.id, res.billed);                               // contract: undefined = no billed path (untouched) · null = billed fetch failed → Store.setBilled(null) marks the stored envelope stale · array = fresh ([] = truthful empty)
       for (const f of c.fields || []) {   // field values persist only once the fetcher accepted them — a rejected value (bad cost scope / resource id) is never remembered, so refreshAll cannot replay it after a reload
@@ -6336,8 +6390,7 @@ const App = {
     const token = keyEl ? keyEl.value.trim() : '';
     if (!token) { status.textContent = `Paste the ${c.keyLabel || 'token'} first (${c.keyHint || 'see the card'}).`; return; }
     LS.set('url:' + c.id, base);
-    const rem = $('remember-' + c.id);
-    if (rem && rem.checked) LS.set(c.keyLS, token);   // Remember opt-in — the only write of the token to storage
+    const rem = $('remember-' + c.id);   // Remember opt-in — honoured once the collector accepted the token (A0 #11)
     this.stopCollectorWatch(c);   // no tick runs beside a connect (an in-flight one commits nothing); a successful connect starts the watch again
     status.textContent = 'Checking ' + base + '…'; status.dataset.gen = String(gen);
     const superseded = () => { if (gen !== this._gen[c.id]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return true; } return false; };
@@ -6366,6 +6419,7 @@ const App = {
     this._collectorExcluded = new Set();   // Validate & connect reads every found tool again — a tool disconnected earlier is back in (review m3)
     const walked = await this._collectorWalk(c, st, { api, base, token, full: true, stale: superseded });
     if (!walked) return;   // superseded mid-walk: its own placeholder is already cleared, nothing committed
+    if (rem && rem.checked) LS.set(c.keyLS, token);   // the only write of the token to storage — and only for a token the collector accepted (A0 #11)
     this.startCollectorWatch(c);   // automatic mode from here on (no immediate tick — everything was just read)
     this._collectorCommit(c, walked.snap, walked.summary);
     return true;
@@ -6631,7 +6685,12 @@ const App = {
     const gen = this._gen[slot] = this._gen[slot] || 0;   // read, don't bump — stopPoll / disconnect bump it to invalidate in-flight ticks
     const base = (LS.get('url:' + c.id, null) || c.baseUrl).replace(/\/+$/, '');
     let res;
-    try { res = await fn(base); } catch { return; }
+    try { res = await fn(base); }
+    catch (e) {
+      if (gen !== this._gen[slot] || !Store.connectors[c.id]) return;
+      this._pollFailed(c, e);   // a dead server / metrics off is attention on the card, never a green dot; the next good tick clears it (A0 #2)
+      return;
+    }
     if (gen !== this._gen[slot] || !Store.connectors[c.id]) return;   // stopped / disconnected (or the entry deleted) while the fetch was in flight
     const FIELDS = ['in', 'out', 'cw', 'cr', 'msgs'];
     const cur = {};
@@ -6655,8 +6714,30 @@ const App = {
     LS.set(key, { base, counters: cur, at: Date.now() });
     if (merged) { const meta = (Store.sources[c.id] || {}).meta || {}; Store.setSource(c.id, rows, { ...meta, polls: (meta.polls || 0) + 1, lastPoll: Date.now() }); }
     const st = Store.connectors[c.id] || {};
-    Store.setConnector(c.id, { label: [st.serverLabel, 'counts while this page is open'].filter(Boolean).join(' · '), lastSync: Date.now() });
-    if (merged) this.render();
+    Store.setConnector(c.id, { label: [st.serverLabel, 'counts while this page is open'].filter(Boolean).join(' · '), lastSync: Date.now(), serverErr: null, err: st.scanErr || null });
+    if (st.serverErr) this._pollRecovered(c);   // the previous tick had failed: the line says so no more
+    if (merged || st.serverErr) this.render();
+  },
+  /** A0 #2 — a failed poll (server gone, --metrics off): serverErr on the entry (attention, the per-half rule scanFiles / connectServer use) + the
+   *  status line unless a validation owns it (dataset.gen). The timer keeps running; the next good tick clears it through _pollRecovered. */
+  _pollFailed(c, e) {
+    const msg = String((e && e.message) || e);
+    const serverErr = ('Poll failed: ' + msg).slice(0, 80);
+    Store.setConnector(c.id, { serverErr, err: serverErr });
+    const status = $(c.id + '-status');
+    if (status && !status.dataset.gen) {
+      status.textContent = '';
+      status.appendChild(el('span', { class: 'err', text: 'Needs attention: ' }));
+      status.appendChild(document.createTextNode(`${msg} — trying again in ${Math.round((c.pollEvery || 60000) / 1000)} s`));
+    }
+    this.render();
+  },
+  _pollRecovered(c) {
+    const status = $(c.id + '-status');
+    if (!status || status.dataset.gen) return;
+    status.textContent = '';
+    status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
+    status.appendChild(document.createTextNode('polling again — counts from /metrics resume this hour'));
   },
 
   async pickFolder() {
@@ -6671,14 +6752,15 @@ const App = {
 
   async rescan() {
     if (this._viaCollector('local')) return this.rescanViaCollector('local');   // v7 T3: the collector feeds this card — Re-scan / Sync go through it, not the handle or the picker
-    if (this.dirHandle) {
-      try {
-        let perm = await this.dirHandle.queryPermission({ mode: 'read' });
-        if (perm !== 'granted') perm = await this.dirHandle.requestPermission({ mode: 'read' });
-        if (perm === 'granted') { await this.scanHandle(this.dirHandle); return; }
-      } catch (e) { console.warn(e); }
-    }
-    this.pickFolder();
+    if (!this.dirHandle) return this.pickFolder();   // nothing stored → the picker is the only way in
+    // a stored handle owns this path: a denied re-grant is a message, NOT a silent fall-through to the picker (rescanFolder's rule, A0 #1)
+    const status = $('local-status');
+    try {
+      let perm = await this.dirHandle.queryPermission({ mode: 'read' });
+      if (perm !== 'granted') perm = await this.dirHandle.requestPermission({ mode: 'read' });
+      if (perm === 'granted') { await this.scanHandle(this.dirHandle); return; }
+      status.textContent = 'Permission denied — click Choose .claude folder… to pick the folder again.';
+    } catch (e) { status.textContent = 'Could not re-check folder access: ' + (e.message || e) + ' — click Choose .claude folder… to pick the folder again.'; }
   },
 
   async restoreHandle() {
@@ -6699,6 +6781,12 @@ const App = {
   },
 
   _gen: { local: 0, anthropic: 0, openai: 0, gemini: 0, copilot: 0, openrouter: 0 },
+  /** A0 #5 — the fetch contract for the legacy Copilot / OpenRouter cards: rows [] is a truthful empty (replaces the stored rows, billed [] clears
+   *  the dollars); rows null means the endpoint is not available for this account (stored rows untouched, a stored billed envelope goes stale). */
+  _landLegacyRows(id, res) {
+    if (res.rows) { Store.setSource(id, res.rows, {}); Store.setBilled(id, res.billed); }
+    else Store.setBilled(id, null);
+  },
   _workerThreshold: 8 * 1024 * 1024,   // bytes — an Imports file above this parses in parseInWorker (JSON via 'sniff' in _readJsonFor, Copilot activity CSV via 'copilot-csv'); checks set 0 to force the worker path
 
   async fetchAnthropic() {
@@ -6706,12 +6794,12 @@ const App = {
     const key = $('anthropic-key').value.trim();
     const status = $('anthropic-status');
     if (!key) { status.textContent = 'Paste an Admin API key first (starts with sk-ant-admin).'; return; }
-    if ($('remember-anthropic').checked) LS.set('key:anthropic', key);
     const days = parseInt($('anthropic-days').value, 10);
     status.textContent = 'Fetching usage…'; status.dataset.gen = String(gen);
     try {
       const { usage, cost } = await fetchAnthropicAll(key, days);
       if (gen !== this._gen.anthropic) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded by a newer fetch — only clear the placeholder if it's still ours
+      if ($('remember-anthropic').checked) LS.set('key:anthropic', key);   // only a key Anthropic accepted is remembered (A0 #11)
       Store.setSource('anthropic', usage.rows, { days });
       Store.setBilled('anthropic', cost);
       Store.setConnector('anthropic', { label: 'Admin key ·  last 4: ' + key.slice(-4), lastSync: Date.now(), err: null });
@@ -6726,6 +6814,7 @@ const App = {
       status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
       status.appendChild(document.createTextNode((e.message || String(e)) + ' — if this is a CORS/network block, use the PowerShell fallback below.'));
       document.querySelector('#src-anthropic details.fallback').open = true;
+      this.render();   // the hub dot follows the error (A0 #6)
     }
   },
 
@@ -6734,12 +6823,12 @@ const App = {
     const key = $('openai-key').value.trim();
     const status = $('openai-status');
     if (!key) { status.textContent = 'Paste an Admin key first (starts with sk-admin).'; return; }
-    if ($('remember-openai').checked) LS.set('key:openai', key);
     const days = parseInt($('openai-days').value, 10);
     status.textContent = 'Fetching usage…'; status.dataset.gen = String(gen);
     try {
       const { usage, cost } = await fetchOpenAIAll(key, days);
       if (gen !== this._gen.openai) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded by a newer fetch — only clear the placeholder if it's still ours
+      if ($('remember-openai').checked) LS.set('key:openai', key);   // only a key OpenAI accepted is remembered (A0 #11)
       Store.setSource('openai', usage.rows, { days });
       Store.setBilled('openai', cost);
       Store.setConnector('openai', { label: 'Admin key ·  last 4: ' + key.slice(-4), lastSync: Date.now(), err: null });
@@ -6754,6 +6843,7 @@ const App = {
       status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
       status.appendChild(document.createTextNode((e.message || String(e)) + ' — if this is a CORS/network block, use the PowerShell fallback below.'));
       document.querySelector('#src-openai details.fallback').open = true;
+      this.render();   // the hub dot follows the error (A0 #6)
     }
   },
 
@@ -6762,11 +6852,11 @@ const App = {
     const key = $('gemini-key').value.trim();
     const status = $('gemini-status');
     if (!key) { status.textContent = 'Paste a Google AI Studio API key first (starts with AIza).'; return; }
-    if ($('remember-gemini') && $('remember-gemini').checked) LS.set('key:gemini', key);
     status.textContent = 'Validating…'; status.dataset.gen = String(gen);
     try {
       const j = await fetchJSON('https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(key), {});
       if (gen !== this._gen.gemini) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
+      if ($('remember-gemini') && $('remember-gemini').checked) LS.set('key:gemini', key);   // only a key Google accepted is remembered (A0 #11)
       const n = (j.models || []).length;
       Store.setConnector('gemini', { label: n + ' models available', lastSync: Date.now(), err: null });
       status.textContent = ''; status.dataset.gen = '';
@@ -6788,18 +6878,17 @@ const App = {
     const key = $('copilot-key').value.trim();
     const status = $('copilot-status');
     if (!key) { status.textContent = 'Paste a fine-grained GitHub token first (github_pat_…).'; return; }
-    if ($('remember-copilot') && $('remember-copilot').checked) LS.set('key:copilot', key);
     status.textContent = 'Validating…'; status.dataset.gen = String(gen);
     try {
       const res = await fetchCopilotAll(key);
       if (gen !== this._gen.copilot) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
+      if ($('remember-copilot') && $('remember-copilot').checked) LS.set('key:copilot', key);   // only a token GitHub accepted is remembered (A0 #11)
       Store.setConnector('copilot', { label: res.login, lastSync: Date.now(), err: null });
-      if (res.rows.length) { Store.setSource('copilot', res.rows, {}); Store.setBilled('copilot', res.billed); }
+      this._landLegacyRows('copilot', res);
       status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
-      status.appendChild(document.createTextNode(res.rows.length
-        ? `${res.rows.length} usage rows (premium requests) + billed costs`
-        : (res.hadUsage ? 'validated — no Copilot usage in the billing data' : 'validated — GitHub exposes no usage data for this account')));
+      status.appendChild(document.createTextNode(!res.rows ? 'validated — GitHub exposes no usage data for this account'
+        : res.rows.length ? `${res.rows.length} usage rows (premium requests) + billed costs` : 'validated — no Copilot usage in the billing data'));
       this.render();
     } catch (e) {
       if (gen !== this._gen.copilot) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
@@ -6816,19 +6905,19 @@ const App = {
     const key = $('openrouter-key').value.trim();
     const status = $('openrouter-status');
     if (!key) { status.textContent = 'Paste an OpenRouter API key first (sk-or-…).'; return; }
-    if ($('remember-openrouter') && $('remember-openrouter').checked) LS.set('key:openrouter', key);
     status.textContent = 'Fetching…'; status.dataset.gen = String(gen);
     try {
       const res = await fetchOpenRouterAll(key);
       if (gen !== this._gen.openrouter) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
+      if ($('remember-openrouter') && $('remember-openrouter').checked) LS.set('key:openrouter', key);   // only a key OpenRouter accepted is remembered (A0 #11)
       Store.setConnector('openrouter', { label: res.label, lastSync: Date.now(), err: null });
-      if (res.rows.length) { Store.setSource('openrouter', res.rows, {}); Store.setBilled('openrouter', res.billed); }
+      this._landLegacyRows('openrouter', res);
       const creditsNote = res.credits ? ` · ${fmtUSD((res.credits.total_credits || 0) - (res.credits.total_usage || 0))} credits left` : '';
       status.textContent = ''; status.dataset.gen = '';
       status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
-      status.appendChild(document.createTextNode(res.rows.length
-        ? `${res.rows.length} daily activity rows${creditsNote}`
-        : `validated${creditsNote} — daily activity not available for this key type`));
+      status.appendChild(document.createTextNode(!res.rows
+        ? `validated${creditsNote} — daily activity not available for this key type`
+        : `${res.rows.length} daily activity rows${creditsNote}`));
       this.render();
     } catch (e) {
       if (gen !== this._gen.openrouter) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
@@ -6862,12 +6951,12 @@ const App = {
       // big exports (> App._workerThreshold) arrive pre-parsed from the worker (_readJsonFor) so the tab doesn't freeze; small ones parse inline — worker startup isn't worth it for them
       const res = pre ? pre.res : parseChatGPTExport(kind === 'chatgpt-export' ? obj : obj.conversations);
       Store.setSource('chatgpt', res.rows, res.meta);
-      notes.push(`${f.name}: ChatGPT export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens)`);
+      notes.push(`${f.name}: ChatGPT export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens${undatedNote(res.meta)})`);
       imported++;
     } else if (kind === 'claudeai-export') {
       const res = pre ? pre.res : parseClaudeAiExport(obj, $('assumed-claude-model').value);
       Store.setSource('claudeai', res.rows, res.meta);
-      notes.push(`${f.name}: Claude.ai export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens)`);
+      notes.push(`${f.name}: Claude.ai export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens${undatedNote(res.meta)})`);
       imported++;
     } else if (kind === 'gemini-takeout') {
       const res = parseGeminiTakeout(obj);
@@ -6931,6 +7020,15 @@ const App = {
     return imported;
   },
 
+  /** A0 #10 — billed days of a generic CSV import: the days the import covers take its cost column, or are REMOVED when it has none (the Cursor
+   *  rule: stale dollars must not survive behind replaced rows); days outside the import keep theirs. A CSV that never carried costs creates no envelope. */
+  _landGenericCsvBilled(res) {
+    if (!Store.billed.csv && !res.billed.length) return;
+    const days = new Set(res.rows.map(r => r.d));
+    const bm = new Map(Store.billedRows('csv').filter(b => !days.has(b.d)).map(b => [b.d, b]));
+    for (const b of res.billed) bm.set(b.d, b);
+    Store.setBilled('csv', [...bm.values()].sort((a, b) => a.d < b.d ? -1 : 1));
+  },
   async handleImportFiles(files) {
     const status = $('import-status');
     clear(status);
@@ -6948,7 +7046,7 @@ const App = {
       if (res.rows.length) {
         const merged = new Map(prev.rows.map(r => [keyOf(r), r]));
         for (const r of res.rows) merged.set(keyOf(r), r);
-        Store.setSource('deepseek-usage-zip', [...merged.values()], { buckets: merged.size, rows: ((prev.meta || {}).rows || 0) + res.meta.rows, rejected: res.meta.rejected, files: ((prev.meta || {}).files || 0) + res.meta.files, currency: res.meta.currency || (prev.meta || {}).currency || '' });
+        Store.setSource('deepseek-usage-zip', [...merged.values()], { buckets: merged.size, ...deepSeekMonthCounts(prev.meta, res), rejected: res.meta.rejected, currency: res.meta.currency || (prev.meta || {}).currency || '' });   // rows / files summed over the stored months (A0 #9)
       }
       if (res.billed.length) {
         const bm = new Map(Store.billedRows('deepseek-usage-zip').map(b => [b.d, b]));
@@ -7043,11 +7141,7 @@ const App = {
           const merged = new Map((Store.sources.csv ? Store.sources.csv.rows : []).map(r => [keyOf(r), r]));
           for (const r of res.rows) merged.set(keyOf(r), r);
           Store.setSource('csv', [...merged.values()], res.meta);
-          if (res.billed && res.billed.length) {
-            const bm = new Map(Store.billedRows('csv').map(b => [b.d, b]));
-            for (const b of res.billed) bm.set(b.d, b);           // re-import replaces same-day amounts
-            Store.setBilled('csv', [...bm.values()].sort((a, b2) => a.d < b2.d ? -1 : 1));
-          }
+          this._landGenericCsvBilled(res);
           notes.push(`${f.name}: imported ${res.meta.rows} CSV rows (merged by day/platform/model)`
             + (res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric or negative)` : ''));
           imported++;

@@ -16,6 +16,7 @@
 // Windows-safe: 127.0.0.1 only, every wait ≤ 10 s (35 s only on a platform without recursive fs.watch), every child is killed in
 // finally, the temp HOME is deleted afterwards.
 import http from 'node:http';
+import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -51,6 +52,17 @@ const request = (port, method, p, headers = {}) => new Promise((resolve, reject)
   req.on('error', reject);
   req.setTimeout(10000, () => req.destroy(new Error('timeout ' + method + ' ' + p)));
   req.end();
+});
+// a raw HTTP/1.1 GET over a bare socket (Connection: close): the whole answer is read until the server closes, so bytes written PAST the declared
+// Content-Length are seen (an http client parser would cut the body at Content-Length and hide them). onFirstData runs with the socket paused.
+const rawGet = (port, p, headers, onFirstData) => new Promise((resolve, reject) => {
+  const s = net.connect({ host: '127.0.0.1', port });
+  const chunks = []; let first = true;
+  s.on('connect', () => s.write(`GET ${p} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n${Object.entries(headers).map(([k, v]) => k + ': ' + v + '\r\n').join('')}\r\n`));
+  s.on('data', (c) => { chunks.push(c); if (first) { first = false; s.pause(); onFirstData().then(() => s.resume(), reject); } });
+  s.on('end', () => { const buf = Buffer.concat(chunks); const i = buf.indexOf('\r\n\r\n'); resolve({ head: buf.subarray(0, i).toString('latin1'), body: buf.subarray(i + 4) }); });
+  s.on('error', reject);
+  s.setTimeout(30000, () => s.destroy(new Error('timeout raw GET ' + p)));
 });
 const asJson = (r) => { try { return JSON.parse(r.body.toString('utf8')); } catch { return null; } };
 const isJsonCT = (r) => /^application\/json/i.test(r.headers['content-type'] || '');
@@ -274,6 +286,22 @@ export async function run() {
     add('collector: /api/file streams a 2 MB file byte-exact while a forced ?refresh=1 walk of every tool is in flight (both fired at once); the forced status re-walks (new scannedAt)',
       wantBig.length >= 2 * 1024 * 1024 && rs.status === 200 && rf.status === 200 && rf.body.equals(wantBig) && +rf.headers['content-length'] === wantBig.length && rsCodex.files === 6 && rsCodex.scannedAt > toolOf(c2, 'codex').scannedAt,
       `status ${rs.status}/${rf.status} · ${rf.body.length}/${wantBig.length} bytes · codex ${JSON.stringify(rsCodex).slice(0, 300)}`);
+
+    // A0 #8: /api/file streams exactly Content-Length bytes — a log that grows while it streams (a CLI appending to its live session) must not break the framing.
+    // ~/.continue appears now (not in seedHome: 89c's end-to-end block counts the found tools); a 12 MB file, read with the client paused after the first chunk
+    // so the server cannot have reached its tail, then 1 MB appended, then the rest read: the body must stop at the size the request saw.
+    const growDir = path.join(HOME, '.continue'), growPath = path.join(growDir, 'grow.txt');
+    fs.mkdirSync(growDir, { recursive: true });
+    fs.writeFileSync(growPath, Buffer.alloc(12 * 1024 * 1024, 0x61));
+    const contFound = toolOf(asJson(await API('/api/status')), 'continue');   // the new root is picked up by a status walk (a file request never re-walks)
+    add('collector: a tool folder created after startup (~/.continue) is discovered by the next plain /api/status — found, 1 file (refreshTool no longer leaves a resolved walking promise behind for a root-less tool)',
+      contFound.found === true && contFound.files === 1, JSON.stringify(contFound));
+    const growLen = fs.statSync(growPath).size;
+    const grown = await rawGet(a.port, '/api/file?tool=continue&path=grow.txt', auth, async () => { fs.appendFileSync(growPath, Buffer.alloc(1024 * 1024, 0x41)); await sleep(300); });
+    const growCL = +((/content-length:\s*(\d+)/i.exec(grown.head) || [])[1] || 0);
+    add('collector (A0 #8): a 12 MB file appended with 1 MB while its GET streams (client paused after the first chunk) arrives with body length === Content-Length === the size at request time (end: size − 1), status 200',
+      /^HTTP\/1\.1 200/.test(grown.head) && growCL === growLen && grown.body.length === growLen && fs.statSync(growPath).size === growLen + 1024 * 1024,
+      `head ${grown.head.split('\r\n')[0]} · content-length ${growCL} · body ${grown.body.length} · size at request ${growLen} · body head ${grown.body.subarray(0, 100).toString('latin1')}`);
 
     await sleep(150);   // the last log line is written after the response ends
     const logLines = a.out.split('\n').filter((l) => /\b(GET|OPTIONS) \//.test(l));

@@ -25,6 +25,20 @@ export async function run({ browser, ok }) {
       totals.n === 2 && totals.in === 300 && totals.out === 130, JSON.stringify(totals));
     ok('merge: re-dropping the same CSV does not double billed', Math.abs(totals.billed - 3.0) < 1e-9, totals.billed);
 
+    // A0 #10: a re-import without a cost column REMOVES the billed days it covers (stale dollars must not survive behind replaced rows); other days keep theirs
+    const billedDrop = await page.evaluate(async () => {
+      const imp = (text, name) => App.handleImportFiles([new File([text], name, { type: 'text/csv' })]);
+      await imp('date,platform,model,input_tokens,output_tokens,cost\n2026-08-12,Gemini,gemini-3.5-flash,10,5,0.5\n', 'other-day.csv');
+      const before = Store.billedRows('csv').map(b => b.d + '|' + b.amount);
+      await imp('date,platform,model,input_tokens,output_tokens\n2026-08-10,Gemini,gemini-3.5-flash,150,60\n2026-08-11,Gemini,gemini-3.5-flash,250,90\n', 'no-cost.csv');
+      const after = Store.billedRows('csv').map(b => b.d + '|' + b.amount);
+      const rows = Store.sources.csv.rows.map(r => r.d + '|' + r.in).sort();
+      return { before, after, stale: Store.billed.csv.stale, rows };
+    });
+    ok('merge (A0 #10): a cost-less re-import of 08-10 / 08-11 drops those billed days and keeps 08-12 (fresh, not stale); the rows are replaced',
+      JSON.stringify(billedDrop.before) === JSON.stringify(['2026-08-10|1', '2026-08-11|2', '2026-08-12|0.5']) && JSON.stringify(billedDrop.after) === JSON.stringify(['2026-08-12|0.5']) && billedDrop.stale === false
+      && JSON.stringify(billedDrop.rows) === JSON.stringify(['2026-08-10|150', '2026-08-11|250', '2026-08-12|10']), JSON.stringify(billedDrop));
+
     const fs2 = await import('node:fs');
     const path2 = await import('node:path');
     const { OUT } = await import('../lib/harness.mjs');

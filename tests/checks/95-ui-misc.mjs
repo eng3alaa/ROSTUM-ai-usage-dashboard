@@ -235,6 +235,23 @@ export async function run({ browser, ok }) {
     ok('daily fold: clicking the Other chip hides the folded group (P12, P13, Other) → no Other series / legend item / column in the daily chart; the second click restores ONE Other series totalling 600',
       JSON.stringify(dfold.off.hidden) === '["Other","P12","P13"]' && dfold.off.others === 0 && !dfold.off.legend.includes('Other') && !dfold.off.thead.includes('Other') && dfold.off.names.length === 11
       && dfold.on.hidden.length === 0 && dfold.on.others === 1 && dfold.on.otherTotal === 600 && once(dfold.on.legend) && once(dfold.on.thead), JSON.stringify({ off: dfold.off, on: dfold.on }));
+
+    // ---- A0 #16: a corrupt 'data' blob is quarantined (kept verbatim under aiusage:data.corrupt), announced in a banner, and never overwritten ----
+    const RAW_CORRUPT = '{"sources": {"csv": {"rows": [1, 2';
+    await page.evaluate((raw) => { localStorage.setItem('aiusage:data', raw); }, RAW_CORRUPT);
+    await page.reload({ waitUntil: 'load' });
+    const quarantined = await page.evaluate(() => {
+      const banner = document.getElementById('data-warning');
+      const before = { backup: localStorage.getItem('aiusage:data.corrupt'), sources: Object.keys(Store.sources).length, banner: banner ? banner.textContent : null, role: banner && banner.getAttribute('role') };
+      Store.setSource('csv', [{ d: '2026-08-10', platform: 'Gemini', model: 'g', in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }], {});   // a new sync persists — into a fresh blob
+      let fresh = null; try { fresh = JSON.parse(localStorage.getItem('aiusage:data')); } catch { fresh = 'unparseable'; }
+      const after = { backup: localStorage.getItem('aiusage:data.corrupt'), freshRows: fresh && fresh.sources && fresh.sources.csv ? fresh.sources.csv.rows.length : fresh };
+      localStorage.removeItem('aiusage:data.corrupt'); Store.sources = {}; Store.persist();
+      return { before, after };
+    });
+    ok('store (A0 #16): a corrupt aiusage:data blob loads as empty, is kept byte-for-byte under aiusage:data.corrupt and announced in a role="alert" banner naming that key; the next persist writes a fresh blob and leaves the backup untouched',
+      quarantined.before.backup === RAW_CORRUPT && quarantined.before.sources === 0 && /could not be read/.test(quarantined.before.banner || '') && /aiusage:data\.corrupt/.test(quarantined.before.banner || '') && quarantined.before.role === 'alert'
+      && quarantined.after.backup === RAW_CORRUPT && quarantined.after.freshRows === 1, JSON.stringify(quarantined));
   } finally {
     await page.close();
   }

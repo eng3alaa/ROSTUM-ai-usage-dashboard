@@ -53,10 +53,10 @@ export async function run({ browser, ok }) {
           billed: Store.billedRows('deepseek-usage-zip'), meta: src().meta, note: note(), status: Store.connectorStatus(c), label: (Store.connectors.deepseek || {}).label || '', est: src().rows.some(r => r.est) };
         // (4) August ZIP → merges by (day, model) / day — July is kept
         await App.handleImportFiles([toFile(zAug, 'usage-2026-08.zip')]);
-        const aug = { t: sum(src().rows), buckets: src().rows.length, billedDays: Store.billedRows('deepseek-usage-zip').map(b => b.d), billedSum: billedSum() };
+        const aug = { t: sum(src().rows), buckets: src().rows.length, billedDays: Store.billedRows('deepseek-usage-zip').map(b => b.d), billedSum: billedSum(), metaRows: src().meta.rows, metaFiles: src().meta.files };
         // (5) the same August CSVs dropped loose → same keys replace, nothing doubles; the generic csv source is untouched
         await App.handleImportFiles([new File([amountAugCsv], 'amount-2026-08.csv', { type: 'text/csv' }), new File([costAugCsv], 'cost-2026-08.csv', { type: 'text/csv' })]);
-        const loose = { t: sum(src().rows), buckets: src().rows.length, billedSum: billedSum(), notes: (note().match(/DeepSeek API usage export/g) || []).length, genericUntouched: !Store.sources.csv };
+        const loose = { t: sum(src().rows), buckets: src().rows.length, billedSum: billedSum(), notes: (note().match(/DeepSeek API usage export/g) || []).length, genericUntouched: !Store.sources.csv, metaRows: src().meta.rows, metaFiles: src().meta.files };
         // (6) header sniffs + the wide / priced shapes
         const head = (s) => (parseCSV(s.split(/\r?\n/, 1)[0])[0] || []).map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
         const wide = 'date,model,input_tokens,cache_hit_tokens,output_tokens,requests\n2026-08-12,deepseek-chat,1000,400,100,5\n';   // input is the total → uncached = 1000 − 400 = 600
@@ -93,6 +93,9 @@ export async function run({ browser, ok }) {
     ok('deepseek: a second month merges by day/model and by day (in=104500 cr=50200 out=28300 msgs=17; 4 buckets; 3 billed days, 0.0716) — July is kept; the same CSVs dropped loose replace their keys (nothing doubles) and leave the generic csv source alone',
       ds.aug.t.in === 104500 && ds.aug.t.cr === 50200 && ds.aug.t.out === 28300 && ds.aug.t.msgs === 17 && ds.aug.buckets === 4 && JSON.stringify(ds.aug.billedDays) === JSON.stringify(['2026-07-10', '2026-07-11', '2026-08-10']) && near(ds.aug.billedSum, 0.0716)
       && ds.loose.t.in === 104500 && ds.loose.t.msgs === 17 && ds.loose.buckets === 4 && near(ds.loose.billedSum, 0.0716) && ds.loose.notes === 2 && ds.loose.genericUntouched, JSON.stringify({ aug: ds.aug, loose: ds.loose }));
+    ok('deepseek (A0 #9): meta.rows / meta.files describe the stored months, not the number of imports — July (10 rows, 2 files) + August → rows add up (files 4); re-dropping August as a loose amount CSV replaces that month\'s counts (rows unchanged, files 2 + 1 = 3) instead of inflating them',
+      ds.jul.meta.rows === 10 && ds.jul.meta.files === 2 && ds.aug.metaRows > 10 && ds.aug.metaFiles === 4 && ds.loose.metaRows === ds.aug.metaRows && ds.loose.metaFiles === 3,
+      JSON.stringify({ jul: { rows: ds.jul.meta.rows, files: ds.jul.meta.files }, aug: { rows: ds.aug.metaRows, files: ds.aug.metaFiles }, loose: { rows: ds.loose.metaRows, files: ds.loose.metaFiles } }));
     ok('deepseek: header sniff takes the wide shape (cache-hit column) and the cost-*.csv name, refuses generic / Cursor headers; wide: in=600 (1000−400) cr=400 out=100 msgs=5; long shape with a price column derives billed 0.0011',
       ds.sniff.wide && !ds.sniff.generic && !ds.sniff.genericCost && !ds.sniff.cursor && ds.sniff.byName && ds.sniff.wideT.in === 600 && ds.sniff.wideT.cr === 400 && ds.sniff.wideT.out === 100 && ds.sniff.wideT.msgs === 5 && ds.sniff.wideShape === 'wide'
       && ds.sniff.priced.length === 1 && ds.sniff.priced[0].d === '2026-08-12' && near(ds.sniff.priced[0].amount, 0.0011) && ds.sniff.pricedT.out === 1000 && ds.sniff.pricedT.msgs === 4 && ds.sniff.pricedShape === 'long', JSON.stringify(ds.sniff));
@@ -203,6 +206,27 @@ export async function run({ browser, ok }) {
       && ex.hub.every(cls => /\bok\b/.test(cls)) && ['grok-export', 'deepseek-chat-export', 'meta-ai-export', 'perplexity-export', 'copilot-activity-csv'].every(id => ex.imports.includes(id))
       && ['Grok', 'Microsoft Copilot', 'Perplexity', 'Meta AI', 'DeepSeek chat', 'ChatGPT', 'Claude.ai'].every(pl => ex.order.includes(pl)) && ex.order.filter(pl => pl === 'ChatGPT').length === 1 && ex.order[ex.order.length - 1] === 'Other'
       && /Grok/.test(ex.badge) && /Perplexity/.test(ex.badge) && /Takeout/.test(ex.badge) && /Cursor/.test(ex.badge), JSON.stringify({ srcs: ex.srcs, pxSid: ex.pxSid, metaAfterSecond: ex.metaAfterSecond, metaAfterReimport: ex.metaAfterReimport, hub: ex.hub, note: ex.note, imports: ex.imports, order: ex.order, badge: ex.badge }));
+    // ---- A0 #7: ChatGPT / Claude.ai exports skip + count undated replies (never booked as today) ----
+    const und = await page.evaluate(() => {
+      const gpt = parseChatGPTExport([{ current_node: 'a2', mapping: {   // no conversation create_time either
+        r: { id: 'r', parent: null, children: ['u1'], message: null },
+        u1: { id: 'u1', parent: 'r', children: ['a1'], message: { author: { role: 'user' }, content: { parts: ['x'.repeat(40)] } } },
+        a1: { id: 'a1', parent: 'u1', children: ['u2'], message: { author: { role: 'assistant' }, metadata: { model_slug: 'gpt-5.4' }, content: { parts: ['y'.repeat(80)] } } },   // undated → skipped
+        u2: { id: 'u2', parent: 'a1', children: ['a2'], message: { author: { role: 'user' }, create_time: 1786352400, content: { parts: ['z'.repeat(20)] } } },
+        a2: { id: 'a2', parent: 'u2', children: [], message: { author: { role: 'assistant' }, create_time: 1786352460, metadata: { model_slug: 'gpt-5.4' }, content: { parts: ['w'.repeat(8)] } } },
+      } }]);
+      const cl = parseClaudeAiExport([{ chat_messages: [   // no conversation created_at either
+        { sender: 'human', text: 'x'.repeat(40) }, { sender: 'assistant', text: 'y'.repeat(80) },
+        { sender: 'human', text: 'z'.repeat(20), created_at: '2026-08-10T09:00:00Z' }, { sender: 'assistant', text: 'w'.repeat(8), created_at: '2026-08-10T09:01:00Z' },
+      ] }], 'claude-sonnet-5');
+      const today = todayKey();
+      return { gpt: { msgs: gpt.meta.msgs, skipped: gpt.meta.skipped, days: gpt.rows.map(r => r.d), out: gpt.rows.reduce((a, r) => a + r.out, 0), today: gpt.rows.some(r => r.d === today) },
+        cl: { msgs: cl.meta.msgs, skipped: cl.meta.skipped, days: cl.rows.map(r => r.d), out: cl.rows.reduce((a, r) => a + r.out, 0), today: cl.rows.some(r => r.d === today) } };
+    });
+    ok('chat exports (A0 #7): an undated ChatGPT reply in an undated conversation is skipped and counted (msgs 1, skipped 1, out 2 from the dated reply only, no row on today); the Claude.ai export does the same (msgs 1, skipped 1, day 2026-08-10)',
+      und.gpt.msgs === 1 && und.gpt.skipped === 1 && und.gpt.out === 2 && !und.gpt.today && und.gpt.days.length === 1
+      && und.cl.msgs === 1 && und.cl.skipped === 1 && und.cl.out === 2 && !und.cl.today && JSON.stringify(und.cl.days) === JSON.stringify(['2026-08-10']), JSON.stringify(und));
+
     // ---- fix set: merge-by-sid sources vs compactRows. Rows older than 90 days used to fold ACROSS sids into one day/platform/model bucket with a
     //      sids[] list; the per-file "replaces only itself" filters then dropped that bucket on re-import (it listed the re-imported sid) and the
     //      other threads'/files' old rows vanished. These sources compact per (day, platform, model, sid) — scalar sid kept, hour dropped, est kept.

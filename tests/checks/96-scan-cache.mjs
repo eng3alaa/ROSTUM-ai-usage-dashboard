@@ -232,6 +232,48 @@ export async function run({ browser, ok }) {
       && capped.p2 === 1 && capped.c2 === 1 && sameTotals(capped.t2, capped.t1), JSON.stringify(capped));
     ok('scan-cache: an entry flagged dupTruncated is an unconditional miss (parsedFiles=1, cachedFiles=0, rows re-derived)',
       capped.p3 === 1 && capped.c3 === 0 && sameTotals(capped.t3, capped.t1), JSON.stringify({ p3: capped.p3, c3: capped.c3, t3: capped.t3 }));
+
+    // ---- A0 #14: parseClaudeLogs runs every count through finTok — string counts are numbers, never concatenated ----
+    const strCounts = await page.evaluate(async () => {
+      const mk = (lines) => ({ path: 'projects/-D--p/sess-s.jsonl', file: new File([lines.map(o => JSON.stringify(o)).join('\n')], 'sess-s.jsonl', { lastModified: 1754000000000 }) });
+      const res = await parseClaudeLogs([mk([
+        { type: 'assistant', timestamp: '2026-08-10T09:00:00.000Z', requestId: 'r1', message: { id: 'm1', model: 'claude-sonnet-5', usage: { input_tokens: '10', output_tokens: '20', cache_read_input_tokens: 'abc', cache_creation_input_tokens: -5 } } },
+        { type: 'assistant', timestamp: '2026-08-10T09:01:00.000Z', requestId: 'r2', message: { id: 'm2', model: 'claude-sonnet-5', usage: { input_tokens: 5, output_tokens: 1, cache_read_input_tokens: 7 } } },
+      ])], null);
+      const t = res.rows.reduce((a, r) => ({ in: a.in + r.in, out: a.out + r.out, cr: a.cr + r.cr, cw: a.cw + r.cw }), { in: 0, out: 0, cr: 0, cw: 0 });
+      return { ...t, types: res.rows.map(r => typeof r.in + typeof r.out), proj: res.projects.map(p => [typeof p.in, p.in]) };
+    });
+    ok('parseClaudeLogs (A0 #14): string / garbage / negative counts go through finTok — in=15 out=21 cr=7 cw=0 as numbers (no "010" concatenation), project rows numeric too',
+      strCounts.in === 15 && strCounts.out === 21 && strCounts.cr === 7 && strCounts.cw === 0 && strCounts.types.every(t => t === 'numbernumber') && strCounts.proj.every(([t, v]) => t === 'number' && v === 15), JSON.stringify(strCounts));
+
+    // ---- A0 #13: a failed Claude Code scan is attention on the card (err on the entry); the walker counts files it could not open ----
+    const scanErr = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      const orig = window.parseClaudeLogsCached;
+      window.parseClaudeLogsCached = async () => { throw new Error('IndexedDB gone'); };
+      await App.scanLocalFiles([{ path: 'projects/-D--p/sess-x.jsonl', file: new File(['{}'], 'sess-x.jsonl', { lastModified: 1754000000000 }) }]);
+      const viaFiles = { err: (Store.connectors.local || {}).err || null, status: Store.connectorStatus(connectorById('local')), text: document.getElementById('local-status').textContent };
+      window.parseClaudeLogsCached = orig; Store.connectors = {};
+      const handleOf = (entries) => ({ entries: async function* () { for (const e of entries) yield e; } });
+      const fileHandle = (text) => ({ kind: 'file', getFile: async () => new File([text], 'f.jsonl', { lastModified: 1754000000000 }) });
+      const broken = { kind: 'file', getFile: async () => { throw new DOMException('The requested file could not be read', 'NotReadableError'); } };
+      const good = JSON.stringify({ type: 'assistant', timestamp: '2026-08-10T09:00:00.000Z', requestId: 'r1', message: { id: 'm1', model: 'claude-sonnet-5', usage: { input_tokens: 10, output_tokens: 20 } } });
+      const dir = handleOf([['sess-a.jsonl', fileHandle(good)], ['sess-b.jsonl', broken], ['notes.txt', fileHandle('x')]]);
+      const walked = await collectJsonlFromHandle(dir);
+      const walk = { n: walked.length, unreadable: walked.unreadable || 0 };
+      await App.scanHandle(dir);   // the same fake handle through the card's own scan
+      const viaHandle = { text: document.getElementById('local-status').textContent, err: (Store.connectors.local || {}).err || null, status: Store.connectorStatus(connectorById('local')), msgs: ((Store.sources.local || {}).meta || {}).msgs };
+      window.parseClaudeLogsCached = async () => { throw new Error('IndexedDB gone'); };
+      await App.scanHandle(dir);
+      const handleErr = { err: (Store.connectors.local || {}).err || null, status: Store.connectorStatus(connectorById('local')) };
+      window.parseClaudeLogsCached = orig;
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; Store.persist(); App._render();
+      return { viaFiles, walk, viaHandle, handleErr };
+    });
+    ok('scan (A0 #13): a throwing Claude Code scan sets err on the local entry (warn) through scanLocalFiles AND scanHandle ("Scan failed: IndexedDB gone")',
+      /IndexedDB gone/.test(scanErr.viaFiles.err || '') && scanErr.viaFiles.status === 'warn' && /Scan failed: IndexedDB gone/.test(scanErr.viaFiles.text) && /IndexedDB gone/.test(scanErr.handleErr.err || '') && scanErr.handleErr.status === 'warn', JSON.stringify(scanErr));
+    ok('scan (A0 #13): collectJsonlFromHandle counts a file whose getFile() throws (1 read, unreadable 1) and scanHandle reports it ("1 file(s) unreadable") beside the 1 message that landed',
+      scanErr.walk.n === 1 && scanErr.walk.unreadable === 1 && scanErr.viaHandle.msgs === 1 && /1 file\(s\) unreadable/.test(scanErr.viaHandle.text) && scanErr.viaHandle.err === null, JSON.stringify(scanErr));
   } finally {
     await page.close();
   }
