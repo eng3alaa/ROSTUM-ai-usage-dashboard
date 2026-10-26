@@ -1,0 +1,94 @@
+{
+ "version": "0.3.0",
+ "summary": "wire the agent",
+ "updated_at": "2026-09-20T09:00:00Z",
+ "model": {
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-5"
+ },
+ "completion_mode": "normal",
+ "profile": "write",
+ "messages": [
+  {
+   "id": 1,
+   "role": "user",
+   "segments": [
+    {
+     "type": "text",
+     "text": "add a parser"
+    }
+   ],
+   "context": "",
+   "creases": [],
+   "is_hidden": false
+  },
+  {
+   "id": 2,
+   "role": "assistant",
+   "segments": [
+    {
+     "type": "text",
+     "text": "on it"
+    }
+   ],
+   "context": "",
+   "creases": [],
+   "is_hidden": false
+  },
+  {
+   "id": 3,
+   "role": "user",
+   "segments": [
+    {
+     "type": "text",
+     "text": "and tests"
+    }
+   ],
+   "context": "",
+   "creases": [],
+   "is_hidden": false
+  },
+  {
+   "id": 4,
+   "role": "assistant",
+   "segments": [
+    {
+     "type": "text",
+     "text": "done"
+    }
+   ],
+   "context": "",
+   "creases": [],
+   "is_hidden": false
+  }
+ ],
+ "request_token_usage": {
+  "1": {
+   "input_tokens": 600,
+   "output_tokens": 120,
+   "cache_creation_input_tokens": 50,
+   "cache_read_input_tokens": 100
+  },
+  "3": {
+   "input_tokens": 400,
+   "output_tokens": 80,
+   "cache_read_input_tokens": 200
+  }
+ },
+ "cumulative_token_usage": {
+  "input_tokens": 1000,
+  "output_tokens": 200,
+  "cache_creation_input_tokens": 50,
+  "cache_read_input_tokens": 300
+ },
+ "initial_project_snapshot": {
+  "worktree_snapshots": [
+   {
+    "worktree_path": "D:\\proj-zed",
+    "git_state": null
+   }
+  ],
+  "unsaved_buffer_paths": [],
+  "timestamp": "2026-09-20T08:00:00Z"
+ }
+}

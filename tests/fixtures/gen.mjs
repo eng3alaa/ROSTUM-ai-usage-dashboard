@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { zedDecodedJsonl } from './sqlite/gen-sqlite.mjs';   // Plan 9 B6: the Zed rows' decoded JSONL (what the collector emits for threads.db with decode=zstd)
 
 const OUT = path.join(import.meta.dirname, 'out');
 
@@ -789,6 +790,88 @@ export async function generate() {
   w('wave3/amp/threads/T-bad.json', '{"id":"T-bad","messages":[{"role":"assistant","usage":{"inputTokens":');   // truncated write → not JSON
   w('wave3/amp/session.json', JSON.stringify({ lastThreadId: 'T-abc', agentMode: 'smart' }));
   w('wave3/amp/history.jsonl', jl({ text: 'fix the build', cwd: 'D:\\proj-amp', timestamp: '2026-09-16T08:59:00.000Z' }) + '\n');   // one line per prompt: text, cwd — never a token log
+
+  // ---- Plan 9 B6 — folder-log parsers B + export files. Zed (threads.db, zstd blobs — see gen-sqlite.mjs ZED_THREADS for rows + totals), GitHub Copilot
+  //   Chat OTel JSONL, and three chat/coding exports estimated from text (Mistral Vibe, Sourcegraph Cody, Character.ai). Paths mirror the tools' folders
+  //   so collector.test.mjs can seed a HOME from b6/.
+  copyDb('zed-threads.db', 'b6/zed/threads/threads.db');
+  // The zstd primitive: a committed frame (tests/fixtures/zed/thread-fixture.zst = zstd of thread-fixture.json, the t1 thread) served under the Zed root
+  //   as thread-fixture.json — Zed itself writes frames only inside threads.db, so this file exists to prove GET /api/file …&decode=zstd byte-exact.
+  //   When this Node's zlib has zstd the committed frame is checked to decode to the committed plain text (fixture drift fails the generator).
+  const ZED_DIR = path.join(import.meta.dirname, 'zed');
+  const zedPlain = fs.readFileSync(path.join(ZED_DIR, 'thread-fixture.json')), zedZst = fs.readFileSync(path.join(ZED_DIR, 'thread-fixture.zst'));
+  if (typeof zlib.zstdDecompressSync === 'function' && !zlib.zstdDecompressSync(zedZst).equals(zedPlain)) throw new Error('tests/fixtures/zed/thread-fixture.zst does not decode to thread-fixture.json — regenerate the pair');
+  w('b6/zed/threads/thread-fixture.json', zedZst);
+  w('b6/zed/threads/thread-corrupt.json', Buffer.concat([zedZst.subarray(0, 4), Buffer.from('deadbeefcafebabe0102030405', 'hex')]));   // zstd magic + garbage → decode=zstd answers 422
+  w('b6/zed/thread-fixture.plain.json', zedPlain);
+  w('b6/zed/decoded-threads.jsonl', zedDecodedJsonl());   // what the collector emits for threads.db with decode=zstd (the page's collector-path fixture)
+  // GitHub Copilot Chat (VS Code) OTel file exporter — github.copilot.chat.otel.exporterType "file" → JSON lines. Shapes exercised (the exact line layout is
+  //   not documented — attributes as a map AND as the OTLP {key, value:{intValue}} array, a span inside an OTLP resourceSpans batch):
+  //   s1 chat span: request gpt-5.4 / response gpt-5.4-2026-01 (response model wins), input 1200 (cache-inclusive) − cache_read 400 → in 800, cw 100, out 300 (reasoning 50 ⊂ output)
+  //   s2 chat span, OTLP array attributes + hrtime startTime: claude-sonnet-4.5 in 500 out 200
+  //   invoke_agent root span with session totals (1700 / 500) → never a row (meta.sessionSpans) · gen_ai.client.inference.operation.details event with the same usage → skipped (meta.skippedRecords)
+  //   a gen_ai.client.token.usage metric line → no usage attributes, not counted · s1 repeated → dupIds 1 · one non-JSON line → badLines 1
+  //   s4 chat span without a timestamp / model → day = file date, model 'copilot', in 10 out 5 · s3 inside resourceSpans[].scopeSpans[].spans[]: gpt-5.4 in 100 out 20
+  //   ⇒ in=1410 cw=100 cr=400 out=525 msgs=4 over 4 rows, lines 9, badLines 1, dupIds 1, sessionSpans 1, skippedRecords 1.
+  const nano = (iso) => String(T(iso)) + '000000';
+  const otlpAttrs = (o) => Object.entries(o).map(([key, v]) => ({ key, value: typeof v === 'number' ? { intValue: String(v) } : { stringValue: v } }));
+  const s1 = { name: 'chat', traceId: 'tr1', spanId: 's1', kind: 3, startTimeUnixNano: nano('2026-09-23T09:00:00Z'), endTimeUnixNano: nano('2026-09-23T09:00:04Z'), status: { code: 1 },
+    attributes: { 'gen_ai.operation.name': 'chat', 'gen_ai.request.model': 'gpt-5.4', 'gen_ai.response.model': 'gpt-5.4-2026-01', 'gen_ai.usage.input_tokens': 1200, 'gen_ai.usage.output_tokens': 300,
+      'gen_ai.usage.cache_read.input_tokens': 400, 'gen_ai.usage.cache_creation.input_tokens': 100, 'gen_ai.usage.reasoning.output_tokens': 50 } };
+  w('b6/copilot-otel/copilot-chat.jsonl', [
+    jl(s1),
+    jl({ name: 'chat', traceId: 'tr1', spanId: 's2', startTime: [Math.floor(T('2026-09-23T21:30:00Z') / 1000), 0], endTime: [Math.floor(T('2026-09-23T21:30:03Z') / 1000), 0],
+      attributes: otlpAttrs({ 'gen_ai.request.model': 'claude-sonnet-4.5', 'gen_ai.usage.input_tokens': 500, 'gen_ai.usage.output_tokens': 200 }) }),
+    jl({ name: 'invoke_agent', traceId: 'tr1', spanId: 'root', startTimeUnixNano: nano('2026-09-23T09:00:00Z'), attributes: { 'gen_ai.usage.input_tokens': 1700, 'gen_ai.usage.output_tokens': 500, 'copilot_chat.session.id': 'sess-1' } }),
+    jl({ name: 'gen_ai.client.inference.operation.details', traceId: 'tr1', spanId: 's1', timeUnixNano: nano('2026-09-23T09:00:04Z'), attributes: { 'gen_ai.request.model': 'gpt-5.4', 'gen_ai.usage.input_tokens': 1200, 'gen_ai.usage.output_tokens': 300 } }),
+    jl({ descriptor: { name: 'gen_ai.client.token.usage', type: 'HISTOGRAM', unit: '{token}' }, dataPoints: [{ attributes: { 'gen_ai.token.type': 'input', 'gen_ai.request.model': 'gpt-5.4' }, value: { sum: 1200, count: 1 } }] }),
+    jl(s1),
+    '{"name":"chat","attributes":{"gen_ai.usage.input_tokens":',
+    jl({ name: 'chat', spanId: 's4', attributes: { 'gen_ai.usage.input_tokens': 10, 'gen_ai.usage.output_tokens': 5 } }),
+    jl({ resourceSpans: [{ resource: { attributes: [{ key: 'service.name', value: { stringValue: 'github.copilot-chat' } }] }, scopeSpans: [{ spans: [
+      { name: 'chat', traceId: 'tr2', spanId: 's3', startTimeUnixNano: nano('2026-09-24T10:00:00Z'), attributes: otlpAttrs({ 'gen_ai.request.model': 'gpt-5.4', 'gen_ai.usage.input_tokens': 100, 'gen_ai.usage.output_tokens': 20 }) } ] }] }] }),
+  ].join('\n') + '\n');
+  // Mistral Vibe (Le Chat) export JSON — admin.mistral.ai/account/export; shape from a third-party guide (univik): account{}, conversations[{id, created_at, title, model,
+  //   messages[{role, content}]}], memories[], projects[]. model per conversation, no per-message times (a created_at on a message is honoured when present).
+  //   c1 mistral-large-latest: user 40 → assistant 80 (in 10, out 20; message created_at) · user 20 → assistant 8 (in 5, out 2; no message time → the conversation's) ·
+  //   c2 no model → 'mistral', no conversation time, user content as parts[]: 'abcd' → 'ok!!!' (in 1, out 1; message created_at) · a second reply with no time anywhere → skipped ·
+  //   c3 codestral-latest: a user turn only (no reply → nothing).
+  //   ⇒ in=16 out=23 msgs=3 convs=3 skipped=1 · platform 'Mistral Vibe' · est
+  w('b6/mistral-vibe/mistral-export.json', JSON.stringify({ account: { email: 'me@example.com', created_at: '2026-01-05T10:00:00Z', plan: 'pro' }, conversations: [
+    { id: 'c1', created_at: '2026-08-10T09:00:00Z', title: 'first', model: 'mistral-large-latest', messages: [
+      { role: 'user', content: 'x'.repeat(40), created_at: '2026-08-10T09:00:00Z' }, { role: 'assistant', content: 'y'.repeat(80), created_at: '2026-08-10T09:00:05Z' },
+      { role: 'user', content: 'z'.repeat(20) }, { role: 'assistant', content: 'w'.repeat(8) } ] },
+    { id: 'c2', title: 'second', messages: [
+      { role: 'user', content: [{ type: 'text', text: 'abcd' }], created_at: '2026-08-11T08:00:00Z' }, { role: 'assistant', content: 'ok!!!', created_at: '2026-08-11T08:00:03Z' },
+      { role: 'user', content: 'again' }, { role: 'assistant', content: 'no time anywhere' } ] },
+    { id: 'c3', created_at: '2026-08-12T10:00:00Z', title: 'third', model: 'codestral-latest', messages: [{ role: 'user', content: 'unanswered' }] },
+  ], memories: [], projects: [] }, null, 1));
+  // Sourcegraph Cody — chat History > Export JSON (shape from the 0.10 release notes): an object keyed by ISO timestamp, each {id, interactions[{humanMessage,
+  //   assistantMessage, fullContext, timestamp}], lastInteractionTimestamp} (+ chatModel in later builds). No model per turn, no tokens.
+  //   chat A (chatModel anthropic/claude-sonnet-4-5): i1 40 → 80 (in 10, out 20; interaction timestamp) · i2 20 → 8 (in 5, out 2; no timestamp → the chat's key) ·
+  //   chat B (no model → 'cody'): i3 'abcd' → displayText 'ok!!!' (in 1, out 1; epoch-ms timestamp) · i4 a human turn with no assistantMessage (unanswered → nothing) ·
+  //   chat C: key is not a date, no timestamp anywhere → its one reply is skipped.   ⇒ in=16 out=23 msgs=3 chats=3 skipped=1 · platform 'Sourcegraph Cody' · est
+  w('b6/cody/cody-history.json', JSON.stringify({
+    '2026-08-10T09:00:00.000Z': { id: 'a', chatModel: 'anthropic/claude-sonnet-4-5', lastInteractionTimestamp: '2026-08-10T21:30:05.000Z', interactions: [
+      { humanMessage: { speaker: 'human', text: 'x'.repeat(40) }, assistantMessage: { speaker: 'assistant', text: 'y'.repeat(80) }, fullContext: [], timestamp: '2026-08-10T09:00:05.000Z' },
+      { humanMessage: { speaker: 'human', text: 'z'.repeat(20) }, assistantMessage: { speaker: 'assistant', text: 'w'.repeat(8) }, fullContext: [] } ] },
+    '2026-08-11T08:00:00.000Z': { id: 'b', interactions: [
+      { humanMessage: { speaker: 'human', text: 'abcd' }, assistantMessage: { speaker: 'assistant', displayText: 'ok!!!' }, timestamp: T('2026-08-11T08:00:03.000Z') },
+      { humanMessage: { speaker: 'human', text: 'unanswered' }, assistantMessage: null } ] },
+    'draft': { id: 'c', interactions: [{ humanMessage: { text: 'no date' }, assistantMessage: { text: 'anywhere' } }] },
+  }, null, 1));
+  // Character.ai — emailed export ZIP (Export Data; layout known only from third-party guides: user, character and message files with timestamps). Tolerant shape:
+  //   a message list with a human flag (is_human / author.is_human / src__is_human), text and a time; a character reply is output, the preceding human message input.
+  //   chat1: 40 → 80 (in 10, out 20) · 20 → 8 (in 5, out 2) · 'abcd' → 'ok!!!' (in 1, out 1; src__is_human + raw_content + created) · one undated reply → skipped.
+  //   ⇒ in=16 out=23 msgs=3 skipped=1 · platform 'Character.ai' · model character.ai · est · sid = file name. The file name carries "character" (the sniff's name gate).
+  w('b6/characterai/character_ai_messages.json', JSON.stringify({ chats: [
+    { external_id: 'chat1', character: { name: 'Zed the Guide', external_id: 'char1' }, messages: [
+      { author: { is_human: true, name: 'me' }, text: 'x'.repeat(40), create_time: '2026-08-10T09:00:00.000Z' }, { author: { is_human: false, name: 'Zed the Guide' }, text: 'y'.repeat(80), create_time: '2026-08-10T09:00:05.000Z' },
+      { is_human: true, text: 'z'.repeat(20), created_at: T('2026-08-10T21:30:00.000Z') }, { is_human: false, text: 'w'.repeat(8), created_at: T('2026-08-10T21:30:05.000Z') },
+      { src__is_human: true, raw_content: 'abcd', created: '2026-08-11T08:00:00.000Z' }, { src__is_human: false, raw_content: 'ok!!!', created: '2026-08-11T08:00:03.000Z' },
+      { is_human: false, text: 'undated reply' } ] },
+  ] }, null, 1));
+
 
   // T14 (4b) — Ollama desktop-app db.sqlite (schema subset of ollama/app/store/schema.sql). Needs node:sqlite; when it is unavailable nothing is
   //   written and 87b's ollama-db block reports itself skipped. One chat, 2 user + 2 assistant messages. m2's record is 6000 + 400 chars → it

@@ -72,8 +72,8 @@ const corsOk = (r) => r.headers['access-control-allow-origin'] === '*'
 
 // spawn the collector against a temp HOME (default: this test's); resolves once its "listening on http://127.0.0.1:<port>" line is out (or it exits / 10 s pass).
 // Exported for tests/checks/89c-collector.mjs's end-to-end block (real collector + real page), which seeds its own HOME the same way.
-export async function start(args, home = HOME) {
-  const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home, COLLECTOR_PORT: '0' };
+export async function start(args, home = HOME, extraEnv = {}) {
+  const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home, COLLECTOR_PORT: '0', ...extraEnv };   // extraEnv: per-instance variables (B6: COPILOT_OTEL_FILE_EXPORTER_PATH)
   for (const k of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'GEMINI_CLI_HOME']) delete env[k];   // a developer's own overrides must not leak into the child
   const h = { child: null, port: 0, out: '', err: '', exited: null };
   h.child = spawn(process.execPath, [COLLECTOR, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
@@ -134,6 +134,14 @@ export function seedWave3(HOME = HOME_DEFAULT) {
   fs.cpSync(path.join(W3, 'kilo', 'tasks'), path.join(HOME, 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'), { recursive: true });
   fs.cpSync(path.join(W3, 'amp'), path.join(HOME, '.local', 'share', 'amp'), { recursive: true });
 }
+// Plan 9 B6 — Zed's threads folder (Windows layout: %LOCALAPPDATA%\Zed\threads — LOCALAPPDATA = HOME here) with threads.db (zstd blobs), a plain zstd frame named
+// thread-fixture.json and a corrupt frame; the GitHub Copilot Chat OTel outfile under <HOME>/copilot-otel — the collector learns that folder from
+// COPILOT_OTEL_FILE_EXPORTER_PATH (start()'s extraEnv), as the outfile has no fixed location.
+export const OTEL_FILE = 'copilot-chat.jsonl';
+export function seedB6(HOME = HOME_DEFAULT) {
+  fs.cpSync(path.join(OUT_DIR, 'b6', 'zed', 'threads'), path.join(HOME, 'Zed', 'threads'), { recursive: true });
+  fs.cpSync(path.join(OUT_DIR, 'b6', 'copilot-otel'), path.join(HOME, 'copilot-otel'), { recursive: true });
+}
 
 export async function run() {
   const results = [];
@@ -142,11 +150,12 @@ export async function run() {
   if (!fs.existsSync(path.join(OUT_DIR, 'codex', 'sessions'))) { const { generate } = await import('../fixtures/gen.mjs'); await generate(); }   // standalone run before the suite ever generated fixtures
   seedHome();
   seedWave3();
+  seedB6();
   let a = null, b = null, c = null;
   const HOME_CW = path.join(OUT_DIR, `collector-cowork-${process.pid}`);   // B1 block: its own HOME (APPDATA / LOCALAPPDATA point at it too — see start())
   try {
     // ---------------------------------------------------------------- default discovery ----------------------------------------------------------------
-    a = await start([]);
+    a = await start([], HOME, { COPILOT_OTEL_FILE_EXPORTER_PATH: path.join(HOME, 'copilot-otel', OTEL_FILE) });
     const tokenFile = path.join(HOME, '.ai-usage', 'collector.token');
     const token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, 'utf8').trim() : '';
     const urlTok = (/\?token=([0-9a-f]+)/.exec(a.out) || [])[1] || '';
@@ -190,8 +199,8 @@ export async function run() {
         && ['local', 'codex', 'copilot-cli', 'gemini-cli'].every(watchOk),
       JSON.stringify({ codex: tool('codex'), local: { watch: tool('local').watch, walkMs: tool('local').walkMs } }).slice(0, 800));
     const ids = (sj.tools || []).map((t) => t.id);
-    add('collector: status names every registry folder connector by its id (local, codex, copilot-cli, gemini-cli, continue, cline, roo, junie, lmstudio, ollama, jan + Plan 9 B5 opencode, goose, devin, kilo, amp) plus aider / tgwebui as --root-only',
-      ['local', 'codex', 'copilot-cli', 'gemini-cli', 'continue', 'cline', 'roo', 'junie', 'lmstudio', 'ollama', 'jan', 'opencode', 'goose', 'devin', 'kilo', 'amp', 'aider', 'tgwebui'].every((id) => ids.includes(id)), ids.join(','));
+    add('collector: status names every registry folder connector by its id (local, codex, copilot-cli, gemini-cli, continue, cline, roo, junie, lmstudio, ollama, jan + Plan 9 B5 opencode, goose, devin, kilo, amp + Plan 9 B6 zed, copilot-vscode) plus aider / tgwebui as --root-only',
+      ['local', 'codex', 'copilot-cli', 'gemini-cli', 'continue', 'cline', 'roo', 'junie', 'lmstudio', 'ollama', 'jan', 'opencode', 'goose', 'devin', 'kilo', 'amp', 'zed', 'copilot-vscode', 'aider', 'tgwebui'].every((id) => ids.includes(id)), ids.join(','));
     // ---------------------------------------------------------------- Plan 9 B5: Wave 3 coding tools (seedWave3) ----------------------------------------------------------------
     const w3 = (id) => tool(id);
     const w3Roots = (id) => (w3(id).roots || []).map((r) => path.resolve(r));
@@ -217,6 +226,48 @@ export async function run() {
     add('collector (B5): /api/file streams a SQLite store byte-exact (goose sessions.db, binary, SQLite header intact); a file under opencode\'s snapshot/ and amp\'s history.jsonl (outside the threads/ root) answer 404',
       gooseGet.status === 200 && gooseGet.body.equals(gooseWant) && gooseWant.subarray(0, 15).toString('latin1') === 'SQLite format 3' && snapGet.status === 404 && histGet.status === 404,
       `goose ${gooseGet.status} ${gooseGet.body.length}/${gooseWant.length} bytes · snapshot ${snapGet.status} · history ${histGet.status}`);
+
+    // ---------------------------------------------------------------- Plan 9 B6: Zed (decode=zstd) + GitHub Copilot Chat OTel outfile (seedB6) ----------------------------------------------------------------
+    const zedRoot = path.join(HOME, 'Zed', 'threads');
+    add('collector (B6): /api/status → zed found under %LOCALAPPDATA%\\Zed\\threads (3 files: threads.db + the two frame fixtures) and copilot-vscode found under the folder of COPILOT_OTEL_FILE_EXPORTER_PATH (1 file) — the OTel outfile has no fixed location, so the env var (or --root) is the only discovery',
+      found('zed', 3) && path.resolve(w3Roots('zed')[0]) === zedRoot && found('copilot-vscode', 1) && path.resolve(w3Roots('copilot-vscode')[0]) === path.join(HOME, 'copilot-otel'),
+      JSON.stringify(['zed', 'copilot-vscode'].map((id) => [id, w3(id).found, w3(id).files, w3(id).roots, w3(id).candidates])));
+    const zedList = await w3List('zed'), otelList = await w3List('copilot-vscode');
+    add('collector (B6): /api/list → zed ["thread-corrupt.json", "thread-fixture.json", "threads.db"], copilot-vscode ["copilot-chat.jsonl"]',
+      JSON.stringify(zedList) === JSON.stringify(['thread-corrupt.json', 'thread-fixture.json', 'threads.db']) && JSON.stringify(otelList) === JSON.stringify([OTEL_FILE]), JSON.stringify({ zedList, otelList }));
+    const zedPlain = fs.readFileSync(path.join(OUT_DIR, 'b6', 'zed', 'thread-fixture.plain.json')), zedFrame = fs.readFileSync(path.join(zedRoot, 'thread-fixture.json'));
+    const rawFrame = await API('/api/file?tool=zed&path=thread-fixture.json');
+    const decoded = await API('/api/file?tool=zed&path=thread-fixture.json&decode=zstd');
+    add('collector (B6): GET /api/file?tool=zed&path=thread-fixture.json streams the zstd frame as-is (byte-exact, 28 B5 2F FD magic); …&decode=zstd answers the DECOMPRESSED bytes byte-exact (the committed plain JSON, Content-Length = its size, JSON content type, CORS headers) — zlib.zstdDecompressSync on the collector\'s side, bounded',
+      rawFrame.status === 200 && rawFrame.body.equals(zedFrame) && zedFrame.subarray(0, 4).toString('hex') === '28b52ffd' && decoded.status === 200 && decoded.body.equals(zedPlain) && +decoded.headers['content-length'] === zedPlain.length && /json/i.test(decoded.headers['content-type'] || '') && corsOk(decoded),
+      `raw ${rawFrame.status} ${rawFrame.body.length}/${zedFrame.length} · decoded ${decoded.status} ${decoded.body.length}/${zedPlain.length} cl=${decoded.headers['content-length']} ct=${decoded.headers['content-type']}`);
+    const corrupt = await API('/api/file?tool=zed&path=thread-corrupt.json&decode=zstd');
+    const otherTool = await API('/api/file?tool=codex&path=' + encodeURIComponent(CODEX_FILE) + '&decode=zstd');
+    const otherCodec = await API('/api/file?tool=zed&path=thread-fixture.json&decode=gzip');
+    add('collector (B6): decode=zstd on a frame that does not decode (zstd magic + garbage) → 422 JSON naming the zstd failure (no stack, no path); decode=zstd on a non-Zed tool (codex) → 400 JSON "only for zed"; decode=gzip → 400 JSON (the only accepted value is zstd)',
+      corrupt.status === 422 && isJsonCT(corrupt) && /zstd/i.test((asJson(corrupt) || {}).error || '') && !/\\|\//.test((asJson(corrupt) || {}).error || '') && !/at .*:\d+/.test(corrupt.body.toString())
+        && otherTool.status === 400 && isJsonCT(otherTool) && /zed/i.test((asJson(otherTool) || {}).error || '') && otherCodec.status === 400 && isJsonCT(otherCodec) && /zstd/.test((asJson(otherCodec) || {}).error || ''),
+      `corrupt ${corrupt.status} ${corrupt.body.toString().slice(0, 160)} · codex ${otherTool.status} ${otherTool.body.toString().slice(0, 120)} · gzip ${otherCodec.status} ${otherCodec.body.toString().slice(0, 120)}`);
+    // threads.db: the Zed store is SQLite with one zstd frame per thread row — decode=zstd there means "every row decoded", answered as JSON lines (the page parses them like the
+    // raw store). The collector needs node:sqlite for it (Node ≥ 22.13); where this Node lacks it the documented answer is 501 with the Node hint — asserted as such, never skipped.
+    const sqliteHere = await import('node:sqlite').then((m) => typeof m.DatabaseSync === 'function').catch(() => false);
+    const dbWant = fs.readFileSync(path.join(zedRoot, 'threads.db'));
+    const dbRaw = await API('/api/file?tool=zed&path=threads.db');
+    const dbDecoded = await API('/api/file?tool=zed&path=threads.db&decode=zstd');
+    const expectLines = fs.readFileSync(path.join(OUT_DIR, 'b6', 'zed', 'decoded-threads.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const gotLines = dbDecoded.status === 200 ? dbDecoded.body.toString('utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }) : [];
+    const sameRow = (g, e) => !!g && g.id === e.id && g.summary === e.summary && String(g.updated_at) === String(e.updated_at) && (e.error ? typeof g.error === 'string' && /zstd/i.test(g.error) && g.data === undefined : g.data_type === 'json' && JSON.stringify(JSON.parse(g.data)) === JSON.stringify(JSON.parse(e.data)));
+    add(sqliteHere
+      ? 'collector (B6): /api/file?tool=zed&path=threads.db streams the SQLite store byte-exact; …&decode=zstd (node:sqlite present in this Node) answers one JSON line per thread row — t1 / t2 / t3 / t5 with data_type "json" and the decoded thread JSON (t3 was plain json already), t4 as an {error} line naming zstd (no data) — matching tests/fixtures/out/b6/zed/decoded-threads.jsonl; ndjson content type'
+      : 'collector (B6): /api/file?tool=zed&path=threads.db streams the SQLite store byte-exact; …&decode=zstd on it answers 501 JSON naming node:sqlite / Node 22.13 (this Node has no node:sqlite — the documented answer, asserted, not skipped)',
+      dbRaw.status === 200 && dbRaw.body.equals(dbWant) && (sqliteHere
+        ? dbDecoded.status === 200 && /ndjson/i.test(dbDecoded.headers['content-type'] || '') && gotLines.length === expectLines.length && expectLines.every((e, i) => sameRow(gotLines[i], e))
+        : dbDecoded.status === 501 && isJsonCT(dbDecoded) && /node:sqlite/.test((asJson(dbDecoded) || {}).error || '') && /22\.13/.test(dbDecoded.body.toString())),
+      `raw ${dbRaw.status} ${dbRaw.body.length}/${dbWant.length} · decoded ${dbDecoded.status} ct=${dbDecoded.headers['content-type']} lines=${gotLines.length}/${expectLines.length} ${dbDecoded.body.toString().slice(0, 200)}`);
+    await sleep(150);
+    const decodeLog = a.out.split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => /decode=/.test(l));
+    add('collector (B6): the request log echoes decode=zstd beside tool / path (sanitised like them) — one line per decode request, never the body, never the token (the banner\'s ready URL is the only place the token is printed)',
+      decodeLog.some((l) => /GET \/api\/file\?tool=zed&path=thread-fixture\.json&decode=zstd 200 \d+$/.test(l)) && decodeLog.length >= 5 && decodeLog.every((l) => !l.includes(token) && !/"data"|SQLite format/.test(l)), decodeLog.join(' | ').slice(0, 400));
 
     const ls = await API('/api/list?tool=codex');
     const lj = asJson(ls) || {};

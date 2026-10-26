@@ -18,7 +18,9 @@
  *           --html <path>           the dashboard file to serve at /  (default: ../../AI Usage Dashboard.html next to this script)
  *           --help
  * Tool ids = the dashboard's connector ids: local (Claude Code / Desktop), codex, copilot-cli, gemini-cli, continue, cline, roo,
- *           junie, lmstudio, ollama, jan, opencode, goose, devin, kilo, amp (Plan 9 B5), aider, tgwebui.
+ *           junie, lmstudio, ollama, jan, opencode, goose, devin, kilo, amp (Plan 9 B5), zed, copilot-vscode (Plan 9 B6), aider, tgwebui.
+ *           Plan 9 B6 roots: zed = <data>/Zed/threads (threads.db — zstd thread rows; the only tool /api/file decodes, see decode=zstd below); copilot-vscode = the folder
+ *           of $COPILOT_OTEL_FILE_EXPORTER_PATH (VS Code's github.copilot.chat.otel.outfile has no fixed location — without the variable use --root copilot-vscode=<folder>).
  *           Plan 9 B5 roots: opencode = the OpenCode data dir (its snapshot/ git object store, bin/, log/ and cache/ are never walked — skipDirs);
  *           goose = <data>/goose/sessions (sessions.db); devin = <data>/devin/cli (sessions.db); kilo = the kilocode.kilo-code globalStorage folder
  *           (its own tool now — it used to be roo's second root); amp = <data>/amp/threads itself, so history.jsonl (prompt text) beside it is never listed.
@@ -69,6 +71,12 @@
  *                                   bytes even when the file grows while it streams (a CLI appending to its live log). Waits only for the
  *                                   tool's FIRST walk (or one in flight) — it never triggers a dirty re-walk (that is /api/status's job), so a
  *                                   file streams now even when the tool just changed
+ *   GET /api/file?tool=zed&path=<rel>&decode=zstd   (Plan 9 B6, design 8) the file DECODED, for a browser whose DecompressionStream lacks zstd: a zstd frame → its
+ *                                   bytes (byte-exact, JSON content type); Zed's threads.db → one JSON line per `threads` row {id, summary, updated_at, data_type:
+ *                                   'json', data} with the blob decompressed, or {…, error} for a row that does not decode (ndjson). Only for a tool whose TABLE row
+ *                                   carries decode: 'zstd' (zed) and only the value zstd — anything else 400; 413 file too large to decode in memory; 415 neither a
+ *                                   frame nor a SQLite store; 422 the frame does not decode; 501 this Node lacks zlib zstd (< 22.15) or node:sqlite (< 22.13).
+ *                                   Token-gated and path-checked exactly like a plain /api/file; the decoded bytes are never written to disk.
  *   GET /                           the dashboard HTML (404 with a hint when the file is not where expected); /favicon.ico → 204
  *   GET /README.md                  the repo README (text/markdown; 404 when absent) — the served page's "Where the numbers come from" link
  *                                   is README.md#automatic-mode, relative to the page
@@ -80,6 +88,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const VERSION = '7.0';
@@ -148,6 +157,11 @@ const TABLE = [
   { id: 'devin',       name: 'Devin CLI',                       groups: [[env('DEVIN_DATA_DIR'), PLAT === 'win32' ? path.join(APPDATA, 'devin', 'cli') : PLAT === 'darwin' ? path.join(HOME, 'Library', 'Application Support', 'devin', 'cli') : path.join(XDG_DATA, 'devin', 'cli')].filter(Boolean)] },
   { id: 'kilo',        name: 'Kilo Code (VS Code)',             groups: [extStorage('kilocode.kilo-code')] },
   { id: 'amp',         name: 'Amp',                             groups: [[env('AMP_DATA_DIR'), path.join(HOME, '.local', 'share', 'amp'), ...(PLAT === 'win32' ? [path.join(LOCALAPPDATA, 'amp')] : [])].filter(Boolean).map((d) => path.join(d, 'threads'))] },
+  // Plan 9 B6 — zed = the Zed threads folder (threads.db; its thread rows are zstd frames a browser cannot always decode — GET /api/file?…&decode=zstd decodes them here,
+  //   see serveDecoded; `decode: 'zstd'` is what allows that for this tool). copilot-vscode = the folder of Copilot Chat's OTel outfile — a user-chosen path
+  //   (github.copilot.chat.otel.outfile), so only COPILOT_OTEL_FILE_EXPORTER_PATH (the extension's own env override) or --root copilot-vscode=<folder> finds it.
+  { id: 'zed',         name: 'Zed (Agent Panel)',               groups: [[PLAT === 'win32' ? path.join(LOCALAPPDATA, 'Zed', 'threads') : PLAT === 'darwin' ? path.join(HOME, 'Library', 'Application Support', 'Zed', 'threads') : path.join(XDG_DATA, 'zed', 'threads')]], decode: 'zstd' },
+  { id: 'copilot-vscode', name: 'GitHub Copilot Chat (VS Code OTel file)', groups: env('COPILOT_OTEL_FILE_EXPORTER_PATH') ? [[path.dirname(path.resolve(env('COPILOT_OTEL_FILE_EXPORTER_PATH')))]] : [] },
   { id: 'aider',       name: 'Aider',                           groups: [] },   // per-repo files — --root <folder that holds your repos> only
   { id: 'tgwebui',     name: 'text-generation-webui',           groups: [] },   // install folder — --root <install or user_data> only
 ];
@@ -420,11 +434,75 @@ function cors(res) {
 // "?" and a value is cut at 200 chars: an unauthenticated request must not be able to forge a log line (review m1).
 const logSafe = (v) => String(v).replace(/[\u0000-\u001f\u007f]/g, '?').slice(0, 200);
 function logLine(req, url, status, bytes) {
-  const q = ['tool', 'path', 'refresh'].filter((k) => url.searchParams.has(k)).map((k) => `${k}=${logSafe(url.searchParams.get(k))}`).join('&');
+  const q = ['tool', 'path', 'refresh', 'decode'].filter((k) => url.searchParams.has(k)).map((k) => `${k}=${logSafe(url.searchParams.get(k))}`).join('&');
   console.log(`${hhmmss()} ${logSafe(req.method)} ${logSafe(url.pathname)}${q ? '?' + q : ''} ${status} ${bytes}`);
 }
 function sendJson(res, status, obj) { const body = Buffer.from(JSON.stringify(obj)); res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': body.length }); res.end(body); return body.length; }
 function sendText(res, status, text, type = 'text/plain; charset=utf-8') { const body = Buffer.from(text); res.writeHead(status, { 'Content-Type': type, 'Content-Length': body.length }); res.end(body); return body.length; }
+
+// ---- Plan 9 B6: GET /api/file?…&decode=zstd (design 8) -----------------------------------------------------------------------------------------------------
+// The page asks for it when its browser cannot decompress zstd (Zed's thread store). Only the value `zstd`, only for a tool whose TABLE row carries decode: 'zstd'
+// (zed). A zstd frame → its bytes (bounded by ZSTD_MAX_OUT, byte-exact); Zed's SQLite store → one JSON line per `threads` row with the blob decoded (data_type 'json'),
+// or an {error} line for a row that does not decode — node:sqlite (Node ≥ 22.13, unflagged) reads the table read-only, zlib.zstdDecompressSync (Node ≥ 22.15) decodes.
+// Failures are JSON: 400 (not zstd / not a decode tool), 413 (too large to decode in memory), 415 (neither a frame nor a SQLite store), 422 (the frame does not
+// decode), 501 (this Node lacks zstd or node:sqlite). The page counts any non-200 as one unreadable file and says so.
+const ZSTD_MAX_IN = 256 * 1024 * 1024, ZSTD_MAX_OUT = 256 * 1024 * 1024;
+const ZSTD_MAGIC = Buffer.from('28b52ffd', 'hex'), SQLITE_MAGIC = Buffer.from('SQLite format 3\0', 'latin1');
+const httpError = (status, message) => Object.assign(new Error(message), { status });
+const zstdErrorText = (e) => String((e && e.message) || e).split('\n')[0].slice(0, 160);   // zlib's own one-liner ("Unknown frame descriptor") — never a path, never a stack
+function zstdDecode(buf) {
+  if (typeof zlib.zstdDecompressSync !== 'function') throw httpError(501, 'this Node has no zstd in zlib — decode=zstd needs Node 22.15 or newer');
+  return zlib.zstdDecompressSync(buf, { maxOutputLength: ZSTD_MAX_OUT });
+}
+async function readHead(abs, n) {
+  const fh = await fsp.open(abs, 'r');
+  try { const { bytesRead, buffer } = await fh.read(Buffer.alloc(n), 0, n, 0); return buffer.subarray(0, bytesRead); } finally { await fh.close(); }
+}
+async function decodedBody(r) {
+  const head = await readHead(r.abs, SQLITE_MAGIC.length);
+  if (head.subarray(0, ZSTD_MAGIC.length).equals(ZSTD_MAGIC)) return { body: zstdDecode(await fsp.readFile(r.abs)), type: CT['.json'] };
+  if (head.equals(SQLITE_MAGIC)) return { body: await decodeZedThreadsDb(r.abs), type: CT['.jsonl'] };
+  throw httpError(415, 'not a zstd frame and not a SQLite store — nothing to decode');
+}
+async function serveDecoded(req, res, t, r, decode) {
+  if (decode !== 'zstd') return sendJson(res, 400, { error: `decode=${logSafe(decode)} is not supported — zstd is the only decoding offered` });
+  if (t.decode !== 'zstd') return sendJson(res, 400, { error: `decode=zstd is only available for zed files (${t.id} keeps no zstd data)` });
+  if (r.st.size > ZSTD_MAX_IN) return sendJson(res, 413, { error: `file too large to decode in memory (${r.st.size} bytes; the limit is ${ZSTD_MAX_IN})` });
+  let out;
+  try { out = await decodedBody(r); }
+  catch (e) { return sendJson(res, e.status || 422, { error: e.status ? e.message : `zstd decode failed: ${zstdErrorText(e)}` }); }
+  res.writeHead(200, { 'Content-Type': out.type, 'Content-Length': out.body.length, 'Last-Modified': r.st.mtime.toUTCString() });
+  if (req.method === 'HEAD') { res.end(); return 0; }
+  res.end(out.body); return out.body.length;
+}
+/** Zed's threads.db → JSON lines, one per `threads` row: { id, summary, updated_at, data_type: 'json', data } with the blob decoded (a 'json' row passes through), or
+ *  { id, summary, updated_at, error } when its frame does not decode. Opened read-only through node:sqlite — no copy is made, nothing is written. */
+async function decodeZedThreadsDb(abs) {
+  const sqlite = await loadNodeSqlite();
+  if (!sqlite) throw httpError(501, 'this Node has no node:sqlite — decoding threads.db needs Node 22.13 or newer (the page reads the store itself when its browser decodes zstd)');
+  const db = new sqlite.DatabaseSync(abs, { readOnly: true });
+  try {
+    const lines = db.prepare('SELECT id, summary, updated_at, data_type, data FROM threads').all().map((row) => JSON.stringify(decodeZedRow(row)));
+    return Buffer.from(lines.length ? lines.join('\n') + '\n' : '');
+  } finally { db.close(); }
+}
+function decodeZedRow(row) {
+  const head = { id: row.id, summary: row.summary, updated_at: row.updated_at };
+  const type = String(row.data_type || '').toLowerCase(), cell = row.data instanceof Uint8Array ? Buffer.from(row.data) : Buffer.from(String(row.data ?? ''), 'utf8');
+  if (type !== 'zstd') return { ...head, data_type: type || 'json', data: cell.toString('utf8') };
+  try { return { ...head, data_type: 'json', data: zstdDecode(cell).toString('utf8') }; }
+  catch (e) { if (e.status) throw e; return { ...head, error: `zstd decode failed: ${zstdErrorText(e)}` }; }   // one bad row — the rest of the store still lands
+}
+let nodeSqlite;   // undefined = not probed yet · null = this Node has no node:sqlite · else the module
+async function loadNodeSqlite() {
+  if (nodeSqlite !== undefined) return nodeSqlite;
+  const origEmit = process.emitWarning;   // Node 22.13–22.x prints an ExperimentalWarning for node:sqlite — not an error, not for the console
+  process.emitWarning = (w, ...a) => { if (/SQLite/i.test(String((w && w.message) || w))) return; return origEmit.call(process, w, ...a); };
+  try { const m = await import('node:sqlite'); nodeSqlite = typeof m.DatabaseSync === 'function' ? m : null; }
+  catch { nodeSqlite = null; }   // ERR_UNKNOWN_BUILTIN_MODULE on Node < 22.5, or flagged on 22.5–22.12: the 501 above tells the user which Node is needed
+  finally { process.emitWarning = origEmit; }
+  return nodeSqlite;
+}
 
 async function handle(req, res, url) {
   const p = url.pathname;
@@ -469,6 +547,7 @@ async function handle(req, res, url) {
   if (p === '/api/file') {
     const r = await resolveFile(t, url.searchParams.get('path'));
     if (r.error) return sendJson(res, r.status, { error: r.error });
+    if (url.searchParams.has('decode')) return serveDecoded(req, res, t, r, url.searchParams.get('decode'));   // Plan 9 B6: the page asked for the zstd data decoded
     res.writeHead(200, { 'Content-Type': CT[path.extname(r.abs).toLowerCase()] || 'application/octet-stream', 'Content-Length': r.st.size, 'Last-Modified': r.st.mtime.toUTCString() });
     if (req.method === 'HEAD' || r.st.size === 0) { res.end(); return 0; }
     return new Promise((resolve) => {

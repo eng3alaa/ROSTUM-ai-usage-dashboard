@@ -1305,6 +1305,8 @@ const App = {
       const res = await parseFolderCached(c, files, (done, total) => { if (prog) { prog.max = total; prog.value = done; } }, ScanCache, { noPrune: !!opts.fromDrop });
       if (gen !== this._gen[c.id]) return;   // superseded by a newer scan of this connector
       if (!res.meta.files) { status.textContent = `No matching files found — expected ${c.hint || 'log files'}.`; return; }
+      // every matched file unreadable (B6: a zstd store this browser cannot decode, a locked DB) = a failed scan with the first reason — never "Connected · 0 messages" over kept rows
+      if (!res.meta.parsedFiles && !res.meta.cachedFiles) throw new Error(`${res.meta.files} file(s) unreadable${res.meta.badFileReason ? ' — ' + res.meta.badFileReason : ''}`);
       if (res.projects && res.projects.length) Store.projectsBy[c.id] = res.projects; else delete Store.projectsBy[c.id];   // Projects table rows (persisted by setSource's persist below); a re-scan that finds none clears the stale set
       Store.setSource(c.id, res.rows, { files: res.meta.files, msgs: res.meta.msgs, lines: res.meta.lines, badLines: res.meta.badLines });
       const filesLabel = `${res.meta.files} file${res.meta.files === 1 ? '' : 's'}` + (opts.fromCollector ? ' · via collector' : '');
@@ -1639,7 +1641,8 @@ const App = {
     let files;
     try {
       const list = await o.api('/api/list?tool=' + encodeURIComponent(conn.id));
-      files = matchConnectorFiles(conn, Array.isArray(list && list.files) ? list.files : []).map(f => ({ path: f.path, file: new RemoteFile(o.base, o.token, conn.id, f) }));
+      const decode = remoteDecodeFor(conn);   // B6: Zed's zstd store is decoded by the collector when this browser cannot (design 8)
+      files = matchConnectorFiles(conn, Array.isArray(list && list.files) ? list.files : []).map(f => ({ path: f.path, file: new RemoteFile(o.base, o.token, conn.id, f, decode) }));
     } catch (e) { if (o.stale()) return null; return { matched: 0, landed: false, retry: true, note: 'error: ' + String(e.message || e).slice(0, 60) }; }
     if (o.stale()) return null;
     if (!files.length) return { matched: 0, landed: false, note: 'found, nothing to read' };
@@ -1984,6 +1987,21 @@ const App = {
       Store.setSource('perplexity-export', all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), files: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size }, { perSid: true });   // compaction keeps one bucket per file (scalar sid) so the filter above stays exact
       notes.push(`${f.name}: Perplexity export — ${fmtInt(res.meta.msgs)} threads (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} undated skipped` : ''}; files merge, the same file re-imported replaces itself)`);
       imported++;
+    } else if (kind === 'mistral-vibe-export') {   // Plan 9 B6
+      const res = pre ? pre.res : parseMistralVibeExport(obj);
+      Store.setSource('mistral-vibe-export', res.rows, res.meta);   // one export = the whole account → re-import replaces
+      notes.push(`${f.name}: Mistral Vibe export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens; model per conversation; input = the preceding prompt only${undatedNote(res.meta)})`);
+      imported++;
+    } else if (kind === 'cody-export') {   // Plan 9 B6
+      const res = pre ? pre.res : parseCodyExport(obj);
+      Store.setSource('cody-export', res.rows, res.meta);   // History > Export is the whole history → re-import replaces
+      notes.push(`${f.name}: Sourcegraph Cody export — ${res.meta.chats} chats, ${fmtInt(res.meta.msgs)} replies (estimated tokens; the export names no model per turn${undatedNote(res.meta)})`);
+      imported++;
+    } else if (kind === 'characterai-export') {   // Plan 9 B6
+      const res = pre ? pre.res : parseCharacterAiExport(obj, f.name);
+      this._landPerFileExport('characterai-export', res);
+      notes.push(`${f.name}: Character.ai export — ${fmtInt(res.meta.msgs)} replies (estimated tokens; no model${undatedNote(res.meta)}; message files merge, the same file re-imported replaces itself)`);
+      imported++;
     } else if (kind === 'anthropic-usage') {
       const res = parseAnthropicUsage(obj);
       this._gen.anthropic++;   // an import supersedes any in-flight fetch — it must not overwrite this
@@ -2016,6 +2034,13 @@ const App = {
     return imported;
   },
 
+  /** Plan 9 B6 — lands a per-file export whose rows carry sid = file name (Character.ai's message files): the same file re-imported replaces only itself, other
+   *  files merge; meta.msgs / meta.files are recomputed over everything stored. (Meta AI, Perplexity and the Copilot activity CSV keep their inline copies of this rule.) */
+  _landPerFileExport(srcId, res) {
+    const keep = ((Store.sources[srcId] || {}).rows || []).filter(r => r.sid !== res.meta.sid && !(Array.isArray(r.sids) && r.sids.includes(res.meta.sid)));
+    const all = keep.concat(res.rows);
+    Store.setSource(srcId, all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), files: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size }, { perSid: true });   // compaction keeps one bucket per file (scalar sid) so the filter above stays exact
+  },
   /** A0 #10 — billed days of a generic CSV import: the days the import covers take its cost column, or are REMOVED when it has none (the Cursor
    *  rule: stale dollars must not survive behind replaced rows); days outside the import keep theirs. A CSV that never carried costs creates no envelope. */
   _landGenericCsvBilled(res) {

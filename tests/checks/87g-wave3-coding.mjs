@@ -4,6 +4,8 @@
 // gen-sqlite.mjs). Binary fixtures cross into the page as base64 → Uint8Array → File. Exact totals per fixture, local:1 where the provider is a
 // local runner, project rows, malformed-row counts, dedupe, registry copy. The one check that may skip (clearly) is the generator equality check
 // when node:sqlite is unavailable — every parser check runs from the committed files.
+// Plan 9 B6 — folder-log parsers B: Zed (threads.db with zstd blobs — page path when the browser decodes zstd, else "needs the local collector"; the
+// collector path with a stubbed fetch) and GitHub Copilot Chat's OTel JSONL (exact gen_ai.usage.* spans; the Imports drop route). Fixtures: out/b6/.
 import fs from 'node:fs';
 import path from 'node:path';
 import { openDashboard, OUT } from '../lib/harness.mjs';
@@ -186,22 +188,146 @@ export async function run({ browser, ok }) {
     ok('registry (B5): the copy names each parser\'s limits — the three SQLite cards warn about the -wal sidecar, Devin says ACUs and missing output tokens, Amp says credits and cloud threads, Goose says session-level, OpenCode names both layouts and msg_*.json, Kilo names Roo; the collector card lists the five tools',
       reg.wal && reg.devinAcu && reg.ampCredits && reg.gooseSession && reg.ocLayouts && reg.kiloRoo && reg.collectorNames, JSON.stringify(reg));
 
+    // ================================================================ Plan 9 B6 — folder-log parsers B: Zed (zstd), GitHub Copilot Chat OTel JSONL ================================================================
+    // Zed keeps its agent threads in threads.db (SQLite; one row per thread, data = a zstd frame of the thread JSON). The page path needs
+    // DecompressionStream('zstd') — feature-detected HERE from the page's own capability report and cross-checked with a direct probe, so neither branch is
+    // vacuous: with zstd the rows must be exact; without it the file must be counted unreadable with the "needs the local collector on this browser" reason
+    // (never silently zero). The collector path runs with a stubbed fetch (RemoteFile + decode=zstd → the decoded JSONL the collector emits,
+    // tests/fixtures/out/b6/zed/decoded-threads.jsonl); the REAL collector's decode=zstd is the Node test (collector.test.mjs, relayed by 89c).
+    const zedB64 = fs.readFileSync(path.join(OUT, 'b6', 'zed', 'threads', 'threads.db')).toString('base64');
+    const zedJsonl = fs.readFileSync(path.join(OUT, 'b6', 'zed', 'decoded-threads.jsonl'), 'utf8');
+    const zd = await page.evaluate(async (dbB64, jsonl) => {
+      const c = connectorById('zed');
+      if (!c || typeof parseZedThreads !== 'function' || typeof hasZstdDecompression !== 'function' || typeof remoteDecodeFor !== 'function') return { missing: true };
+      const bytes = Uint8Array.from(atob(dbB64), ch => ch.charCodeAt(0));
+      const sum = (rows) => rows.reduce((a, r) => ({ in: a.in + r.in, cw: a.cw + r.cw, cr: a.cr + r.cr, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
+      const cap = hasZstdDecompression();
+      let probe = false; try { new DecompressionStream('zstd'); probe = true; } catch { probe = false; }   // the check's own probe — the page's report must agree with it
+      const describe = (res) => ({ ...sum(res.rows), rows: res.rows.length, lines: res.meta.lines, badLines: res.meta.badLines, badFiles: res.meta.badFiles, reason: res.meta.badFileReason || null,
+        byModel: Object.fromEntries(res.rows.map(r => [r.model, { ...sum([r]), d: r.d, sid: r.sid, local: r.local || 0, cost: Pricing.cost(r.model, r), platform: r.platform }])),
+        proj: Object.fromEntries((res.projects || []).map(p => [p.project, p.in])), sids: [...new Set(res.rows.map(r => r.sid))].sort() });   // parseFolderCached keeps ids per cache entry, so the booked threads are read off the rows' sids
+      const mk = () => [{ path: 'threads/threads.db', file: new File([bytes], 'threads.db', { lastModified: 1789000000000 }) }];
+      const direct = describe(await parseFolderCached(c, mk(), null, new Map()));
+      // through the card (App.scanFiles): Connected with the rows, or a FAILED scan that names the collector — never "Connected, 0 messages"
+      Store.sources = {}; Store.connectors = {}; Store.projectsBy = {};
+      await App.scanFiles(c, mk());
+      const scanned = { status: Store.connectorStatus(c), text: document.getElementById('zed-status').textContent, rows: ((Store.sources.zed || {}).rows || []).length, err: (Store.connectors.zed || {}).scanErr || null };
+      Store.sources = {}; Store.connectors = {}; Store.projectsBy = {}; Store.persist();
+      // collector path: RemoteFile asks for decode=zstd exactly when this browser lacks zstd; the stub answers the decoded JSONL for that URL, raw bytes otherwise
+      const origFetch = window.fetch; const urls = [];
+      window.fetch = async (url) => { urls.push(String(url)); return new Response(new URL(String(url)).searchParams.get('decode') === 'zstd' ? jsonl : bytes, { status: 200 }); };
+      let viaCollector = null, decodeFlag = null, plainUrl = null;
+      try {
+        decodeFlag = remoteDecodeFor(c);
+        const rf = new RemoteFile('http://127.0.0.1:11436', 'tok-z', 'zed', { path: 'threads.db', size: bytes.length, mtime: 1789000000000 }, 'zstd');
+        viaCollector = describe(await parseFolderCached(c, [{ path: 'threads.db', file: rf }], null, new Map()));
+        plainUrl = new RemoteFile('http://127.0.0.1:11436', 'tok-z', 'zed', { path: 'threads.db', size: 1, mtime: 1 })._url;
+      } finally { window.fetch = origFetch; }
+      return { cap, probe, direct, scanned, viaCollector, decodeFlag, urls, plainUrl, decode: c.decode,
+        expT1: dayKey(new Date('2026-09-20T09:00:00Z')), expT2: dayKey(new Date('2026-09-21T10:00:00Z')), expT3: dayKey(new Date('2026-09-19T22:30:00Z')) };
+    }, zedB64, zedJsonl);
+    const zedExact = (r) => !!r && r.in === 1410 && r.cw === 50 && r.cr === 300 && r.out === 285 && r.msgs === 4 && r.rows === 3 && r.lines === 5 && r.badLines === 1 && !r.badFiles
+      && r.byModel['claude-sonnet-4-5'] && r.byModel['claude-sonnet-4-5'].in === 1000 && r.byModel['claude-sonnet-4-5'].cw === 50 && r.byModel['claude-sonnet-4-5'].cr === 300 && r.byModel['claude-sonnet-4-5'].msgs === 2
+      && r.byModel['claude-sonnet-4-5'].d === zd.expT1 && r.byModel['claude-sonnet-4-5'].sid === 't1'
+      && r.byModel['qwen3:8b'] && r.byModel['qwen3:8b'].local === 1 && r.byModel['qwen3:8b'].cost === 0 && r.byModel['qwen3:8b'].in === 400 && r.byModel['qwen3:8b'].out === 80 && r.byModel['qwen3:8b'].d === zd.expT2 && r.byModel['qwen3:8b'].sid === 't2'
+      && r.byModel['gpt-5.4'] && r.byModel['gpt-5.4'].in === 10 && r.byModel['gpt-5.4'].out === 5 && r.byModel['gpt-5.4'].msgs === 1 && r.byModel['gpt-5.4'].d === zd.expT3 && r.byModel['gpt-5.4'].sid === 't3'
+      && r.proj['D:/proj-zed'] === 1000 && Object.keys(r.proj).length === 1 && JSON.stringify(r.sids) === '["t1","t2","t3"]' && Object.values(r.byModel).every(x => x.platform === 'Zed');
+    ok('zed (B6): the page reports its zstd capability truthfully (hasZstdDecompression() agrees with a direct DecompressionStream("zstd") probe) and the registry entry carries decode "zstd"',
+      !zd.missing && zd.cap === zd.probe && zd.decode === 'zstd', JSON.stringify({ missing: zd.missing, cap: zd.cap, probe: zd.probe, decode: zd.decode }));
+    if (zd.cap) {
+      ok('zed (B6, page path — this browser decodes zstd): threads.db → t1 cumulative 1000/50/300/200 msgs 2 (claude-sonnet-4-5; project D:/proj-zed) + t2 400/80 local:1 ($0, ollama) + t3 legacy json 10/5 (request_token_usage summed) → in=1410 cw=50 cr=300 out=285 msgs=4; t4 corrupt blob = 1 bad row; t5 empty skipped; 5 rows read; day = updated_at; sid = thread id; through the card: Connected with the rows and "1 unreadable line"',
+        zedExact(zd.direct) && zd.scanned.status === 'ok' && zd.scanned.rows === 3 && /Connected/.test(zd.scanned.text) && /1 unreadable line/.test(zd.scanned.text), JSON.stringify({ direct: zd.direct, scanned: zd.scanned }));
+    } else {
+      ok('zed (B6, page path — this browser has NO zstd): threads.db is 1 unreadable file with the reason "needs the local collector on this browser" (0 rows, never silently zero); through the card the scan FAILS with that reason (status warn, scanErr names the collector, no rows stored)',
+        !zd.missing && zd.direct.rows === 0 && zd.direct.badFiles === 1 && /needs the local collector on this browser/.test(zd.direct.reason || '') && zd.scanned.status === 'warn' && zd.scanned.rows === 0
+        && /needs the local collector on this browser/.test(zd.scanned.text) && /1 file\(s\) unreadable/.test(zd.scanned.text) && /needs the local collector/.test(zd.scanned.err || ''), JSON.stringify({ direct: zd.direct, scanned: zd.scanned }));
+    }
+    ok('zed (B6, collector path): remoteDecodeFor(zed) is "zstd" exactly when the page lacks zstd (null otherwise); a RemoteFile built with decode "zstd" asks GET …/api/file?tool=zed&path=threads.db&decode=zstd and the decoded JSONL parses to the same exact totals (in=1410 cw=50 cr=300 out=285 msgs=4; the t4 error line = 1 bad row); without decode the URL carries no decode parameter',
+      !zd.missing && zd.decodeFlag === (zd.cap ? null : 'zstd') && zd.urls.length === 1 && /\/api\/file\?tool=zed&path=threads\.db&decode=zstd$/.test(zd.urls[0]) && zedExact(zd.viaCollector) && !/decode=/.test(zd.plainUrl || ''),
+      JSON.stringify({ decodeFlag: zd.decodeFlag, urls: zd.urls, plainUrl: zd.plainUrl, via: zd.viaCollector }));
+
+    // ---- GitHub Copilot Chat (VS Code) — the official OTel file exporter's JSON lines: chat spans with gen_ai.usage.* (map or OTLP array attributes, loose or in a resourceSpans batch) ----
+    const otelTxt = fs.readFileSync(path.join(OUT, 'b6', 'copilot-otel', 'copilot-chat.jsonl'), 'utf8');
+    const co = await page.evaluate(async (txt) => {
+      const c = connectorById('copilot-vscode');
+      if (!c || typeof parseCopilotOtelJsonl !== 'function') return { missing: true };
+      const sum = (rows) => rows.reduce((a, r) => ({ in: a.in + r.in, cw: a.cw + r.cw, cr: a.cr + r.cr, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
+      const mk = () => [{ path: 'copilot-chat.jsonl', file: new File([txt], 'copilot-chat.jsonl', { lastModified: 1789000000000 }) }];
+      const res = await parseCopilotOtelJsonl(mk(), null, new Set(), c);
+      const rows = res.rows.map(r => ({ model: r.model, ...sum([r]), d: r.d, hour: r.hour, platform: r.platform, est: r.est })).sort((a, b) => a.in - b.in);
+      const folder = await parseFolderCached(c, mk(), null, new Map());
+      const lines = txt.split('\n');
+      const kinds = { span: sniffJsonlKind(JSON.parse(lines[0]), 'copilot-chat.jsonl'), batch: sniffJsonlKind(JSON.parse(lines[8]), 'x.jsonl'), metric: sniffJsonlKind(JSON.parse(lines[4]), 'x.jsonl') };
+      // the Imports drop zone routes the outfile by content to this card (JSONL_ROUTE), like every other folder-log JSONL
+      Store.sources = {}; Store.connectors = {}; Store.projectsBy = {};
+      await App.handleImportFiles([new File([txt], 'copilot-chat.jsonl', { type: 'application/x-ndjson' })]);
+      const dropped = { msgs: sum(((Store.sources['copilot-vscode'] || {}).rows) || []).msgs, note: document.getElementById('import-status').textContent, status: Store.connectorStatus(c), imports: !Store.connectors.imports };
+      Store.sources = {}; Store.connectors = {}; Store.projectsBy = {}; Store.persist();
+      return { ...sum(res.rows), rows, lines: res.meta.lines, badLines: res.meta.badLines, dupIds: res.meta.dupIds, addedIds: (res.meta.addedIds || []).slice().sort(), sessionSpans: res.meta.sessionSpans, skippedRecords: res.meta.skippedRecords,
+        folder: { ...sum(folder.rows), files: folder.meta.files, badLines: folder.meta.badLines }, kinds, route: !!(JSONL_ROUTE['copilot-vscode'] && JSONL_ROUTE['copilot-vscode'].id === 'copilot-vscode'), dropped, patterns: c.patterns.map(String),
+        expS1: dayKey(new Date('2026-09-23T09:00:00Z')), expS1Hour: new Date('2026-09-23T09:00:00Z').getHours(), expS2: dayKey(new Date('2026-09-23T21:30:00Z')), expS3: dayKey(new Date('2026-09-24T10:00:00Z')), expFile: dayKey(new Date(1789000000000)) };
+    }, otelTxt);
+    const s1 = co.rows ? co.rows.find(r => r.in === 800) : null, s2 = co.rows ? co.rows.find(r => r.in === 500) : null, s3 = co.rows ? co.rows.find(r => r.in === 100) : null, s4 = co.rows ? co.rows.find(r => r.in === 10) : null;
+    ok('copilot-vscode (B6, OTel JSONL): chat spans → s1 input 1200 net of cache_read 400 → in 800 + cw 100 + out 300 (gen_ai.response.model gpt-5.4-2026-01 wins over the request model; reasoning ⊂ output) + s2 OTLP array attributes / hrtime 500/200 (claude-sonnet-4.5) + s3 inside a resourceSpans batch 100/20 (gpt-5.4) + s4 no timestamp / model → file day, "copilot" 10/5 → in=1410 cw=100 cr=400 out=525 msgs=4 exact; invoke_agent session totals never a row (sessionSpans 1); the inference.operation.details event skipped (skippedRecords 1); the metric line not counted; s1 repeated = dupIds 1; a non-JSON line = badLines 1; 9 lines; platform GitHub Copilot',
+      !co.missing && co.in === 1410 && co.cw === 100 && co.cr === 400 && co.out === 525 && co.msgs === 4 && co.rows.length === 4 && co.lines === 9 && co.badLines === 1 && JSON.stringify(co.dupIds) === '["s1"]' && JSON.stringify(co.addedIds) === '["s1","s2","s3","s4"]'
+      && co.sessionSpans === 1 && co.skippedRecords === 1 && co.rows.every(r => r.platform === 'GitHub Copilot' && !r.est)
+      && s1 && s1.model === 'gpt-5.4-2026-01' && s1.cw === 100 && s1.cr === 400 && s1.out === 300 && s1.d === co.expS1 && s1.hour === co.expS1Hour
+      && s2 && s2.model === 'claude-sonnet-4.5' && s2.out === 200 && s2.d === co.expS2 && s3 && s3.model === 'gpt-5.4' && s3.out === 20 && s3.d === co.expS3 && s4 && s4.model === 'copilot' && s4.out === 5 && s4.d === co.expFile
+      && co.folder.in === 1410 && co.folder.files === 1 && co.folder.badLines === 1, JSON.stringify(co));
+    ok('copilot-vscode (B6): a chat span line and a resourceSpans batch line sniff as "copilot-vscode" (the metric line does not), JSONL_ROUTE routes the kind, the card\'s patterns take .jsonl / .ndjson, so an outfile dropped on Imports lands under the copilot-vscode card (msgs 4, status ok, note names the card, the Imports card stays off)',
+      !co.missing && co.kinds.span === 'copilot-vscode' && co.kinds.batch === 'copilot-vscode' && co.kinds.metric === 'unknown' && co.route && co.patterns.some(p => /jsonl/.test(p)) && co.dropped.msgs === 4 && co.dropped.status === 'ok' && /routed to GitHub Copilot Chat/.test(co.dropped.note) && co.dropped.imports,
+      JSON.stringify({ kinds: co.kinds, route: co.route, patterns: co.patterns, dropped: co.dropped }));
+
+    // ---- registry: the two B6 folder-log entries in the Coding group with honest copy ----
+    const reg6 = await page.evaluate(() => {
+      const bad = [];
+      for (const id of ['zed', 'copilot-vscode']) {
+        const c = connectorById(id);
+        if (!c) { bad.push(id + ': missing'); continue; }
+        if (c.kind !== 'folder-log' || c.category !== 'coding' || c.quality !== 'exact') bad.push(id + ': kind/category/quality');
+        if (c.statusEl !== id + '-status' || !document.getElementById(c.statusEl) || !document.getElementById('src-' + id)) bad.push(id + ': statusEl / card');
+        if (!Array.isArray(c.srcIds) || c.srcIds[0] !== id) bad.push(id + ': srcIds');
+        if (typeof globalThis[c.parser] !== 'function') bad.push(id + ': parser ' + c.parser);
+        if (!Array.isArray(c.patterns) || !c.patterns.length || !c.hint) bad.push(id + ': patterns / hint');
+        if (!Array.isArray(c.paths) || c.paths.length < 2) bad.push(id + ': paths');
+        if (!c.links || !c.links.get || !c.links.docs) bad.push(id + ': links');
+        if (!(typeof c.qualityNote === 'string' && c.qualityNote.length >= 80 && /^Exact/.test(c.qualityNote))) bad.push(id + ': copy must open with Exact');
+        if (!c.platform || !PLATFORM_ORDER.includes(c.platform)) bad.push(id + ': platform order');
+        if (document.querySelector('#accounts-hub .hub-group[data-group="coding"] .acct[data-connector="' + id + '"]') === null) { App.renderHub(); if (!document.querySelector('#accounts-hub .hub-group[data-group="coding"] .acct[data-connector="' + id + '"]')) bad.push(id + ': not in the Coding hub group'); }
+      }
+      const note = (id) => (connectorById(id) || {}).qualityNote || '';
+      const collector = (connectorById('collector') || {}).qualityNote || '';
+      return { bad, platforms: ['zed', 'copilot-vscode'].map(id => (connectorById(id) || {}).platform),
+        zed: /threads\.db/.test(note('zed')) && /zstd/.test(note('zed')) && /needs the local collector on this browser/.test(note('zed')) && /updated_at/.test(note('zed')) && /source-based, not yet verified on real files/.test(note('zed')) && /dashboard\.zed\.dev|Zed Pro/.test(note('zed')),
+        zedPaths: ((connectorById('zed') || {}).paths || []).some(p => /%LOCALAPPDATA%\\Zed\\threads\\threads\.db/.test(p)),
+        otel: /github\.copilot\.chat\.otel\.enabled/.test(note('copilot-vscode')) && /exporterType/.test(note('copilot-vscode')) && /outfile/.test(note('copilot-vscode')) && /invoke_agent/.test(note('copilot-vscode')) && /cache-inclusive/i.test(note('copilot-vscode')) && /ONLY with the exporter on|only with the exporter on/i.test(note('copilot-vscode')),
+        cliPointsHere: /OTel/.test(note('copilot-cli')) && !/Wave 2 parser/.test(note('copilot-cli')), collectorNames: /Zed/.test(collector) && /Copilot Chat/.test(collector),
+        n: CONNECTORS.length, dupIds: CONNECTORS.map(c => c.id).filter((x, i, a) => a.indexOf(x) !== i) };
+    });
+    ok('registry (B6): zed / copilot-vscode are exact folder-log entries in Coding tools — parser registered, patterns + hint, ≥ 2 paths, get + docs links, statusEl + card + hub placement, copy opens "Exact"; platforms Zed / GitHub Copilot (the one platform two cards may share); ids unique',
+      reg6.bad.length === 0 && JSON.stringify(reg6.platforms) === '["Zed","GitHub Copilot"]' && reg6.dupIds.length === 0, JSON.stringify(reg6));
+    ok('registry (B6): honesty copy — Zed names threads.db, zstd, "needs the local collector on this browser", the updated_at day attribution, the Pro billing page and "source-based, not yet verified on real files" (+ the %LOCALAPPDATA%\\Zed\\threads\\threads.db path); Copilot Chat names github.copilot.chat.otel.enabled / exporterType / outfile, invoke_agent, the cache-inclusive input rule and "exact only with the exporter on"; the Copilot CLI card points at the OTel card (no "Wave 2 parser" promise); the collector card lists Zed and Copilot Chat',
+      reg6.zed && reg6.zedPaths && reg6.otel && reg6.cliPointsHere && reg6.collectorNames, JSON.stringify(reg6));
+
     // ---- committed .db fixtures == generator output (semantic: the same tables decode to the same rows; the header's SQLite version may differ) ----
     const regen = path.join(OUT, 'wave3', 'regen');
     const built = await buildSqliteFixtures(regen);
     if (!built) {
       ok('sqlite fixtures: committed .db files match a fresh gen-sqlite.mjs build', true, 'skipped: node:sqlite unavailable in this Node — only this equality check is skipped; every parser check above ran from the committed files');
     } else {
-      const TABLES = { 'opencode.db': ['session', 'message', 'part'], 'opencode-v2.db': ['session_v2', 'session_message'], 'goose-sessions.db': ['sessions', 'messages'], 'devin-sessions.db': ['sessions', 'message_nodes'] };
-      const pairs = SQLITE_FIXTURES.map(f => ({ f, tables: TABLES[f], committed: fs.readFileSync(path.join(SQLITE_DIR, f)).toString('base64'), fresh: fs.readFileSync(path.join(regen, f)).toString('base64'), size: fs.statSync(path.join(SQLITE_DIR, f)).size }));
+      // zed-threads.db (B6) is built only when this Node's zlib has zstd; its data cells are zstd frames whose bytes differ between zstd library versions, so
+      // blob cells compare as 'blob' (the decoded content is what 87g's Zed block asserts) — every other cell must be identical
+      const TABLES = { 'opencode.db': ['session', 'message', 'part'], 'opencode-v2.db': ['session_v2', 'session_message'], 'goose-sessions.db': ['sessions', 'messages'], 'devin-sessions.db': ['sessions', 'message_nodes'], 'zed-threads.db': ['threads'] };
+      const pairs = built.map(f => ({ f, tables: TABLES[f], committed: fs.readFileSync(path.join(SQLITE_DIR, f)).toString('base64'), fresh: fs.readFileSync(path.join(regen, f)).toString('base64'), size: fs.statSync(path.join(SQLITE_DIR, f)).size }));
       const eq = await page.evaluate((pairs) => pairs.map(p => {
         const dec = (b) => Uint8Array.from(atob(b), ch => ch.charCodeAt(0));
         const a = dec(p.committed), b = dec(p.fresh);
-        const same = p.tables.every(t => JSON.stringify(readSqliteTable(a, t)) === JSON.stringify(readSqliteTable(b, t)));
+        const norm = (t) => JSON.stringify({ columns: t.columns, rows: t.rows.map(r => r.map(v => v instanceof Uint8Array ? 'blob' : v)) });
+        const same = p.tables.every(t => norm(readSqliteTable(a, t)) === norm(readSqliteTable(b, t)));
         return { f: p.f, same, size: p.size, rows: p.tables.map(t => t + ':' + readSqliteTable(a, t).rows.length).join(' ') };
       }), pairs);
-      ok('sqlite fixtures: the committed opencode.db / opencode-v2.db / goose-sessions.db / devin-sessions.db decode to the same tables and rows as a fresh gen-sqlite.mjs build (node:sqlite present), each < 50 KB',
-        eq.every(e => e.same && e.size < 50 * 1024), JSON.stringify(eq));
+      ok('sqlite fixtures: the committed opencode.db / opencode-v2.db / goose-sessions.db / devin-sessions.db (+ zed-threads.db when this Node has zstd: ' + built.length + ' built) decode to the same tables and rows as a fresh gen-sqlite.mjs build (node:sqlite present), each < 50 KB',
+        eq.length === built.length && eq.every(e => e.same && e.size < 50 * 1024) && (!built.includes('zed-threads.db') || eq.some(e => e.f === 'zed-threads.db' && /threads:5/.test(e.rows))), JSON.stringify(eq));
     }
   } finally {
     await page.close();

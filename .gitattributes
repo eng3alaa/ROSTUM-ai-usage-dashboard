@@ -5,3 +5,5 @@
 src/** text eol=crlf
 # Plan 9 B5: committed SQLite fixtures (OpenCode / Goose / Devin CLI) — never line-ending normalised
 tests/fixtures/sqlite/*.db binary
+# Plan 9 B6: the committed Zed zstd frame (thread-fixture.zst = zstd of thread-fixture.json) - CI never depends on the local zlib having zstd
+tests/fixtures/zed/*.zst binary

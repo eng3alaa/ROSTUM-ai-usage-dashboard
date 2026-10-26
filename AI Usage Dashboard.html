@@ -749,7 +749,7 @@ details.price-group table { margin: 0 0 8px; }
     </div>
 
     <div class="card src" id="src-import">
-      <div class="card-head"><h2>Imports</h2><span class="badge">ChatGPT · Claude.ai · Gemini Takeout · Grok · MS Copilot · Perplexity · Meta AI · DeepSeek · Cursor CSV · Cerebras CSV · Alibaba bill CSV · CSV · ZIP</span></div>
+      <div class="card-head"><h2>Imports</h2><span class="badge">ChatGPT · Claude.ai · Gemini Takeout · Grok · MS Copilot · Perplexity · Meta AI · DeepSeek · Mistral Vibe · Cody · Character.ai · Cursor CSV · Cerebras CSV · Alibaba bill CSV · CSV · ZIP</span></div>
       <div class="desc">
         Drop exported files here:
         <b>ChatGPT</b> data export (<code>conversations.json</code>; tokens estimated from text) · <b>Claude.ai</b> data export (<code>conversations.json</code>; estimated) ·
@@ -761,6 +761,8 @@ details.price-group table { margin: 0 0 8px; }
         <b>Grok</b> export (grok.com → Settings → Data → Export Data; one JSON; estimated) · <b>Microsoft Copilot</b> activity CSV (account.microsoft.com/privacy → Copilot activity history → Export; estimated) ·
         <b>Perplexity</b> data export (Settings → Account → Request data export; ZIP or its JSON threads; estimated) · <b>Meta AI</b> Download-your-information threads (message_*.json with Meta AI; estimated) ·
         <b>DeepSeek chat</b> export (chat.deepseek.com → Settings → Data → Export data; drop the ZIP or keep "deepseek" in the JSON name; estimated) ·
+        <b>Mistral Vibe</b> (Le Chat) export (admin.mistral.ai → Account → Export; one JSON; estimated) · <b>Sourcegraph Cody</b> chat History → Export JSON (estimated) ·
+        <b>Character.ai</b> Export Data archive (keep "character" in the name; message files merge; estimated) ·
         API responses saved by the PowerShell commands · or a generic <b>CSV</b>
         (<code>date, platform, model, input_tokens, output_tokens[, cache_read_tokens, cache_write_tokens, cost_usd]</code>) — handy for the Gemini API, which has no usage endpoint.
         Consumer chat apps expose no usage API a local page can call — their usage comes from your data export.
@@ -1774,7 +1776,7 @@ const CONNECTORS = [
     statusEl: 'collector-status', brand: '#2f855a', mark: 'Lc', srcIds: [],
     baseUrl: 'http://127.0.0.1:11436', keyLS: 'key:collector', keyLabel: 'Collector token', keyHint: 'printed by: node docs/tools/ai-usage-collector.mjs',
     quality: 'exact',
-    qualityNote: 'Exact — the same log files the folder pickers read, found automatically. The collector is a small Node helper you run on this machine (node docs/tools/ai-usage-collector.mjs, no dependencies): it discovers the standard log folders of the coding tools and local runners installed here (Claude Code, Codex CLI, Copilot CLI, Gemini CLI, Continue, Cline, Roo, Junie, LM Studio, Ollama, Jan, OpenCode, Goose, Devin CLI, Kilo Code, Amp) and serves them to this page on 127.0.0.1 only. Every request is gated by the token it prints — without a token any web page open in your browser could read those transcripts through the port — and nothing leaves this machine. Each tool it finds shows up connected under its own card ("via collector") with exactly the rows a folder pick would land; no folder picker is needed and the tools stay current while it runs. The page the collector serves itself (http://127.0.0.1:11436/?token=…) keeps its own browser storage, separate from this file:// copy — data, keys and view settings are not shared between the two.',
+    qualityNote: 'Exact — the same log files the folder pickers read, found automatically. The collector is a small Node helper you run on this machine (node docs/tools/ai-usage-collector.mjs, no dependencies): it discovers the standard log folders of the coding tools and local runners installed here (Claude Code, Codex CLI, Copilot CLI, Gemini CLI, Continue, Cline, Roo, Junie, LM Studio, Ollama, Jan, OpenCode, Goose, Devin CLI, Kilo Code, Amp, Zed, Copilot Chat (OTel file — when COPILOT_OTEL_FILE_EXPORTER_PATH names the outfile)) and serves them to this page on 127.0.0.1 only. Every request is gated by the token it prints — without a token any web page open in your browser could read those transcripts through the port — and nothing leaves this machine. Each tool it finds shows up connected under its own card ("via collector") with exactly the rows a folder pick would land; no folder picker is needed and the tools stay current while it runs. The page the collector serves itself (http://127.0.0.1:11436/?token=…) keeps its own browser storage, separate from this file:// copy — data, keys and view settings are not shared between the two.',
     paths: ['start: node docs/tools/ai-usage-collector.mjs (Node 20+; --port, --root <tool>=<path>, --no-<tool>)', 'token: ~/.ai-usage/collector.token (created on first run; printed with a ready-made ?token= URL)'],
     links: { docs: 'README.md#automatic-mode' } },
   { id: 'local',      platform: 'Claude Code/Desktop', name: 'Claude Code / Desktop', category: 'coding', kind: 'folder',
@@ -1824,7 +1826,7 @@ const CONNECTORS = [
     statusEl: 'copilot-cli-status', brand: '#8957e5', mark: 'Cl', srcIds: ['copilot-cli'],
     patterns: [/(^|\/)events\.jsonl$/i], exclude: /\/\.junie\//, parser: 'parseCopilotCliEvents', hint: 'session-state/<session-id>/events.jsonl (pick ~/.copilot)',
     quality: 'exact',
-    qualityNote: 'Exact tokens from Copilot CLI session events (events.jsonl: assistant.usage carries server-reported input / output / cache-read / cache-write tokens and model; session.shutdown holds per-model totals, used only when a session has no per-request events). Documented by GitHub; the exact field paths were verified against third-party parsers, so the parser is tolerant. This is separate from the GitHub Copilot billing card (PAT) — both roll up under the GitHub Copilot platform. Copilot is a flat-rate plan; the $ shown for these rows is the API list-price equivalent, not what GitHub charges you (the PAT card carries GitHub\'s own billed dollars). VS Code Copilot Chat has no local token log unless you enable its OTel file export (Wave 2 parser).',
+    qualityNote: 'Exact tokens from Copilot CLI session events (events.jsonl: assistant.usage carries server-reported input / output / cache-read / cache-write tokens and model; session.shutdown holds per-model totals, used only when a session has no per-request events). Documented by GitHub; the exact field paths were verified against third-party parsers, so the parser is tolerant. This is separate from the GitHub Copilot billing card (PAT) — both roll up under the GitHub Copilot platform. Copilot is a flat-rate plan; the $ shown for these rows is the API list-price equivalent, not what GitHub charges you (the PAT card carries GitHub\'s own billed dollars). VS Code Copilot Chat has no local token log unless you enable its OTel file exporter — that file is read by the GitHub Copilot Chat (VS Code OTel file) card.',
     paths: ['%USERPROFILE%\\.copilot\\session-state\\<session-id>\\events.jsonl (Windows)', '~/.copilot/session-state/… (macOS/Linux)'],
     links: { get: 'https://github.com/github/copilot-cli', docs: 'https://docs.github.com/en/copilot/concepts/agents/copilot-cli/chronicle', usage: 'https://github.com/settings/billing' } },
   { id: 'continue', platform: 'Continue.dev', name: 'Continue.dev', category: 'coding', kind: 'folder-log',
@@ -1899,6 +1901,33 @@ const CONNECTORS = [
     qualityNote: 'Exact tokens from Amp\'s local thread files (threads/**/*.json, one JSON per thread): the usageLedger events carry per-request model, time, input / output tokens and credits, with cache-write / cache-read counts taken from the billed message; threads without a ledger fall back to each assistant message\'s usage block. Credits are Amp\'s billing unit — summed in the scan metadata, never converted to dollars (rows are priced at list prices). Only CLI / local sessions are on disk — threads run in cloud orbs are not. Every .json under the pick is sniffed (the T-<id>.json naming is unverified; session.json is skipped). Not installed on the research machine and the Windows path is unverified: source-based, not yet verified on real files.',
     paths: ['~/.local/share/amp/threads/ (macOS/Linux; AMP_DATA_DIR override)', '%USERPROFILE%\\.local\\share\\amp\\threads\\ (Windows — unverified; also try %LOCALAPPDATA%\\amp)'],
     links: { get: 'https://ampcode.com', docs: 'https://ampcode.com/docs/threads', usage: 'https://ampcode.com/settings' } },
+  // ---- Plan 9 B6 coding tools (Wave 3 B): Zed's threads.db (one zstd frame per thread — the page decodes it when this browser's DecompressionStream knows zstd, else the
+  //      collector does behind decode=zstd: design 8), GitHub Copilot Chat's OTel file exporter, the Cursor front door (export-file over the cursor-csv importer: design 9)
+  //      and Sourcegraph Cody's History export. Zed / Cody are not installed on the research machine (source-based); the OTel attribute names are confirmed by the VS Code docs. ----
+  { id: 'zed', platform: 'Zed', name: 'Zed (Agent Panel)', category: 'coding', kind: 'folder-log',
+    statusEl: 'zed-status', brand: '#084ccf', mark: 'Zd', srcIds: ['zed'], decode: 'zstd',
+    patterns: [/(^|\/)threads\.db$/i], parser: 'parseZedThreads', hint: 'threads/threads.db (pick the Zed threads folder)',
+    quality: 'exact',
+    qualityNote: 'Exact tokens from Zed\'s Agent Panel store threads.db (one SQLite row per thread; the thread JSON inside is zstd-compressed): cumulative_token_usage carries the thread\'s input, output, cache-write and cache-read tokens, model{provider, model} names the model, request_token_usage the per-request split (it does not cover every request, so the thread total is what lands). Threads carry no per-request time — a whole thread lands on its updated_at day, so day attribution is approximate; sid = thread id; the project is the thread\'s first worktree. The zstd data needs decompressing: this page does it itself when the browser\'s DecompressionStream knows zstd; otherwise reading threads.db needs the local collector on this browser (it decodes every row behind decode=zstd — Node 22.15 or newer — and a folder pick without it counts the file as unreadable, never as zero usage). Threads on a local provider (ollama, lmstudio) are $0. Zed Pro bills hosted models per token on dashboard.zed.dev (no API, no export) — rows here are priced at list; BYO provider keys show up on that provider\'s own card too. Legacy text threads under Zed/conversations/ are not read. Zed is not installed on the research machine: the schema is source-based, not yet verified on real files.',
+    paths: ['%LOCALAPPDATA%\\Zed\\threads\\threads.db (Windows)', '~/Library/Application Support/Zed/threads/threads.db (macOS)', '~/.local/share/zed/threads/threads.db (Linux)'],
+    links: { get: 'https://zed.dev', docs: 'https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/zed.md', usage: 'https://dashboard.zed.dev' } },
+  { id: 'copilot-vscode', platform: 'GitHub Copilot', name: 'GitHub Copilot Chat (VS Code OTel file)', category: 'coding', kind: 'folder-log',
+    statusEl: 'copilot-vscode-status', brand: '#8957e5', mark: 'Cv', srcIds: ['copilot-vscode'],
+    patterns: [/\.(jsonl|ndjson)$/i], parser: 'parseCopilotOtelJsonl', hint: 'the OTel outfile (github.copilot.chat.otel.outfile — JSON lines of chat spans; pick its folder, or drop the file on Imports)',
+    quality: 'exact',
+    qualityNote: 'Exact tokens from VS Code Copilot Chat\'s official OpenTelemetry file exporter — exact ONLY with the exporter on: set github.copilot.chat.otel.enabled: true, github.copilot.chat.otel.exporterType: "file" and github.copilot.chat.otel.outfile: "<path>" in VS Code settings (COPILOT_OTEL_ENABLED / COPILOT_OTEL_FILE_EXPORTER_PATH in the environment do the same), then pick the outfile\'s folder, drop the file on Imports, or let the collector find it (it reads COPILOT_OTEL_FILE_EXPORTER_PATH; else --root copilot-vscode=<folder>). Each chat span carries gen_ai.request.model / gen_ai.response.model and gen_ai.usage.input_tokens, output_tokens, cache_read.input_tokens, cache_creation.input_tokens and reasoning.output_tokens; the input count is cache-inclusive (per the agent-traces schema), so input is booked net of cache reads, reasoning stays inside output, and the invoke_agent root span\'s session totals are never counted on top (the attribute names are confirmed by the VS Code docs; the exact line layout is not documented, so the map and the OTLP array forms are both read). Without the exporter there is NO token data: the chatSessions journals and transcripts VS Code keeps hold text only (verified). The dbSpanExporter (agent-traces.db) is not read. Copilot is a flat-rate plan — the $ shown is the API list-price equivalent; GitHub\'s own premium-request dollars live on the GitHub Copilot (PAT) card and the CLI\'s logs on the Copilot CLI card (same platform).',
+    paths: ['settings.json: "github.copilot.chat.otel.enabled": true, "github.copilot.chat.otel.exporterType": "file", "github.copilot.chat.otel.outfile": "<path>" (pick that path\'s folder)', 'environment: COPILOT_OTEL_ENABLED=1, COPILOT_OTEL_FILE_EXPORTER_PATH=<path> (the collector reads this one)', 'not a token log: %APPDATA%\\Code\\User\\workspaceStorage\\<hash>\\chatSessions\\*.jsonl (text only)'],
+    links: { get: 'https://code.visualstudio.com/docs/copilot/overview', docs: 'https://code.visualstudio.com/docs/copilot/guides/monitoring-agents', usage: 'https://github.com/settings/billing' } },
+  { id: 'cursor', platform: 'Cursor', name: 'Cursor', category: 'coding', kind: 'export-file',
+    statusEl: 'cursor-status', brand: '#111111', mark: 'Cu', srcIds: ['cursor-csv'], quality: 'exact',
+    qualityNote: 'Exact tokens and cost from Cursor\'s own usage export: cursor.com/dashboard → Usage → Export CSV (Date, Kind, Model, Max Mode, Input (w/ Cache Write), Input (w/o Cache Write), Cache Read, Output Tokens, Total Tokens, Cost) — drop it on Imports; each export is the date window you picked, so a re-import replaces the days it covers (drop each range as you export it). Why no folder pick: Cursor\'s local database (%APPDATA%\\Cursor\\User\\globalStorage\\state.vscdb — composerData / bubbleId blobs, multi-GB and locked while Cursor runs) carries no real token counts (tokenCount stays {0,0}, usageData is empty; third-party parsers only estimate from text), and cursor-agent\'s files hold no token fields either. Teams / Enterprise admins have the Admin API (api.cursor.com/teams/filtered-usage-events, Basic auth with the key) — it answers CORS only for https://cursor.com, so it is collector-only (a local proxy, not built here) and never callable from this page. The dashboard\'s own endpoints are cookie-bound and this page never reads your login.',
+    hint: 'the usage-events CSV from cursor.com/dashboard → Usage → Export CSV', paths: ['cursor.com/dashboard → Usage → Export CSV (usage-events CSV; exact tokens, Cost when present)', 'not read: %APPDATA%\\Cursor\\User\\globalStorage\\state.vscdb (no real token counts)', 'Teams: POST https://api.cursor.com/teams/filtered-usage-events (admin key; CORS-blocked → collector only)'],
+    links: { get: 'https://cursor.com', docs: 'https://cursor.com/docs/account/teams/admin-api', usage: 'https://cursor.com/dashboard?tab=usage' } },
+  { id: 'cody', platform: 'Sourcegraph Cody', name: 'Sourcegraph Cody (Enterprise)', category: 'coding', kind: 'export-file',
+    statusEl: 'cody-status', brand: '#ff5543', mark: 'Cy', srcIds: ['cody-export'], quality: 'estimated',
+    qualityNote: 'Estimated: Cody\'s chat panel → History → Export writes a JSON of your chats (an object keyed by time, each with interactions[] of humanMessage / assistantMessage / fullContext — the 2023 release-notes shape, not documented since and possibly drifted, so the importer sniffs it) with no token counts and no model per turn (a chatModel field is used when present, else "cody"), so tokens are estimated from text: each answered interaction is output, its prompt input; undated interactions are skipped and counted; a re-import replaces (the export is the whole history). Cody Free and Pro ended 2025-07-23 — only Cody Enterprise remains (individuals were pointed to Amp, which has its own card); the IDE keeps the same transcripts in VS Code\'s state.vscdb under a key this research could not verify, and site admins see only aggregate Cody analytics on their Sourcegraph instance (no per-user tokens, CORS-blocked). Not installed on the research machine: source-based.',
+    hint: 'the JSON from Cody\'s chat History → Export', paths: ['VS Code / JetBrains: Cody chat panel → History → Export (JSON)', 'admins: https://<your-sourcegraph-instance>/site-admin/analytics/cody (aggregates only)'],
+    links: { get: 'https://sourcegraph.com/cody', docs: 'https://sourcegraph.com/blog/cody-vscode-0-10-release', usage: 'https://sourcegraph.com/docs/cody/capabilities/chat' } },
   { id: 'lmstudio', platform: 'LM Studio', name: 'LM Studio', category: 'local', kind: 'folder-log',
     statusEl: 'lmstudio-status', brand: '#6d5dfc', mark: 'LM', srcIds: ['lmstudio'],
     patterns: [/\.conversation\.json$/i], parser: 'parseLmStudioConversations', hint: '*.conversation.json chat files (pick ~/.lmstudio/conversations)',
@@ -2271,6 +2300,17 @@ const CONNECTORS = [
     qualityNote: 'Estimated: chat.deepseek.com (web only, not the mobile apps) → Settings → Data → Export data gives a JSON archive of conversations (messages with role, text and timestamps; the model is reportedly recorded, otherwise deepseek-chat is assumed) — no token counts, so tokens are estimated from text and priced at DeepSeek list; a re-import replaces. The importer tells this shape from other chat exports by name: drop the export ZIP as-is, or keep "deepseek" in the JSON file name. Deleted chats and files are excluded; there is no usage API or local store for the chat product and this page never reads your login. API-key usage (the monthly usage ZIP + balance) lives on the DeepSeek API card.',
     hint: 'the export ZIP, or its JSON with "deepseek" in the file name', paths: ['chat.deepseek.com → Settings → Data → Export data (JSON archive)'],
     links: { get: 'https://chat.deepseek.com', docs: 'https://api-docs.deepseek.com/quick_start/token_usage/' } },
+  // ---- Plan 9 B6 chat exports: Mistral Vibe (Le Chat) and Character.ai — estimated from text; both export layouts are known only from third-party guides (sniffed) ----
+  { id: 'mistral-vibe', platform: 'Mistral Vibe', name: 'Mistral Vibe (Le Chat)', category: 'chat', kind: 'export-file',
+    statusEl: 'mistral-vibe-status', brand: '#f7931e', mark: 'Mv', srcIds: ['mistral-vibe-export'], quality: 'estimated',
+    qualityNote: 'Estimated: Mistral\'s chat product (Le Chat, renamed Vibe in 2026) has no usage API for a personal account and no local files; admin.mistral.ai/account/export (Export) downloads your data as JSON. Its schema is not documented — a third-party guide shows account{}, conversations[{id, created_at, title, model, messages[{role, content}]}], memories, projects — so the importer sniffs that shape (the file name, the account block or a Mistral-family model marks it) and estimates tokens from text: each assistant reply is output, the preceding prompt input (a lower bound), priced as the conversation\'s model at list. The guide\'s sample has no per-message times — replies land on the conversation\'s created_at (a message created_at is honoured when present; no time at all → skipped and counted); a re-import replaces. La Plateforme API keys have their own card (Mistral, under API vendors); the Admin API\'s Vibe analytics are Enterprise-only and CORS-blocked.',
+    hint: 'the JSON from admin.mistral.ai/account/export', paths: ['admin.mistral.ai → Account → Export (JSON: account, conversations[].model + messages[].role/content)'],
+    links: { get: 'https://chat.mistral.ai', docs: 'https://help.mistral.ai/en/articles/347623-how-do-i-export-my-data-from-le-chat' } },
+  { id: 'characterai', platform: 'Character.ai', name: 'Character.ai', category: 'chat', kind: 'export-file',
+    statusEl: 'characterai-status', brand: '#138eed', mark: 'Cr', srcIds: ['characterai-export'], quality: 'estimated',
+    qualityNote: 'Estimated: Character.ai has no public API, no usage or billing endpoint (c.ai+ has no metered quota) and no local files — web and mobile only. Profile Settings → Account → Manage Account & Data → Export Data requests an account-wide archive: processing takes 3-4 weeks and the emailed link is valid 7 days; its layout is not documented (third-party guides describe a ZIP of user, character and message files with timestamps), so the importer sniffs message lists with a human flag, text and a time — keep "character" in the file name (drop the ZIP as-is or its message files). A character\'s reply is output, your preceding message input, tokens estimated from text; the export names no model (character.ai — $0 unless you add a price row); undated replies are skipped and counted; each message file merges and the same file re-imported replaces itself. The internal character.ai/api is session-bound and undocumented — this page never reads your login.',
+    hint: 'the exported archive, or its message JSON files (with "character" in the name)', paths: ['character.ai → Profile Settings → Account → Manage Account & Data → Export Data (emailed ZIP, 3-4 weeks; link valid 7 days)', 'mobile: Profile → Settings → Legal & Privacy → Export Data'],
+    links: { get: 'https://character.ai', docs: 'https://support.character.ai/hc/en-us/articles/30299431702555-How-do-I-export-all-my-data-How-can-I-export-my-chats' } },
   // ---- Plan 9 B2: Poe — the one consumer chat app with a real usage API (per-query bot, points, cost_usd, tokens inside the breakdown strings) ----
   { id: 'poe', platform: 'Poe', name: 'Poe (poe.com)', category: 'chat', kind: 'api-key',
     statusEl: 'poe-status', brand: '#5d5cde', mark: 'Po', srcIds: ['poe'], keyLS: 'key:poe', fetch: 'fetchPoe',
@@ -2317,7 +2357,7 @@ const CONNECTORS = [
     paths: ['admins: M365 admin center → Reports → Usage → Microsoft Copilot → Export (prompt counts, CSV)', 'admins: GET https://graph.microsoft.com/v1.0/copilot/reports/getMicrosoft365CopilotUsageUserDetail(period=\'D30\') (Reports.Read.All; CORS-blocked)'],
     links: { get: 'https://m365.cloud.microsoft', usage: 'https://admin.microsoft.com', docs: 'https://learn.microsoft.com/en-us/microsoft-365/admin/activity-reports/microsoft-365-copilot-usage' } },
   { id: 'imports',    platform: null,                  name: 'Imports',               category: 'chat', kind: 'files',
-    statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv', 'grok-export', 'deepseek-chat-export', 'meta-ai-export', 'perplexity-export', 'copilot-activity-csv'] },
+    statusEl: 'import-status',   brand: '#898781', mark: 'Im', srcIds: ['chatgpt', 'claudeai', 'csv', 'gemini-takeout', 'cursor-csv', 'grok-export', 'deepseek-chat-export', 'meta-ai-export', 'perplexity-export', 'copilot-activity-csv', 'mistral-vibe-export', 'cody-export', 'characterai-export'] },
 ];
 const connectorById = (id) => CONNECTORS.find(c => c.id === id);
 /* Platforms that run on the user's own hardware (category:'local') — Pricing.cost() zero-prices rows
@@ -2344,7 +2384,7 @@ const QUALITY_LABEL = { exact: 'exact', estimated: 'estimated', validate: 'valid
 const fieldIsSecret = (f) => !!(f && (f.secret || f.type === 'password'));
 
 // deduped: several connectors may share one platform (GitHub Copilot billing + Copilot CLI logs)
-// deduped across the registry AND the import-only names: ChatGPT / Claude.ai now have export-file entries, Gemini app / Cursor do not; Other stays last
+// deduped across the registry AND the import-only names: ChatGPT / Claude.ai / Cursor (Plan 9 B6) have export-file entries, Gemini app does not; Other stays last
 const PLATFORM_ORDER = [...new Set(CONNECTORS.map(c => c.platform).filter(Boolean).concat(['ChatGPT', 'Claude.ai', 'Gemini app', 'Cursor', 'Other']))];
 
 const Store = {
@@ -2762,16 +2802,18 @@ function matchConnectorFiles(c, entries) {
  *  same parser, same cache keys (path + size + lastModified → unchanged files stay cache hits). Nothing is fetched until a reader asks:
  *  stream() is a ReadableStream (highWaterMark 0) whose first pull opens the request and then pumps the response body chunk by chunk —
  *  readLines never holds a whole log in memory. An HTTP error rejects with its status ("HTTP 404 Not Found reading <path> …"), which
- *  parseFolderCached counts as one unreadable file and moves on. The token travels in the Authorization header only — never in the URL. */
+ *  parseFolderCached counts as one unreadable file and moves on. The token travels in the Authorization header only — never in the URL.
+ *  decode (Plan 9 B6): 'zstd' adds &decode=zstd — the collector then decodes Zed's zstd data (a frame → its bytes; threads.db → one JSON line per row) for a
+ *  browser whose DecompressionStream lacks zstd (remoteDecodeFor decides); the file's cache signature is unchanged, the parser accepts both forms. */
 class RemoteFile {
-  constructor(base, token, tool, entry) {
+  constructor(base, token, tool, entry, decode = null) {
     const rel = String(entry.path);
     this.name = rel.split('/').pop();
     this.size = +entry.size || 0;
     this.lastModified = +entry.mtime || 0;
     this.webkitRelativePath = rel;
     this.tool = tool;
-    this._url = String(base).replace(/\/+$/, '') + '/api/file?tool=' + encodeURIComponent(tool) + '&path=' + encodeURIComponent(rel);
+    this._url = String(base).replace(/\/+$/, '') + '/api/file?tool=' + encodeURIComponent(tool) + '&path=' + encodeURIComponent(rel) + (decode ? '&decode=' + encodeURIComponent(decode) : '');   // decode (B6): 'zstd' asks the collector to decode Zed's zstd data for a browser that cannot
     this._headers = { Authorization: 'Bearer ' + token };
   }
   async _open() {
@@ -2801,6 +2843,11 @@ class RemoteFile {
   }
   async text() { return (await this._open()).text(); }
   async arrayBuffer() { return (await this._open()).arrayBuffer(); }
+}
+/** Plan 9 B6 (design 8): the decode a collector-fed file of this connector needs — 'zstd' for a connector whose data is zstd-compressed (Zed's threads.db, registry
+ *  `decode: 'zstd'`) when THIS browser cannot decompress zstd itself, else null (the page decodes in place; the collector streams the bytes as they are). */
+function remoteDecodeFor(c) {
+  return c && c.decode === 'zstd' && !hasZstdDecompression() ? 'zstd' : null;
 }
 
 /** Generic incremental scan: per-file aggregates cached by (connectorId, path, size, lastModified).
@@ -2833,7 +2880,7 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
   const sibSig = new Map();   // dir → 'size\u0001lastModified' per sibling, path-sorted so the string is stable across scans
   for (const s of [...siblingFiles].sort((a, b) => a.path < b.path ? -1 : 1)) { const dir = s.path.slice(0, s.path.lastIndexOf('/') + 1); sibSig.set(dir, (sibSig.get(dir) || '') + '\u0001' + s.file.size + '\u0001' + s.file.lastModified); }
   const rows = [], projects = [];
-  let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0, lines = 0, badLines = 0, badFiles = 0, cowork = null;
+  let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0, lines = 0, badLines = 0, badFiles = 0, cowork = null, badFileReason = null;
   const runningSeen = new Set();
   const seen = new Set();   // signatures present in THIS scan — stale entries for absent files get pruned below
   const prefix = connector.id + '\u0001';
@@ -2850,7 +2897,12 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
       // appending to its live session log mid-scan) or one throwing parser must NEVER abort the batch:
       // count it, don't cache it, move on. Surfaced as meta.badFiles → "N file(s) unreadable" in the status line.
       try { res = await parser([f], null, runningSeen, connector, siblingFiles); }
-      catch (e) { badFiles++; done++; if (onProgress) onProgress(done, main.length); continue; }
+      catch (e) {
+        badFiles++; done++;
+        if (!badFileReason) badFileReason = String((e && e.message) || e).slice(0, 200);   // the first failure's reason travels to the status line (B6: "needs the local collector on this browser")
+        if (onProgress) onProgress(done, main.length);
+        continue;
+      }
       entry = { rows: res.rows, projects: res.projects || [], msgs: res.meta.msgs || 0, ids: res.meta.addedIds || [], lines: res.meta.lines || 0, badLines: res.meta.badLines || 0 };
       if (res.meta.cowork) entry.cowork = res.meta.cowork;   // Plan 9 B1: a Cowork transcript's session ids / an audit's reported figures travel with the file's entry
       // ids this file skipped as duplicates of an EARLIER file (an in-file repeat is the file's own id, not another file's)
@@ -2881,7 +2933,7 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
   // badFiles also folds in the walker's getFile() failures (collectFilesFromHandle tags the list with .unreadable);
   // skipped = files handed in that matched neither patterns nor siblings (not this connector's — never an error)
   return { rows, projects: [...pm.values()], meta: { files: main.length, msgs, parsedFiles, cachedFiles, lines, badLines,
-    badFiles: badFiles + (files.unreadable || 0), skipped: Math.max(0, files.length - main.length - siblingFiles.length), ...(cowork ? { cowork } : {}) } };
+    badFiles: badFiles + (files.unreadable || 0), skipped: Math.max(0, files.length - main.length - siblingFiles.length), ...(cowork ? { cowork } : {}), ...(badFileReason ? { badFileReason } : {}) } };
 }
 /** Plan 9 B1: folds one file's meta.cowork (parseClaudeLogs) into the scan's — session ids union; a session's reported figure comes from the
  *  LAST file (path order) that carried it (two audit files for one session would be a copy, never two halves); the counters add up. */
@@ -3499,6 +3551,162 @@ function bookAmpMessages(messages, ctx) {
     bookAmpRow(ctx, ctx.tid + ':' + (m.messageId != null ? String(m.messageId) : 'message-' + i), { t, model: String(m.model || 'unknown'), ts: ampWhen(m.timestamp, ctx.fallbackTs) });
   }
 }
+/* =================================================================
+ * Plan 9 B6 — folder-log parsers B: Zed (threads.db — SQLite rows whose data cell is a zstd frame of the thread JSON) and GitHub Copilot Chat's OTel file
+ * exporter (JSON lines of spans carrying gen_ai.usage.*). Same contract as the parsers above. Zed is not installed on the research machine (source-based:
+ * CodeBurn's zed.md + Zed commit #31741); the OTel attribute names are confirmed by the VS Code docs, the line layout is not documented (both attribute forms
+ * are accepted). Appended here like B5's parsers until the parts are renumbered (one file per vendor family — Plan 10).
+ * ================================================================= */
+/** Zed Agent Panel — threads/threads.db: table threads(id, summary, updated_at, data_type 'zstd' | 'json', data). The thread JSON (SerializedThread 0.1–0.3) carries
+ *  model{provider, model}, messages[], request_token_usage{<user message id>: {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens}},
+ *  cumulative_token_usage (same shape, the whole thread) and initial_project_snapshot.worktree_snapshots[].worktree_path. One row per thread: cumulative_token_usage
+ *  when present (request_token_usage does not cover every request), else the request map summed; msgs = assistant messages (else requests, else 1); day = the row's
+ *  updated_at (no per-request time exists — approximate); sid = thread id; project = the first worktree; a local provider (ollama, lmstudio) → local:1. zstd rows are
+ *  decoded in the page when DecompressionStream knows zstd; otherwise the file must come through the collector's decode=zstd (one JSON line per row — accepted here
+ *  too), and a raw store read on a browser without zstd throws "needs the local collector on this browser" (one unreadable file, never zero rows). A row whose blob
+ *  does not decode / parse is counted (badLines); a thread with no tokens is skipped; dedupe by thread id (the same store under two paths). */
+async function parseZedThreads(files, onProgress, seen = new Set(), c) {
+  const platform = (c && c.platform) || 'Zed';
+  const ctx = { agg: makeAgg(), proj: makeProjAgg(platform), seen, platform, k: { msgs: 0, lines: 0, badLines: 0, addedIds: [], dupIds: [] } };
+  const list = files.filter(f => /(^|\/)threads\.db$/i.test(f.path));
+  for (let fi = 0; fi < list.length; fi++) {
+    const { file } = list[fi];
+    ctx.fallbackTs = file.lastModified;
+    for (const row of await zedThreadRows(new Uint8Array(await file.arrayBuffer()))) bookZedRow(row, ctx);
+    if (onProgress) onProgress(fi + 1, list.length);
+  }
+  const k = ctx.k;
+  return { rows: ctx.agg.rows(), projects: ctx.proj.rows(), meta: { files: list.length, msgs: k.msgs, lines: k.lines, badLines: k.badLines, addedIds: k.addedIds, dupIds: k.dupIds } };
+}
+const isSqliteBytes = (u8) => u8.length >= 16 && new TextDecoder('latin1').decode(u8.subarray(0, 15)) === 'SQLite format 3';
+/** The thread rows of one threads.db read — the raw SQLite store, or the collector's decoded JSON lines ({ id, summary, updated_at, data_type: 'json', data } |
+ *  { id, …, error }) → [{ id, updated_at, thread: object | null }] (null = undecodable, counted by the caller). */
+async function zedThreadRows(bytes) {
+  if (isSqliteBytes(bytes)) {
+    const t = readSqliteTable(bytes, 'threads'), col = sqliteColumns(t);
+    return Promise.all(t.rows.map(async (r) => ({ id: col.get(r, 'id'), updated_at: col.get(r, 'updated_at'), thread: await decodeZedThread(col.get(r, 'data_type'), col.get(r, 'data')) })));
+  }
+  const rows = [];
+  for (const line of new TextDecoder('utf-8').decode(bytes).split('\n')) {
+    if (!line.trim()) continue;
+    const o = parseJsonObject(line);
+    rows.push({ id: o && o.id, updated_at: o && o.updated_at, thread: o && o.error == null && typeof o.data === 'string' ? parseJsonObject(o.data) : null });
+  }
+  return rows;
+}
+/** One data cell → the thread object, or null when it cannot be decoded (counted as one bad row). A zstd cell on a browser without zstd throws instead — the
+ *  whole file is then one unreadable file whose reason names the collector. */
+async function decodeZedThread(dataType, cell) {
+  if (String(dataType || '').toLowerCase() !== 'zstd') return parseJsonObject(cell instanceof Uint8Array ? new TextDecoder('utf-8').decode(cell) : cell);
+  if (!(cell instanceof Uint8Array)) return null;
+  if (!hasZstdDecompression()) throw new Error('needs the local collector on this browser — Zed thread data is zstd-compressed and this browser cannot decompress zstd (the collector decodes it behind decode=zstd)');
+  let plain;
+  try { plain = await zstdDecompressBounded(cell); } catch { return null; }   // a corrupt or oversized frame is one bad row (counted), never a failed file
+  return parseJsonObject(new TextDecoder('utf-8').decode(plain));
+}
+function bookZedRow(row, ctx) {
+  ctx.k.lines++;
+  const th = row.thread;
+  if (!th) { ctx.k.badLines++; return; }
+  const t = zedThreadTokens(th);
+  if (!t) return;   // an empty thread (opened, nothing asked) — not malformed
+  const id = String(row.id ?? th.id ?? '');
+  if (ctx.seen.has(id)) { ctx.k.dupIds.push(id); return; }
+  ctx.seen.add(id); ctx.k.addedIds.push(id);
+  const model = th.model && typeof th.model === 'object' ? th.model : {};
+  if (isLocalProvider(model.provider)) t.local = 1;
+  const name = String(model.model || 'unknown'), ts = sqliteTimestamp(row.updated_at ?? th.updated_at, ctx.fallbackTs), worktree = zedWorktree(th);
+  ctx.agg.add(dayKey(ts), ctx.platform, name, t, id, ts.getHours());
+  if (worktree) ctx.proj.add(prettyProject(worktree), name, t);
+  ctx.k.msgs += t.msgs;
+}
+const zedUsage = (u) => u && typeof u === 'object' ? { in: finTok(+u.input_tokens || 0), out: finTok(+u.output_tokens || 0), cw: finTok(+u.cache_creation_input_tokens || 0), cr: finTok(+u.cache_read_input_tokens || 0) } : null;
+/** The thread's tokens: cumulative_token_usage, else the request_token_usage map summed; msgs = assistant messages, else requests, else 1. null when nothing to book. */
+function zedThreadTokens(th) {
+  const requests = th.request_token_usage && typeof th.request_token_usage === 'object' ? Object.values(th.request_token_usage).map(zedUsage).filter(Boolean) : [];
+  const t = zedUsage(th.cumulative_token_usage) || requests.reduce((a, u) => ({ in: a.in + u.in, out: a.out + u.out, cw: a.cw + u.cw, cr: a.cr + u.cr }), { in: 0, out: 0, cw: 0, cr: 0 });
+  if (noTokens(t)) return null;
+  const replies = Array.isArray(th.messages) ? th.messages.filter(m => m && String(m.role).toLowerCase() === 'assistant').length : 0;
+  t.msgs = replies || requests.length || 1;
+  return t;
+}
+/** The thread's first worktree path (initial_project_snapshot.worktree_snapshots[].worktree_path | abs_path | path), else a top-level project / worktree string, else null. */
+function zedWorktree(th) {
+  const snap = th.initial_project_snapshot, list = snap && Array.isArray(snap.worktree_snapshots) ? snap.worktree_snapshots : [];
+  const w = list.find(x => x && (x.worktree_path || x.abs_path || x.path));
+  if (w) return String(w.worktree_path || w.abs_path || w.path);
+  return typeof th.project === 'string' ? th.project : typeof th.worktree === 'string' ? th.worktree : null;
+}
+
+/** GitHub Copilot Chat (VS Code) — the OTel file exporter (github.copilot.chat.otel.enabled + exporterType "file" + outfile): JSON lines of spans / events / metrics.
+ *  Each `chat` span (one per LLM call) carries gen_ai.request.model / gen_ai.response.model and gen_ai.usage.input_tokens, output_tokens, cache_read.input_tokens,
+ *  cache_creation.input_tokens, reasoning.output_tokens. Attributes come as a map or as the OTLP {key, value:{intValue|stringValue}} array; a line may also be an
+ *  OTLP batch (resourceSpans[].scopeSpans[].spans[]). Booked per span: in = input_tokens − cache_read (the exporter's input count is cache-inclusive per the
+ *  agent-traces schema — source-based), cw = cache_creation, out = output_tokens (reasoning ⊂ output), model = response model, else request model, else 'copilot';
+ *  day / hour from the start time (unix nanos, hrtime [s, ns], ISO or epoch), else the file date; sid = the session id attribute when present. Never a row:
+ *  `invoke_agent` root spans (session totals — meta.sessionSpans), gen_ai.client.* / copilot_chat.* events (meta.skippedRecords — the span already carries the usage),
+ *  metric lines (no usage attributes). Dedupe by span id (the exporter appends; a rewritten file repeats spans); platform GitHub Copilot (shared with the CLI card). */
+const OTEL_USAGE = { in: 'gen_ai.usage.input_tokens', out: 'gen_ai.usage.output_tokens', cr: 'gen_ai.usage.cache_read.input_tokens', cw: 'gen_ai.usage.cache_creation.input_tokens' };
+const OTEL_EVENT_NAME = /^(gen_ai\.client\.|copilot_chat\.)/;   // event / metric records that carry the span's own usage again
+async function parseCopilotOtelJsonl(files, onProgress, seen = new Set(), c) {
+  const platform = (c && c.platform) || 'GitHub Copilot';
+  const ctx = { agg: makeAgg(), seen, platform, k: { msgs: 0, lines: 0, badLines: 0, sessionSpans: 0, skippedRecords: 0, addedIds: [], dupIds: [] } };
+  const list = files.filter(f => /\.(jsonl|ndjson)$/i.test(f.path));
+  for (let fi = 0; fi < list.length; fi++) {
+    const { file } = list[fi];
+    ctx.fallbackTs = file.lastModified;
+    await eachJsonl(file, (o) => { for (const span of otelSpansOf(o)) bookOtelSpan(span, ctx); }, ctx.k);
+    if (onProgress) onProgress(fi + 1, list.length);
+  }
+  const k = ctx.k;
+  return { rows: ctx.agg.rows(), projects: [], meta: { files: list.length, msgs: k.msgs, lines: k.lines, badLines: k.badLines, addedIds: k.addedIds, dupIds: k.dupIds, sessionSpans: k.sessionSpans, skippedRecords: k.skippedRecords } };
+}
+/** The span-like records of one exporter line: the line itself, or every span of an OTLP batch (resourceSpans[].scopeSpans[].spans[]). */
+function otelSpansOf(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return [];
+  if (!Array.isArray(o.resourceSpans)) return [o];
+  const out = [];
+  for (const rs of o.resourceSpans) for (const ss of (rs && Array.isArray(rs.scopeSpans) ? rs.scopeSpans : [])) for (const s of (ss && Array.isArray(ss.spans) ? ss.spans : [])) if (s && typeof s === 'object') out.push(s);
+  return out;
+}
+/** A span's attributes as a plain object — the SDK map form, or the OTLP [{key, value:{intValue|doubleValue|stringValue|boolValue}}] array. */
+function otelAttrs(span) {
+  const a = span.attributes;
+  if (!Array.isArray(a)) return a && typeof a === 'object' ? a : {};
+  const out = {};
+  for (const kv of a) {
+    if (!kv || typeof kv.key !== 'string') continue;
+    const v = kv.value;
+    out[kv.key] = v && typeof v === 'object' ? (v.intValue ?? v.doubleValue ?? v.stringValue ?? v.boolValue) : v;
+  }
+  return out;
+}
+const otelHasUsage = (attrs) => attrs[OTEL_USAGE.in] != null || attrs[OTEL_USAGE.out] != null;
+const otelSpanId = (span) => span.spanId ?? span.span_id ?? (span.context && typeof span.context === 'object' ? span.context.spanId : undefined);
+function bookOtelSpan(span, ctx) {
+  const attrs = otelAttrs(span);
+  if (!otelHasUsage(attrs)) return;   // a metric line, a span without usage
+  const name = String(span.name || '');
+  if (/^invoke_agent/.test(name)) { ctx.k.sessionSpans++; return; }   // the root span repeats the session's totals
+  if (OTEL_EVENT_NAME.test(name)) { ctx.k.skippedRecords++; return; }
+  const id = otelSpanId(span);
+  if (id != null) { const key = String(id); if (ctx.seen.has(key)) { ctx.k.dupIds.push(key); return; } ctx.seen.add(key); ctx.k.addedIds.push(key); }
+  const num = (k) => finTok(+attrs[k] || 0);
+  const cr = num(OTEL_USAGE.cr), t = { in: Math.max(0, num(OTEL_USAGE.in) - cr), out: num(OTEL_USAGE.out), cr, cw: num(OTEL_USAGE.cw), msgs: 1 };
+  const model = String(attrs['gen_ai.response.model'] || attrs['gen_ai.request.model'] || 'copilot'), ts = otelStart(span, ctx.fallbackTs);
+  const sid = attrs['copilot_chat.session.id'] || attrs['gen_ai.conversation.id'];
+  ctx.agg.add(dayKey(ts), ctx.platform, model, t, sid != null ? String(sid) : undefined, ts.getHours());
+  ctx.k.msgs++;
+}
+/** A span's start → Date: startTimeUnixNano / timeUnixNano (digit string or number), startTime / timestamp / time as hrtime [s, ns], ISO text or epoch ms; else the file date. */
+function otelStart(span, fallback) {
+  const v = span.startTimeUnixNano ?? span.timeUnixNano ?? span.startTime ?? span.timestamp ?? span.time;
+  if (Array.isArray(v) && Number.isFinite(+v[0])) return new Date(+v[0] * 1000 + Math.floor((+v[1] || 0) / 1e6));
+  if ((typeof v === 'string' && /^\d{16,20}$/.test(v)) || (typeof v === 'number' && v > 1e15)) return new Date(Number(BigInt(String(v).split('.')[0]) / 1000000n));
+  const d = v != null ? new Date(v) : null;
+  return d && !isNaN(d) ? d : new Date(fallback);
+}
+
 /** LM Studio — *.conversation.json (whole-file JSON). For each message take versions[currentlySelected]; assistant
  *  versions are 'multiStep' (steps[] contentBlocks, each with genInfo.stats) or 'singleStep' (genInfo on the version).
  *  in = stats.promptTokensCount, out = stats.predictedTokensCount, model = genInfo.identifier (the short load id, e.g. 'llama-4-8b';
@@ -4032,12 +4240,100 @@ function parsePerplexityExport(input, fileName) {
   return { rows: agg.rows(), meta: { msgs, skipped, threads: list.length, sid } };
 }
 
+/* ---------- Plan 9 B6 exports (Mistral Vibe, Sourcegraph Cody, Character.ai): estimated from text like the Wave 2 exports — input = the preceding prompt only
+ * (a lower bound), every row est:1, undated replies skipped + counted (A0 #7). Every layout is third-party / sniffed (research 2026-10-15) — field access is tolerant,
+ * and each sniff below is what keeps a look-alike export (DeepSeek chat, Grok) out of these parsers. ---------- */
+/** Books the assistant turns of one ordered message list. say(m) → { role: 'user' | 'assistant' | other, chars, ts: { d, hour } | null } or null (not a message);
+ *  book(turn, promptChars) lands a row; counters.msgs / counters.skipped count landed and undated replies. */
+function bookEstimatedTurns(list, say, book, counters) {
+  let lastUser = 0;
+  for (const m of list) {
+    const turn = say(m);
+    if (!turn) continue;
+    if (turn.role !== 'assistant') { if (turn.role === 'user') lastUser = turn.chars; continue; }
+    if (!turn.ts) { counters.skipped++; continue; }
+    book(turn, lastUser); counters.msgs++;
+  }
+}
+const MISTRAL_MODEL_RE = /mistral|codestral|magistral|devstral|ministral|pixtral|voxtral/i;
+/** admin.mistral.ai/account/export: {account, conversations:[{…, model, messages:[{role, content}]}], …} — recognised by the file name (mistral / vibe / le chat), the
+ *  account block or a Mistral-family conversation model; a bare {conversations:[{messages}]} is not claimed (DeepSeek chat has that shape). */
+function isMistralVibeExport(obj, convs, fileName) {
+  const withRoles = convs.some(c => c && Array.isArray(c.messages) && c.messages.some(m => m && typeof m.role === 'string'));
+  if (!withRoles) return false;
+  return /mistral|vibe|le[-_ ]?chat/i.test(String(fileName || '')) || !!(obj.account && typeof obj.account === 'object') || convs.some(c => c && MISTRAL_MODEL_RE.test(String(c.model || '')));
+}
+/** Mistral Vibe (Le Chat) export JSON (schema from a third-party guide): conversations[{id, created_at, title, model, messages:[{role, content, created_at?}]}]. Model per
+ *  conversation (else 'mistral'); a message's created_at, else the conversation's; none → skipped + counted. Platform 'Mistral Vibe'. */
+function parseMistralVibeExport(obj) {
+  const agg = makeAgg(); const k = { msgs: 0, skipped: 0 };
+  const convs = Array.isArray(obj && obj.conversations) ? obj.conversations.filter(c => c && typeof c === 'object') : [];
+  for (const c of convs) {
+    const convTs = exportTimestamp(c.created_at != null ? c.created_at : c.create_time), model = String(c.model || 'mistral');
+    const say = (m) => m && typeof m === 'object' ? { role: String(m.role || '').toLowerCase(), chars: exportText(m.content != null ? m.content : m.text).length, ts: exportTimestamp(m.created_at != null ? m.created_at : m.timestamp) || convTs } : null;
+    bookEstimatedTurns(Array.isArray(c.messages) ? c.messages : [], say, (turn, prompt) => agg.add(turn.ts.d, 'Mistral Vibe', model, { in: estTok(prompt), out: estTok(turn.chars), msgs: 1, est: 1 }, undefined, turn.ts.hour), k);
+  }
+  return { rows: agg.rows(), meta: { msgs: k.msgs, convs: convs.length, skipped: k.skipped } };
+}
+/** Cody's History > Export: an object whose values are chats with interactions[] of {humanMessage, assistantMessage}. */
+function isCodyExport(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+  const chats = Object.values(obj).filter(v => v && typeof v === 'object' && Array.isArray(v.interactions));
+  return chats.length > 0 && chats.some(ch => ch.interactions.some(it => it && typeof it === 'object' && ('humanMessage' in it || 'assistantMessage' in it)));
+}
+/** Sourcegraph Cody chat History > Export JSON (0.10 release-notes shape; may have drifted): {"<ISO time>": {id, chatModel?, lastInteractionTimestamp?,
+ *  interactions:[{humanMessage:{text|displayText}, assistantMessage:{…}|null, timestamp?}]}}. One row per answered interaction; time = the interaction's, else its
+ *  prompt's, else the chat's key / lastInteractionTimestamp (none → skipped + counted); model = chatModel, else 'cody'. Platform 'Sourcegraph Cody'. */
+function parseCodyExport(obj) {
+  const agg = makeAgg(); const k = { msgs: 0, skipped: 0 };
+  const chats = Object.entries(obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}).filter(([, ch]) => ch && typeof ch === 'object' && Array.isArray(ch.interactions));
+  const text = (m) => m && typeof m === 'object' ? exportText(m.text != null ? m.text : m.displayText) : '';
+  for (const [key, ch] of chats) {
+    const chatTs = exportTimestamp(key) || exportTimestamp(ch.lastInteractionTimestamp), model = String(ch.chatModel || ch.model || 'cody');
+    for (const it of ch.interactions) {
+      if (!it || typeof it !== 'object' || !it.assistantMessage) continue;   // an unanswered turn
+      const ts = exportTimestamp(it.timestamp) || exportTimestamp(it.humanMessage && it.humanMessage.timestamp) || chatTs;
+      if (!ts) { k.skipped++; continue; }
+      agg.add(ts.d, 'Sourcegraph Cody', model, { in: estTok(text(it.humanMessage).length), out: estTok(text(it.assistantMessage).length), msgs: 1, est: 1 }, undefined, ts.hour);
+      k.msgs++;
+    }
+  }
+  return { rows: agg.rows(), meta: { msgs: k.msgs, chats: chats.length, skipped: k.skipped } };
+}
+/** A Character.ai message's human flag in the shapes third-party guides show (is_human / author.is_human / src__is_human / author__is_human / role) — undefined when none. */
+const caiIsHuman = (m) => m.is_human ?? (m.author && typeof m.author === 'object' ? m.author.is_human : undefined) ?? m.src__is_human ?? m.author__is_human ?? (typeof m.role === 'string' ? /^(user|human)$/i.test(m.role) : undefined);
+/** The message lists an archive file may hold: a top-level array, {messages}, {chats:[{messages}]} or {history:[{msgs}]}. */
+function characterAiMessageLists(obj) {
+  if (Array.isArray(obj)) return [obj];
+  if (!obj || typeof obj !== 'object') return [];
+  if (Array.isArray(obj.messages)) return [obj.messages];
+  const chats = Array.isArray(obj.chats) ? obj.chats : Array.isArray(obj.history) ? obj.history : [];
+  return chats.filter(c => c && typeof c === 'object').map(c => Array.isArray(c.messages) ? c.messages : Array.isArray(c.msgs) ? c.msgs : []);
+}
+/** Character.ai: "character" in the file name (the archive's own name counts) AND a message list whose messages carry a human flag and text. */
+function isCharacterAiExport(obj, fileName) {
+  if (!/character/i.test(String(fileName || ''))) return false;
+  return characterAiMessageLists(obj).some(list => list.some(m => m && typeof m === 'object' && typeof caiIsHuman(m) === 'boolean' && (m.text != null || m.raw_content != null || m.content != null)));
+}
+/** Character.ai export archive (Export Data — emailed weeks later; layout from third-party guides, sniffed): message lists with a human flag, text (text / raw_content /
+ *  content) and a time (create_time / created_at / created / timestamp). A character reply is output, the preceding human message input; no model (character.ai).
+ *  Rows carry sid = file name so each message file of the archive replaces only itself. */
+function parseCharacterAiExport(obj, fileName) {
+  const agg = makeAgg(); const k = { msgs: 0, skipped: 0 };
+  const sid = String(fileName || 'character.ai');
+  const when = (m) => exportTimestamp(m.create_time != null ? m.create_time : m.created_at != null ? m.created_at : m.created != null ? m.created : m.timestamp);
+  const say = (m) => m && typeof m === 'object' && typeof caiIsHuman(m) === 'boolean' ? { role: caiIsHuman(m) ? 'user' : 'assistant', chars: exportText(m.text != null ? m.text : m.raw_content != null ? m.raw_content : m.content).length, ts: when(m) } : null;
+  for (const list of characterAiMessageLists(obj)) bookEstimatedTurns(list, say, (turn, prompt) => agg.add(turn.ts.d, 'Character.ai', 'character.ai', { in: estTok(prompt), out: estTok(turn.chars), msgs: 1, est: 1 }, sid, turn.ts.hour), k);
+  return { rows: agg.rows(), meta: { msgs: k.msgs, skipped: k.skipped, sid } };
+}
+
+
 /** Parses a large chat export off the main thread via a Blob-sourced Worker, so a big export doesn't freeze the tab. Rebuilds the parse
  *  functions' source inside the worker (Workers don't share scope with the page) from their .toString(): every free identifier those
  *  functions touch (dayKey, addDays, estTok, RE_DATEONLY, makeAgg, textOfChatGPTMessage, exportTimestamp, exportText, dsChatTime, parseCSV,
  *  sniffJSON …) must be listed in `fns` too, or the worker throws a ReferenceError — surfaced below as a rejection, never a hang.
  *  kind: 'chatgpt' (an array or {conversations}) · 'claudeai' (+ assumedModel) · 'grok' · 'deepseek-chat' · 'meta-ai' · 'perplexity' (+ fileName,
- *  the sid) → JSON text, parsed in the worker; 'copilot-csv' → the raw activity CSV text (+ fileName). Resolves {rows, meta} exactly as the inline
+ *  the sid) · 'mistral-vibe' · 'cody' · 'characterai' (+ fileName, the sid — Plan 9 B6) → JSON text, parsed in the worker; 'copilot-csv' → the raw activity CSV text (+ fileName). Resolves {rows, meta} exactly as the inline
  *  parser returns it. kind 'sniff' → the worker parses the JSON, runs sniffJSON(obj, fileName) — the same exact gates as inline, e.g. DeepSeek
  *  chat's file-name / source mark — and, when that names a chat export, parses it in the same trip: resolves {kind, res} with res = {rows, meta},
  *  or null for any other shape (provider report, Takeout, empty, unknown — the caller parses those inline). Chosen over a 64 KB head sniff on the
@@ -4046,7 +4342,8 @@ function parsePerplexityExport(input, fileName) {
 function parseInWorker(kind, text, assumedModel, fileName) {
   return new Promise((resolve, reject) => {
     const fns = { dayKey, addDays, estTok, RE_DATEONLY, makeAgg, textOfChatGPTMessage, parseChatGPTExport, parseClaudeAiExport, exportTimestamp, exportText, dsChatTime,
-      parseGrokExport, parseDeepSeekChatExport, parseMetaAiExport, parsePerplexityExport, parseCSV, parseCopilotActivityCSV, sniffJSON };
+      parseGrokExport, parseDeepSeekChatExport, parseMetaAiExport, parsePerplexityExport, parseCSV, parseCopilotActivityCSV, sniffJSON,
+      bookEstimatedTurns, MISTRAL_MODEL_RE, isMistralVibeExport, parseMistralVibeExport, isCodyExport, parseCodyExport, caiIsHuman, characterAiMessageLists, isCharacterAiExport, parseCharacterAiExport };   // Plan 9 B6 (sniffJSON reaches the three is* gates)
     const src = Object.entries(fns).map(([name, f]) => {
       const body = f.toString();
       // `function name(...) {...}` declarations stringify ready to paste; const-bound arrows (dayKey, addDays, estTok, dsChatTime) and the
@@ -4054,8 +4351,10 @@ function parseInWorker(kind, text, assumedModel, fileName) {
       return body.trim().startsWith('function') ? body : `const ${name} = ${body};`;
     }).join('\n')
       + '\nconst PARSERS = { chatgpt: (o) => parseChatGPTExport(Array.isArray(o) ? o : o.conversations), claudeai: (o, a) => parseClaudeAiExport(o, a), grok: (o) => parseGrokExport(o),'
-      + ' "deepseek-chat": (o) => parseDeepSeekChatExport(o), "meta-ai": (o, a, n) => parseMetaAiExport(o, n), perplexity: (o, a, n) => parsePerplexityExport(o, n) };'
-      + '\nconst SNIFFED = { "chatgpt-export": "chatgpt", "chatgpt-export-wrapped": "chatgpt", "claudeai-export": "claudeai", "grok-export": "grok", "deepseek-chat-export": "deepseek-chat", "meta-ai-export": "meta-ai", "perplexity-export": "perplexity" };'
+      + ' "deepseek-chat": (o) => parseDeepSeekChatExport(o), "meta-ai": (o, a, n) => parseMetaAiExport(o, n), perplexity: (o, a, n) => parsePerplexityExport(o, n),'
+      + ' "mistral-vibe": (o) => parseMistralVibeExport(o), cody: (o) => parseCodyExport(o), characterai: (o, a, n) => parseCharacterAiExport(o, n) };'
+      + '\nconst SNIFFED = { "chatgpt-export": "chatgpt", "chatgpt-export-wrapped": "chatgpt", "claudeai-export": "claudeai", "grok-export": "grok", "deepseek-chat-export": "deepseek-chat", "meta-ai-export": "meta-ai", "perplexity-export": "perplexity",'
+      + ' "mistral-vibe-export": "mistral-vibe", "cody-export": "cody", "characterai-export": "characterai" };'
       + '\nself.onmessage = (e) => { const { kind, text, assumedModel, fileName } = e.data; try {'
       + ' if (kind === "copilot-csv") { self.postMessage(parseCopilotActivityCSV(text, fileName)); return; }'
       + ' const obj = JSON.parse(text);'
@@ -5897,13 +6196,29 @@ const undatedNote = (meta) => meta.skipped ? `; ${meta.skipped} undated ${meta.s
 /** deflate-raw → bytes, refusing to inflate past `declared` (the central directory's uncompressed size). The size is attacker-controlled, so this
  *  bound is what stands between a small archive and an unbounded allocation (A0 #22); an honest entry is read whole. */
 async function inflateBounded(blob, declared) {
-  const reader = blob.stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+  return decompressBounded(blob, 'deflate-raw', declared, `ZIP entry inflates past its declared size (${declared} bytes) — refusing to read it`);
+}
+/** Plan 9 B6: does this browser's DecompressionStream know zstd (Zed's thread blobs)? Probed once; the Zed parser and remoteDecodeFor read it. */
+let _zstdInPage = null;
+function hasZstdDecompression() {
+  if (_zstdInPage === null) { try { new DecompressionStream('zstd'); _zstdInPage = true; } catch { _zstdInPage = false; } }   // a TypeError = the format is unknown here
+  return _zstdInPage;
+}
+const ZSTD_MAX_BYTES = 64 * 1024 * 1024;   // one decompressed Zed thread — a frame claiming more is refused, never allocated
+/** zstd frame → bytes through the page's DecompressionStream('zstd'), bounded. Throws when the browser lacks zstd (the caller says "needs the local collector"). */
+async function zstdDecompressBounded(bytes, limit = ZSTD_MAX_BYTES) {
+  if (!hasZstdDecompression()) throw new Error('needs the local collector on this browser — it cannot decompress zstd (DecompressionStream has no "zstd")');
+  return decompressBounded(new Blob([bytes]), 'zstd', limit, `zstd frame inflates past ${limit} bytes — refusing to read it`);
+}
+/** blob → bytes through DecompressionStream(format), refusing to grow past `limit` bytes (`tooBig` is the thrown message). */
+async function decompressBounded(blob, format, limit, tooBig) {
+  const reader = blob.stream().pipeThrough(new DecompressionStream(format)).getReader();
   const chunks = []; let total = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.length;
-    if (total > declared) { await reader.cancel(); throw new Error(`ZIP entry inflates past its declared size (${declared} bytes) — refusing to read it`); }
+    if (total > limit) { await reader.cancel(); throw new Error(tooBig); }
     chunks.push(value);
   }
   const out = new Uint8Array(total); let at = 0;
@@ -5928,6 +6243,7 @@ function sniffJsonlKind(o, fileName) {
   if (type === 'assistant' || type === 'user' || type === 'summary' || (o.message && typeof o.message === 'object' && o.message.usage) || 'parentUuid' in o || (o.sessionId && o.uuid)) return 'claude';
   const hasTs = o.ts != null || o.timestamp != null;
   if (o.prompt_eval_count != null || o.eval_count != null || (hasTs && ['in', 'out', 'input_tokens', 'output_tokens', 'prompt_tokens', 'completion_tokens'].some(k => typeof o[k] === 'number'))) return 'ollama';   // usage-logger line (docs/tools/ollama-usage-logger.mjs, or anything scripted to that shape) — top-level counts only, which is all parseUsageLoggerJsonl reads
+  if (otelSpansOf(o).some(s => otelHasUsage(otelAttrs(s)))) return 'copilot-vscode';   // Plan 9 B6: an OTel span (or OTLP batch) line carrying gen_ai.usage.* — Copilot Chat's file exporter
   const name = String(fileName || '');
   if (/(^|\/)rollout-[^/]*\.jsonl$/i.test(name)) return 'codex';
   if (/(^|\/)tokensGenerated\.jsonl$/i.test(name)) return 'continue';
@@ -5957,6 +6273,7 @@ const JSONL_ROUTE = {
   continue: { id: 'continue', canon: (n) => n.replace(/\.jsonl$/i, '') + '/tokensGenerated.jsonl' },
   junie: { id: 'junie', canon: (n) => n.replace(/\.jsonl$/i, '') + '-events.jsonl' },
   ollama: { id: 'ollama', canon: (n) => 'usage-' + n },
+  'copilot-vscode': { id: 'copilot-vscode', canon: (n) => n },   // Plan 9 B6: the OTel outfile keeps its own name (the card's patterns take any .jsonl / .ndjson)
 };
 const jsonlRoutePath = (c, kind, name) => (c.patterns || []).some(re => re.test(name)) ? name : JSONL_ROUTE[kind].canon(name);
 function sniffJSON(obj, fileName) {
@@ -5982,15 +6299,19 @@ function sniffJSON(obj, fileName) {
     if (obj[0] && obj[0].chat_messages) return 'claudeai-export';
     if (dsConv(obj[0]) && dsMark(obj, fileName)) return 'deepseek-chat-export';
     if (pxItem(obj[0]) || (obj[0] && Array.isArray(obj[0].entries) && pxItem(obj[0].entries[0]))) return 'perplexity-export';
+    if (isCharacterAiExport(obj, fileName)) return 'characterai-export';   // Plan 9 B6: a bare message list (human flag + text + time), name-gated on "character"
   }
   if (obj && !Array.isArray(obj) && typeof obj === 'object') {
     const convs = Array.isArray(obj.conversations) ? obj.conversations : null;
     if (convs && convs[0] && Array.isArray(convs[0].responses)) return 'grok-export';   // grok.com: {conversations:[{conversation, responses:[{message, sender, create_time}]}]}
     const dsList = convs || (Array.isArray(obj.data) ? obj.data : null);
     if (dsList && dsConv(dsList[0]) && dsMark(obj, fileName)) return 'deepseek-chat-export';
+    if (convs && isMistralVibeExport(obj, convs, fileName)) return 'mistral-vibe-export';   // Plan 9 B6: {account, conversations:[{model, messages:[{role, content}]}]} — the name, the account block or a Mistral-family model marks it (a bare {conversations} stays unknown)
     if (Array.isArray(obj.participants) && Array.isArray(obj.messages) && (obj.participants.some(p => /meta\s*ai/i.test(p && p.name)) || obj.messages.some(m => /meta\s*ai/i.test(m && m.sender_name)))) return 'meta-ai-export';
     const pxList = Array.isArray(obj.threads) ? obj.threads : Array.isArray(obj.data) ? obj.data : null;   // {threads:[…]} or {data:[…]} — parsePerplexityExport reads both
     if (pxList && pxList[0] && (pxItem(pxList[0]) || (Array.isArray(pxList[0].entries) && pxItem(pxList[0].entries[0])))) return 'perplexity-export';
+    if (isCodyExport(obj)) return 'cody-export';   // Plan 9 B6: {"<ISO time>": {id, interactions:[{humanMessage, assistantMessage}]}} — Cody's History > Export
+    if (isCharacterAiExport(obj, fileName)) return 'characterai-export';   // Plan 9 B6: {chats:[{messages}]} / {messages} with human flags, name-gated on "character"
     if (convs && !convs.length) return 'empty-export';   // an empty {conversations:[]} (ChatGPT / Grok / DeepSeek chat alike) never reaches a parser, so it cannot replace an earlier import
     if (convs && convs[0] && convs[0].mapping) return 'chatgpt-export-wrapped';   // only ChatGPT mapping trees — any other {conversations:[…]} stays unknown
   }
@@ -7646,6 +7967,8 @@ const App = {
       const res = await parseFolderCached(c, files, (done, total) => { if (prog) { prog.max = total; prog.value = done; } }, ScanCache, { noPrune: !!opts.fromDrop });
       if (gen !== this._gen[c.id]) return;   // superseded by a newer scan of this connector
       if (!res.meta.files) { status.textContent = `No matching files found — expected ${c.hint || 'log files'}.`; return; }
+      // every matched file unreadable (B6: a zstd store this browser cannot decode, a locked DB) = a failed scan with the first reason — never "Connected · 0 messages" over kept rows
+      if (!res.meta.parsedFiles && !res.meta.cachedFiles) throw new Error(`${res.meta.files} file(s) unreadable${res.meta.badFileReason ? ' — ' + res.meta.badFileReason : ''}`);
       if (res.projects && res.projects.length) Store.projectsBy[c.id] = res.projects; else delete Store.projectsBy[c.id];   // Projects table rows (persisted by setSource's persist below); a re-scan that finds none clears the stale set
       Store.setSource(c.id, res.rows, { files: res.meta.files, msgs: res.meta.msgs, lines: res.meta.lines, badLines: res.meta.badLines });
       const filesLabel = `${res.meta.files} file${res.meta.files === 1 ? '' : 's'}` + (opts.fromCollector ? ' · via collector' : '');
@@ -7980,7 +8303,8 @@ const App = {
     let files;
     try {
       const list = await o.api('/api/list?tool=' + encodeURIComponent(conn.id));
-      files = matchConnectorFiles(conn, Array.isArray(list && list.files) ? list.files : []).map(f => ({ path: f.path, file: new RemoteFile(o.base, o.token, conn.id, f) }));
+      const decode = remoteDecodeFor(conn);   // B6: Zed's zstd store is decoded by the collector when this browser cannot (design 8)
+      files = matchConnectorFiles(conn, Array.isArray(list && list.files) ? list.files : []).map(f => ({ path: f.path, file: new RemoteFile(o.base, o.token, conn.id, f, decode) }));
     } catch (e) { if (o.stale()) return null; return { matched: 0, landed: false, retry: true, note: 'error: ' + String(e.message || e).slice(0, 60) }; }
     if (o.stale()) return null;
     if (!files.length) return { matched: 0, landed: false, note: 'found, nothing to read' };
@@ -8325,6 +8649,21 @@ const App = {
       Store.setSource('perplexity-export', all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), files: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size }, { perSid: true });   // compaction keeps one bucket per file (scalar sid) so the filter above stays exact
       notes.push(`${f.name}: Perplexity export — ${fmtInt(res.meta.msgs)} threads (estimated tokens${res.meta.skipped ? `; ${res.meta.skipped} undated skipped` : ''}; files merge, the same file re-imported replaces itself)`);
       imported++;
+    } else if (kind === 'mistral-vibe-export') {   // Plan 9 B6
+      const res = pre ? pre.res : parseMistralVibeExport(obj);
+      Store.setSource('mistral-vibe-export', res.rows, res.meta);   // one export = the whole account → re-import replaces
+      notes.push(`${f.name}: Mistral Vibe export — ${res.meta.convs} conversations, ${fmtInt(res.meta.msgs)} replies (estimated tokens; model per conversation; input = the preceding prompt only${undatedNote(res.meta)})`);
+      imported++;
+    } else if (kind === 'cody-export') {   // Plan 9 B6
+      const res = pre ? pre.res : parseCodyExport(obj);
+      Store.setSource('cody-export', res.rows, res.meta);   // History > Export is the whole history → re-import replaces
+      notes.push(`${f.name}: Sourcegraph Cody export — ${res.meta.chats} chats, ${fmtInt(res.meta.msgs)} replies (estimated tokens; the export names no model per turn${undatedNote(res.meta)})`);
+      imported++;
+    } else if (kind === 'characterai-export') {   // Plan 9 B6
+      const res = pre ? pre.res : parseCharacterAiExport(obj, f.name);
+      this._landPerFileExport('characterai-export', res);
+      notes.push(`${f.name}: Character.ai export — ${fmtInt(res.meta.msgs)} replies (estimated tokens; no model${undatedNote(res.meta)}; message files merge, the same file re-imported replaces itself)`);
+      imported++;
     } else if (kind === 'anthropic-usage') {
       const res = parseAnthropicUsage(obj);
       this._gen.anthropic++;   // an import supersedes any in-flight fetch — it must not overwrite this
@@ -8357,6 +8696,13 @@ const App = {
     return imported;
   },
 
+  /** Plan 9 B6 — lands a per-file export whose rows carry sid = file name (Character.ai's message files): the same file re-imported replaces only itself, other
+   *  files merge; meta.msgs / meta.files are recomputed over everything stored. (Meta AI, Perplexity and the Copilot activity CSV keep their inline copies of this rule.) */
+  _landPerFileExport(srcId, res) {
+    const keep = ((Store.sources[srcId] || {}).rows || []).filter(r => r.sid !== res.meta.sid && !(Array.isArray(r.sids) && r.sids.includes(res.meta.sid)));
+    const all = keep.concat(res.rows);
+    Store.setSource(srcId, all, { msgs: all.reduce((a, r) => a + (r.msgs || 0), 0), files: new Set(all.flatMap(r => r.sid ? [r.sid] : (r.sids || []))).size }, { perSid: true });   // compaction keeps one bucket per file (scalar sid) so the filter above stays exact
+  },
   /** A0 #10 — billed days of a generic CSV import: the days the import covers take its cost column, or are REMOVED when it has none (the Cursor
    *  rule: stale dollars must not survive behind replaced rows); days outside the import keep theirs. A CSV that never carried costs creates no envelope. */
   _landGenericCsvBilled(res) {

@@ -333,3 +333,159 @@ function bookAmpMessages(messages, ctx) {
     bookAmpRow(ctx, ctx.tid + ':' + (m.messageId != null ? String(m.messageId) : 'message-' + i), { t, model: String(m.model || 'unknown'), ts: ampWhen(m.timestamp, ctx.fallbackTs) });
   }
 }
+/* =================================================================
+ * Plan 9 B6 — folder-log parsers B: Zed (threads.db — SQLite rows whose data cell is a zstd frame of the thread JSON) and GitHub Copilot Chat's OTel file
+ * exporter (JSON lines of spans carrying gen_ai.usage.*). Same contract as the parsers above. Zed is not installed on the research machine (source-based:
+ * CodeBurn's zed.md + Zed commit #31741); the OTel attribute names are confirmed by the VS Code docs, the line layout is not documented (both attribute forms
+ * are accepted). Appended here like B5's parsers until the parts are renumbered (one file per vendor family — Plan 10).
+ * ================================================================= */
+/** Zed Agent Panel — threads/threads.db: table threads(id, summary, updated_at, data_type 'zstd' | 'json', data). The thread JSON (SerializedThread 0.1–0.3) carries
+ *  model{provider, model}, messages[], request_token_usage{<user message id>: {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens}},
+ *  cumulative_token_usage (same shape, the whole thread) and initial_project_snapshot.worktree_snapshots[].worktree_path. One row per thread: cumulative_token_usage
+ *  when present (request_token_usage does not cover every request), else the request map summed; msgs = assistant messages (else requests, else 1); day = the row's
+ *  updated_at (no per-request time exists — approximate); sid = thread id; project = the first worktree; a local provider (ollama, lmstudio) → local:1. zstd rows are
+ *  decoded in the page when DecompressionStream knows zstd; otherwise the file must come through the collector's decode=zstd (one JSON line per row — accepted here
+ *  too), and a raw store read on a browser without zstd throws "needs the local collector on this browser" (one unreadable file, never zero rows). A row whose blob
+ *  does not decode / parse is counted (badLines); a thread with no tokens is skipped; dedupe by thread id (the same store under two paths). */
+async function parseZedThreads(files, onProgress, seen = new Set(), c) {
+  const platform = (c && c.platform) || 'Zed';
+  const ctx = { agg: makeAgg(), proj: makeProjAgg(platform), seen, platform, k: { msgs: 0, lines: 0, badLines: 0, addedIds: [], dupIds: [] } };
+  const list = files.filter(f => /(^|\/)threads\.db$/i.test(f.path));
+  for (let fi = 0; fi < list.length; fi++) {
+    const { file } = list[fi];
+    ctx.fallbackTs = file.lastModified;
+    for (const row of await zedThreadRows(new Uint8Array(await file.arrayBuffer()))) bookZedRow(row, ctx);
+    if (onProgress) onProgress(fi + 1, list.length);
+  }
+  const k = ctx.k;
+  return { rows: ctx.agg.rows(), projects: ctx.proj.rows(), meta: { files: list.length, msgs: k.msgs, lines: k.lines, badLines: k.badLines, addedIds: k.addedIds, dupIds: k.dupIds } };
+}
+const isSqliteBytes = (u8) => u8.length >= 16 && new TextDecoder('latin1').decode(u8.subarray(0, 15)) === 'SQLite format 3';
+/** The thread rows of one threads.db read — the raw SQLite store, or the collector's decoded JSON lines ({ id, summary, updated_at, data_type: 'json', data } |
+ *  { id, …, error }) → [{ id, updated_at, thread: object | null }] (null = undecodable, counted by the caller). */
+async function zedThreadRows(bytes) {
+  if (isSqliteBytes(bytes)) {
+    const t = readSqliteTable(bytes, 'threads'), col = sqliteColumns(t);
+    return Promise.all(t.rows.map(async (r) => ({ id: col.get(r, 'id'), updated_at: col.get(r, 'updated_at'), thread: await decodeZedThread(col.get(r, 'data_type'), col.get(r, 'data')) })));
+  }
+  const rows = [];
+  for (const line of new TextDecoder('utf-8').decode(bytes).split('\n')) {
+    if (!line.trim()) continue;
+    const o = parseJsonObject(line);
+    rows.push({ id: o && o.id, updated_at: o && o.updated_at, thread: o && o.error == null && typeof o.data === 'string' ? parseJsonObject(o.data) : null });
+  }
+  return rows;
+}
+/** One data cell → the thread object, or null when it cannot be decoded (counted as one bad row). A zstd cell on a browser without zstd throws instead — the
+ *  whole file is then one unreadable file whose reason names the collector. */
+async function decodeZedThread(dataType, cell) {
+  if (String(dataType || '').toLowerCase() !== 'zstd') return parseJsonObject(cell instanceof Uint8Array ? new TextDecoder('utf-8').decode(cell) : cell);
+  if (!(cell instanceof Uint8Array)) return null;
+  if (!hasZstdDecompression()) throw new Error('needs the local collector on this browser — Zed thread data is zstd-compressed and this browser cannot decompress zstd (the collector decodes it behind decode=zstd)');
+  let plain;
+  try { plain = await zstdDecompressBounded(cell); } catch { return null; }   // a corrupt or oversized frame is one bad row (counted), never a failed file
+  return parseJsonObject(new TextDecoder('utf-8').decode(plain));
+}
+function bookZedRow(row, ctx) {
+  ctx.k.lines++;
+  const th = row.thread;
+  if (!th) { ctx.k.badLines++; return; }
+  const t = zedThreadTokens(th);
+  if (!t) return;   // an empty thread (opened, nothing asked) — not malformed
+  const id = String(row.id ?? th.id ?? '');
+  if (ctx.seen.has(id)) { ctx.k.dupIds.push(id); return; }
+  ctx.seen.add(id); ctx.k.addedIds.push(id);
+  const model = th.model && typeof th.model === 'object' ? th.model : {};
+  if (isLocalProvider(model.provider)) t.local = 1;
+  const name = String(model.model || 'unknown'), ts = sqliteTimestamp(row.updated_at ?? th.updated_at, ctx.fallbackTs), worktree = zedWorktree(th);
+  ctx.agg.add(dayKey(ts), ctx.platform, name, t, id, ts.getHours());
+  if (worktree) ctx.proj.add(prettyProject(worktree), name, t);
+  ctx.k.msgs += t.msgs;
+}
+const zedUsage = (u) => u && typeof u === 'object' ? { in: finTok(+u.input_tokens || 0), out: finTok(+u.output_tokens || 0), cw: finTok(+u.cache_creation_input_tokens || 0), cr: finTok(+u.cache_read_input_tokens || 0) } : null;
+/** The thread's tokens: cumulative_token_usage, else the request_token_usage map summed; msgs = assistant messages, else requests, else 1. null when nothing to book. */
+function zedThreadTokens(th) {
+  const requests = th.request_token_usage && typeof th.request_token_usage === 'object' ? Object.values(th.request_token_usage).map(zedUsage).filter(Boolean) : [];
+  const t = zedUsage(th.cumulative_token_usage) || requests.reduce((a, u) => ({ in: a.in + u.in, out: a.out + u.out, cw: a.cw + u.cw, cr: a.cr + u.cr }), { in: 0, out: 0, cw: 0, cr: 0 });
+  if (noTokens(t)) return null;
+  const replies = Array.isArray(th.messages) ? th.messages.filter(m => m && String(m.role).toLowerCase() === 'assistant').length : 0;
+  t.msgs = replies || requests.length || 1;
+  return t;
+}
+/** The thread's first worktree path (initial_project_snapshot.worktree_snapshots[].worktree_path | abs_path | path), else a top-level project / worktree string, else null. */
+function zedWorktree(th) {
+  const snap = th.initial_project_snapshot, list = snap && Array.isArray(snap.worktree_snapshots) ? snap.worktree_snapshots : [];
+  const w = list.find(x => x && (x.worktree_path || x.abs_path || x.path));
+  if (w) return String(w.worktree_path || w.abs_path || w.path);
+  return typeof th.project === 'string' ? th.project : typeof th.worktree === 'string' ? th.worktree : null;
+}
+
+/** GitHub Copilot Chat (VS Code) — the OTel file exporter (github.copilot.chat.otel.enabled + exporterType "file" + outfile): JSON lines of spans / events / metrics.
+ *  Each `chat` span (one per LLM call) carries gen_ai.request.model / gen_ai.response.model and gen_ai.usage.input_tokens, output_tokens, cache_read.input_tokens,
+ *  cache_creation.input_tokens, reasoning.output_tokens. Attributes come as a map or as the OTLP {key, value:{intValue|stringValue}} array; a line may also be an
+ *  OTLP batch (resourceSpans[].scopeSpans[].spans[]). Booked per span: in = input_tokens − cache_read (the exporter's input count is cache-inclusive per the
+ *  agent-traces schema — source-based), cw = cache_creation, out = output_tokens (reasoning ⊂ output), model = response model, else request model, else 'copilot';
+ *  day / hour from the start time (unix nanos, hrtime [s, ns], ISO or epoch), else the file date; sid = the session id attribute when present. Never a row:
+ *  `invoke_agent` root spans (session totals — meta.sessionSpans), gen_ai.client.* / copilot_chat.* events (meta.skippedRecords — the span already carries the usage),
+ *  metric lines (no usage attributes). Dedupe by span id (the exporter appends; a rewritten file repeats spans); platform GitHub Copilot (shared with the CLI card). */
+const OTEL_USAGE = { in: 'gen_ai.usage.input_tokens', out: 'gen_ai.usage.output_tokens', cr: 'gen_ai.usage.cache_read.input_tokens', cw: 'gen_ai.usage.cache_creation.input_tokens' };
+const OTEL_EVENT_NAME = /^(gen_ai\.client\.|copilot_chat\.)/;   // event / metric records that carry the span's own usage again
+async function parseCopilotOtelJsonl(files, onProgress, seen = new Set(), c) {
+  const platform = (c && c.platform) || 'GitHub Copilot';
+  const ctx = { agg: makeAgg(), seen, platform, k: { msgs: 0, lines: 0, badLines: 0, sessionSpans: 0, skippedRecords: 0, addedIds: [], dupIds: [] } };
+  const list = files.filter(f => /\.(jsonl|ndjson)$/i.test(f.path));
+  for (let fi = 0; fi < list.length; fi++) {
+    const { file } = list[fi];
+    ctx.fallbackTs = file.lastModified;
+    await eachJsonl(file, (o) => { for (const span of otelSpansOf(o)) bookOtelSpan(span, ctx); }, ctx.k);
+    if (onProgress) onProgress(fi + 1, list.length);
+  }
+  const k = ctx.k;
+  return { rows: ctx.agg.rows(), projects: [], meta: { files: list.length, msgs: k.msgs, lines: k.lines, badLines: k.badLines, addedIds: k.addedIds, dupIds: k.dupIds, sessionSpans: k.sessionSpans, skippedRecords: k.skippedRecords } };
+}
+/** The span-like records of one exporter line: the line itself, or every span of an OTLP batch (resourceSpans[].scopeSpans[].spans[]). */
+function otelSpansOf(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return [];
+  if (!Array.isArray(o.resourceSpans)) return [o];
+  const out = [];
+  for (const rs of o.resourceSpans) for (const ss of (rs && Array.isArray(rs.scopeSpans) ? rs.scopeSpans : [])) for (const s of (ss && Array.isArray(ss.spans) ? ss.spans : [])) if (s && typeof s === 'object') out.push(s);
+  return out;
+}
+/** A span's attributes as a plain object — the SDK map form, or the OTLP [{key, value:{intValue|doubleValue|stringValue|boolValue}}] array. */
+function otelAttrs(span) {
+  const a = span.attributes;
+  if (!Array.isArray(a)) return a && typeof a === 'object' ? a : {};
+  const out = {};
+  for (const kv of a) {
+    if (!kv || typeof kv.key !== 'string') continue;
+    const v = kv.value;
+    out[kv.key] = v && typeof v === 'object' ? (v.intValue ?? v.doubleValue ?? v.stringValue ?? v.boolValue) : v;
+  }
+  return out;
+}
+const otelHasUsage = (attrs) => attrs[OTEL_USAGE.in] != null || attrs[OTEL_USAGE.out] != null;
+const otelSpanId = (span) => span.spanId ?? span.span_id ?? (span.context && typeof span.context === 'object' ? span.context.spanId : undefined);
+function bookOtelSpan(span, ctx) {
+  const attrs = otelAttrs(span);
+  if (!otelHasUsage(attrs)) return;   // a metric line, a span without usage
+  const name = String(span.name || '');
+  if (/^invoke_agent/.test(name)) { ctx.k.sessionSpans++; return; }   // the root span repeats the session's totals
+  if (OTEL_EVENT_NAME.test(name)) { ctx.k.skippedRecords++; return; }
+  const id = otelSpanId(span);
+  if (id != null) { const key = String(id); if (ctx.seen.has(key)) { ctx.k.dupIds.push(key); return; } ctx.seen.add(key); ctx.k.addedIds.push(key); }
+  const num = (k) => finTok(+attrs[k] || 0);
+  const cr = num(OTEL_USAGE.cr), t = { in: Math.max(0, num(OTEL_USAGE.in) - cr), out: num(OTEL_USAGE.out), cr, cw: num(OTEL_USAGE.cw), msgs: 1 };
+  const model = String(attrs['gen_ai.response.model'] || attrs['gen_ai.request.model'] || 'copilot'), ts = otelStart(span, ctx.fallbackTs);
+  const sid = attrs['copilot_chat.session.id'] || attrs['gen_ai.conversation.id'];
+  ctx.agg.add(dayKey(ts), ctx.platform, model, t, sid != null ? String(sid) : undefined, ts.getHours());
+  ctx.k.msgs++;
+}
+/** A span's start → Date: startTimeUnixNano / timeUnixNano (digit string or number), startTime / timestamp / time as hrtime [s, ns], ISO text or epoch ms; else the file date. */
+function otelStart(span, fallback) {
+  const v = span.startTimeUnixNano ?? span.timeUnixNano ?? span.startTime ?? span.timestamp ?? span.time;
+  if (Array.isArray(v) && Number.isFinite(+v[0])) return new Date(+v[0] * 1000 + Math.floor((+v[1] || 0) / 1e6));
+  if ((typeof v === 'string' && /^\d{16,20}$/.test(v)) || (typeof v === 'number' && v > 1e15)) return new Date(Number(BigInt(String(v).split('.')[0]) / 1000000n));
+  const d = v != null ? new Date(v) : null;
+  return d && !isNaN(d) ? d : new Date(fallback);
+}
+

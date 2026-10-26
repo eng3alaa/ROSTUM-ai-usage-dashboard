@@ -217,12 +217,100 @@ function parsePerplexityExport(input, fileName) {
   return { rows: agg.rows(), meta: { msgs, skipped, threads: list.length, sid } };
 }
 
+/* ---------- Plan 9 B6 exports (Mistral Vibe, Sourcegraph Cody, Character.ai): estimated from text like the Wave 2 exports — input = the preceding prompt only
+ * (a lower bound), every row est:1, undated replies skipped + counted (A0 #7). Every layout is third-party / sniffed (research 2026-10-15) — field access is tolerant,
+ * and each sniff below is what keeps a look-alike export (DeepSeek chat, Grok) out of these parsers. ---------- */
+/** Books the assistant turns of one ordered message list. say(m) → { role: 'user' | 'assistant' | other, chars, ts: { d, hour } | null } or null (not a message);
+ *  book(turn, promptChars) lands a row; counters.msgs / counters.skipped count landed and undated replies. */
+function bookEstimatedTurns(list, say, book, counters) {
+  let lastUser = 0;
+  for (const m of list) {
+    const turn = say(m);
+    if (!turn) continue;
+    if (turn.role !== 'assistant') { if (turn.role === 'user') lastUser = turn.chars; continue; }
+    if (!turn.ts) { counters.skipped++; continue; }
+    book(turn, lastUser); counters.msgs++;
+  }
+}
+const MISTRAL_MODEL_RE = /mistral|codestral|magistral|devstral|ministral|pixtral|voxtral/i;
+/** admin.mistral.ai/account/export: {account, conversations:[{…, model, messages:[{role, content}]}], …} — recognised by the file name (mistral / vibe / le chat), the
+ *  account block or a Mistral-family conversation model; a bare {conversations:[{messages}]} is not claimed (DeepSeek chat has that shape). */
+function isMistralVibeExport(obj, convs, fileName) {
+  const withRoles = convs.some(c => c && Array.isArray(c.messages) && c.messages.some(m => m && typeof m.role === 'string'));
+  if (!withRoles) return false;
+  return /mistral|vibe|le[-_ ]?chat/i.test(String(fileName || '')) || !!(obj.account && typeof obj.account === 'object') || convs.some(c => c && MISTRAL_MODEL_RE.test(String(c.model || '')));
+}
+/** Mistral Vibe (Le Chat) export JSON (schema from a third-party guide): conversations[{id, created_at, title, model, messages:[{role, content, created_at?}]}]. Model per
+ *  conversation (else 'mistral'); a message's created_at, else the conversation's; none → skipped + counted. Platform 'Mistral Vibe'. */
+function parseMistralVibeExport(obj) {
+  const agg = makeAgg(); const k = { msgs: 0, skipped: 0 };
+  const convs = Array.isArray(obj && obj.conversations) ? obj.conversations.filter(c => c && typeof c === 'object') : [];
+  for (const c of convs) {
+    const convTs = exportTimestamp(c.created_at != null ? c.created_at : c.create_time), model = String(c.model || 'mistral');
+    const say = (m) => m && typeof m === 'object' ? { role: String(m.role || '').toLowerCase(), chars: exportText(m.content != null ? m.content : m.text).length, ts: exportTimestamp(m.created_at != null ? m.created_at : m.timestamp) || convTs } : null;
+    bookEstimatedTurns(Array.isArray(c.messages) ? c.messages : [], say, (turn, prompt) => agg.add(turn.ts.d, 'Mistral Vibe', model, { in: estTok(prompt), out: estTok(turn.chars), msgs: 1, est: 1 }, undefined, turn.ts.hour), k);
+  }
+  return { rows: agg.rows(), meta: { msgs: k.msgs, convs: convs.length, skipped: k.skipped } };
+}
+/** Cody's History > Export: an object whose values are chats with interactions[] of {humanMessage, assistantMessage}. */
+function isCodyExport(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+  const chats = Object.values(obj).filter(v => v && typeof v === 'object' && Array.isArray(v.interactions));
+  return chats.length > 0 && chats.some(ch => ch.interactions.some(it => it && typeof it === 'object' && ('humanMessage' in it || 'assistantMessage' in it)));
+}
+/** Sourcegraph Cody chat History > Export JSON (0.10 release-notes shape; may have drifted): {"<ISO time>": {id, chatModel?, lastInteractionTimestamp?,
+ *  interactions:[{humanMessage:{text|displayText}, assistantMessage:{…}|null, timestamp?}]}}. One row per answered interaction; time = the interaction's, else its
+ *  prompt's, else the chat's key / lastInteractionTimestamp (none → skipped + counted); model = chatModel, else 'cody'. Platform 'Sourcegraph Cody'. */
+function parseCodyExport(obj) {
+  const agg = makeAgg(); const k = { msgs: 0, skipped: 0 };
+  const chats = Object.entries(obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}).filter(([, ch]) => ch && typeof ch === 'object' && Array.isArray(ch.interactions));
+  const text = (m) => m && typeof m === 'object' ? exportText(m.text != null ? m.text : m.displayText) : '';
+  for (const [key, ch] of chats) {
+    const chatTs = exportTimestamp(key) || exportTimestamp(ch.lastInteractionTimestamp), model = String(ch.chatModel || ch.model || 'cody');
+    for (const it of ch.interactions) {
+      if (!it || typeof it !== 'object' || !it.assistantMessage) continue;   // an unanswered turn
+      const ts = exportTimestamp(it.timestamp) || exportTimestamp(it.humanMessage && it.humanMessage.timestamp) || chatTs;
+      if (!ts) { k.skipped++; continue; }
+      agg.add(ts.d, 'Sourcegraph Cody', model, { in: estTok(text(it.humanMessage).length), out: estTok(text(it.assistantMessage).length), msgs: 1, est: 1 }, undefined, ts.hour);
+      k.msgs++;
+    }
+  }
+  return { rows: agg.rows(), meta: { msgs: k.msgs, chats: chats.length, skipped: k.skipped } };
+}
+/** A Character.ai message's human flag in the shapes third-party guides show (is_human / author.is_human / src__is_human / author__is_human / role) — undefined when none. */
+const caiIsHuman = (m) => m.is_human ?? (m.author && typeof m.author === 'object' ? m.author.is_human : undefined) ?? m.src__is_human ?? m.author__is_human ?? (typeof m.role === 'string' ? /^(user|human)$/i.test(m.role) : undefined);
+/** The message lists an archive file may hold: a top-level array, {messages}, {chats:[{messages}]} or {history:[{msgs}]}. */
+function characterAiMessageLists(obj) {
+  if (Array.isArray(obj)) return [obj];
+  if (!obj || typeof obj !== 'object') return [];
+  if (Array.isArray(obj.messages)) return [obj.messages];
+  const chats = Array.isArray(obj.chats) ? obj.chats : Array.isArray(obj.history) ? obj.history : [];
+  return chats.filter(c => c && typeof c === 'object').map(c => Array.isArray(c.messages) ? c.messages : Array.isArray(c.msgs) ? c.msgs : []);
+}
+/** Character.ai: "character" in the file name (the archive's own name counts) AND a message list whose messages carry a human flag and text. */
+function isCharacterAiExport(obj, fileName) {
+  if (!/character/i.test(String(fileName || ''))) return false;
+  return characterAiMessageLists(obj).some(list => list.some(m => m && typeof m === 'object' && typeof caiIsHuman(m) === 'boolean' && (m.text != null || m.raw_content != null || m.content != null)));
+}
+/** Character.ai export archive (Export Data — emailed weeks later; layout from third-party guides, sniffed): message lists with a human flag, text (text / raw_content /
+ *  content) and a time (create_time / created_at / created / timestamp). A character reply is output, the preceding human message input; no model (character.ai).
+ *  Rows carry sid = file name so each message file of the archive replaces only itself. */
+function parseCharacterAiExport(obj, fileName) {
+  const agg = makeAgg(); const k = { msgs: 0, skipped: 0 };
+  const sid = String(fileName || 'character.ai');
+  const when = (m) => exportTimestamp(m.create_time != null ? m.create_time : m.created_at != null ? m.created_at : m.created != null ? m.created : m.timestamp);
+  const say = (m) => m && typeof m === 'object' && typeof caiIsHuman(m) === 'boolean' ? { role: caiIsHuman(m) ? 'user' : 'assistant', chars: exportText(m.text != null ? m.text : m.raw_content != null ? m.raw_content : m.content).length, ts: when(m) } : null;
+  for (const list of characterAiMessageLists(obj)) bookEstimatedTurns(list, say, (turn, prompt) => agg.add(turn.ts.d, 'Character.ai', 'character.ai', { in: estTok(prompt), out: estTok(turn.chars), msgs: 1, est: 1 }, sid, turn.ts.hour), k);
+  return { rows: agg.rows(), meta: { msgs: k.msgs, skipped: k.skipped, sid } };
+}
+
+
 /** Parses a large chat export off the main thread via a Blob-sourced Worker, so a big export doesn't freeze the tab. Rebuilds the parse
  *  functions' source inside the worker (Workers don't share scope with the page) from their .toString(): every free identifier those
  *  functions touch (dayKey, addDays, estTok, RE_DATEONLY, makeAgg, textOfChatGPTMessage, exportTimestamp, exportText, dsChatTime, parseCSV,
  *  sniffJSON …) must be listed in `fns` too, or the worker throws a ReferenceError — surfaced below as a rejection, never a hang.
  *  kind: 'chatgpt' (an array or {conversations}) · 'claudeai' (+ assumedModel) · 'grok' · 'deepseek-chat' · 'meta-ai' · 'perplexity' (+ fileName,
- *  the sid) → JSON text, parsed in the worker; 'copilot-csv' → the raw activity CSV text (+ fileName). Resolves {rows, meta} exactly as the inline
+ *  the sid) · 'mistral-vibe' · 'cody' · 'characterai' (+ fileName, the sid — Plan 9 B6) → JSON text, parsed in the worker; 'copilot-csv' → the raw activity CSV text (+ fileName). Resolves {rows, meta} exactly as the inline
  *  parser returns it. kind 'sniff' → the worker parses the JSON, runs sniffJSON(obj, fileName) — the same exact gates as inline, e.g. DeepSeek
  *  chat's file-name / source mark — and, when that names a chat export, parses it in the same trip: resolves {kind, res} with res = {rows, meta},
  *  or null for any other shape (provider report, Takeout, empty, unknown — the caller parses those inline). Chosen over a 64 KB head sniff on the
@@ -231,7 +319,8 @@ function parsePerplexityExport(input, fileName) {
 function parseInWorker(kind, text, assumedModel, fileName) {
   return new Promise((resolve, reject) => {
     const fns = { dayKey, addDays, estTok, RE_DATEONLY, makeAgg, textOfChatGPTMessage, parseChatGPTExport, parseClaudeAiExport, exportTimestamp, exportText, dsChatTime,
-      parseGrokExport, parseDeepSeekChatExport, parseMetaAiExport, parsePerplexityExport, parseCSV, parseCopilotActivityCSV, sniffJSON };
+      parseGrokExport, parseDeepSeekChatExport, parseMetaAiExport, parsePerplexityExport, parseCSV, parseCopilotActivityCSV, sniffJSON,
+      bookEstimatedTurns, MISTRAL_MODEL_RE, isMistralVibeExport, parseMistralVibeExport, isCodyExport, parseCodyExport, caiIsHuman, characterAiMessageLists, isCharacterAiExport, parseCharacterAiExport };   // Plan 9 B6 (sniffJSON reaches the three is* gates)
     const src = Object.entries(fns).map(([name, f]) => {
       const body = f.toString();
       // `function name(...) {...}` declarations stringify ready to paste; const-bound arrows (dayKey, addDays, estTok, dsChatTime) and the
@@ -239,8 +328,10 @@ function parseInWorker(kind, text, assumedModel, fileName) {
       return body.trim().startsWith('function') ? body : `const ${name} = ${body};`;
     }).join('\n')
       + '\nconst PARSERS = { chatgpt: (o) => parseChatGPTExport(Array.isArray(o) ? o : o.conversations), claudeai: (o, a) => parseClaudeAiExport(o, a), grok: (o) => parseGrokExport(o),'
-      + ' "deepseek-chat": (o) => parseDeepSeekChatExport(o), "meta-ai": (o, a, n) => parseMetaAiExport(o, n), perplexity: (o, a, n) => parsePerplexityExport(o, n) };'
-      + '\nconst SNIFFED = { "chatgpt-export": "chatgpt", "chatgpt-export-wrapped": "chatgpt", "claudeai-export": "claudeai", "grok-export": "grok", "deepseek-chat-export": "deepseek-chat", "meta-ai-export": "meta-ai", "perplexity-export": "perplexity" };'
+      + ' "deepseek-chat": (o) => parseDeepSeekChatExport(o), "meta-ai": (o, a, n) => parseMetaAiExport(o, n), perplexity: (o, a, n) => parsePerplexityExport(o, n),'
+      + ' "mistral-vibe": (o) => parseMistralVibeExport(o), cody: (o) => parseCodyExport(o), characterai: (o, a, n) => parseCharacterAiExport(o, n) };'
+      + '\nconst SNIFFED = { "chatgpt-export": "chatgpt", "chatgpt-export-wrapped": "chatgpt", "claudeai-export": "claudeai", "grok-export": "grok", "deepseek-chat-export": "deepseek-chat", "meta-ai-export": "meta-ai", "perplexity-export": "perplexity",'
+      + ' "mistral-vibe-export": "mistral-vibe", "cody-export": "cody", "characterai-export": "characterai" };'
       + '\nself.onmessage = (e) => { const { kind, text, assumedModel, fileName } = e.data; try {'
       + ' if (kind === "copilot-csv") { self.postMessage(parseCopilotActivityCSV(text, fileName)); return; }'
       + ' const obj = JSON.parse(text);'

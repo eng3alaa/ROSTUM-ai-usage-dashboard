@@ -1,4 +1,4 @@
-// Plan 9 B5 — the SQLite fixtures of the Wave 3 coding tools (OpenCode opencode.db ×2 layouts, Goose sessions.db, Devin CLI sessions.db).
+// Plan 9 B5 — the SQLite fixtures of the Wave 3 coding tools (OpenCode opencode.db ×2 layouts, Goose sessions.db, Devin CLI sessions.db) + Plan 9 B6 Zed threads.db.
 // They are COMMITTED as binary files next to this script so the suite and CI never depend on node:sqlite; this generator is the documented
 // way to regenerate them (node tests/fixtures/sqlite/gen-sqlite.mjs — needs Node ≥ 22.13 for node:sqlite). tests/fixtures/gen.mjs copies the
 // committed files into out/wave3/…; tests/checks/87g-wave3-coding.mjs reads them through readSqliteTable and, when node:sqlite is available,
@@ -9,9 +9,52 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 
-export const SQLITE_FIXTURES = ['opencode.db', 'opencode-v2.db', 'goose-sessions.db', 'devin-sessions.db'];
+export const SQLITE_FIXTURES = ['opencode.db', 'opencode-v2.db', 'goose-sessions.db', 'devin-sessions.db', 'zed-threads.db'];
 const T = (iso) => new Date(iso).getTime();
+const hasZstd = typeof zlib.zstdCompressSync === 'function';   // Node >= 22.15 / 23.8 — zed-threads.db needs it (its thread blobs are zstd frames)
+
+// Plan 9 B6 — Zed Agent Panel threads.db (table threads: id, summary, updated_at, data_type 'zstd' | 'json', data BLOB). One row per thread; the
+// decompressed thread JSON (Zed's SerializedThread, versions 0.1.0-0.3.0) carries model{provider, model}, messages[], request_token_usage
+// (per user-message id), cumulative_token_usage (the whole thread) and initial_project_snapshot.worktree_snapshots[].worktree_path. Shapes follow
+// the research entry + CodeBurn's zed.md and Zed commit #31741 — Zed is not installed on the research machine (source-based).
+//   t1 zstd: cumulative in=1000 cw=50 cr=300 out=200 (claude-sonnet-4-5, anthropic), 2 assistant messages → msgs 2; updated_at RFC3339; project D:\proj-zed
+//   t2 zstd: cumulative in=400 out=80 (qwen3:8b via ollama → local:1), 1 assistant message; updated_at SQLite text 'YYYY-MM-DD HH:MM:SS' (UTC)
+//   t3 json (legacy uncompressed): no cumulative → request_token_usage summed: in=10 out=5 (gpt-5.4, openai); updated_at epoch ms (digit text)
+//   t4 zstd: the blob is a zstd magic + garbage → decode fails → badLines 1 (the collector emits an error line for it)
+//   t5 zstd: a thread with no tokens anywhere → skipped (empty, not malformed)
+//   ⇒ in=1410 cw=50 cr=300 out=285 msgs=4 over 3 rows, lines 5, badLines 1; project D:/proj-zed in=1000.
+const zedMsg = (id, role, text) => ({ id, role, segments: [{ type: 'text', text }], context: '', creases: [], is_hidden: false });
+export const ZED_THREADS = [
+  { id: 't1', summary: 'wire the agent', updated_at: '2026-09-20T09:00:00Z', data_type: 'zstd', thread: {
+    version: '0.3.0', summary: 'wire the agent', updated_at: '2026-09-20T09:00:00Z', model: { provider: 'anthropic', model: 'claude-sonnet-4-5' }, completion_mode: 'normal', profile: 'write',
+    messages: [zedMsg(1, 'user', 'add a parser'), zedMsg(2, 'assistant', 'on it'), zedMsg(3, 'user', 'and tests'), zedMsg(4, 'assistant', 'done')],
+    request_token_usage: { 1: { input_tokens: 600, output_tokens: 120, cache_creation_input_tokens: 50, cache_read_input_tokens: 100 }, 3: { input_tokens: 400, output_tokens: 80, cache_read_input_tokens: 200 } },
+    cumulative_token_usage: { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 50, cache_read_input_tokens: 300 },
+    initial_project_snapshot: { worktree_snapshots: [{ worktree_path: 'D:\\proj-zed', git_state: null }], unsaved_buffer_paths: [], timestamp: '2026-09-20T08:00:00Z' } } },
+  { id: 't2', summary: 'local run', updated_at: '2026-09-21 10:00:00', data_type: 'zstd', thread: {
+    version: '0.2.0', summary: 'local run', model: { provider: 'ollama', model: 'qwen3:8b' }, messages: [zedMsg(1, 'user', 'explain'), zedMsg(2, 'assistant', 'sure')],
+    cumulative_token_usage: { input_tokens: 400, output_tokens: 80 } } },
+  { id: 't3', summary: 'legacy json', updated_at: String(T('2026-09-19T22:30:00Z')), data_type: 'json', thread: {
+    version: '0.1.0', summary: 'legacy json', model: { provider: 'openai', model: 'gpt-5.4' }, messages: [zedMsg(1, 'user', 'rename'), zedMsg(2, 'assistant', 'renamed')],
+    request_token_usage: { 1: { input_tokens: 10, output_tokens: 5 } } } },
+  { id: 't4', summary: 'corrupt blob', updated_at: '2026-09-22T10:00:00Z', data_type: 'zstd', corrupt: true },
+  { id: 't5', summary: 'empty thread', updated_at: '2026-09-22T11:00:00Z', data_type: 'zstd', thread: { version: '0.3.0', summary: 'empty thread', model: { provider: 'anthropic', model: 'claude-sonnet-4-5' }, messages: [] } },
+];
+/** The bytes of one thread row's data cell: a zstd frame of the thread JSON, the plain JSON text, or (t4) a zstd magic followed by garbage. */
+export function zedThreadBlob(row) {
+  if (row.corrupt) return Buffer.concat([Buffer.from('28b52ffd', 'hex'), Buffer.from('deadbeefcafebabe0102030405', 'hex')]);
+  const json = Buffer.from(JSON.stringify(row.thread));
+  return row.data_type === 'zstd' ? zlib.zstdCompressSync(json) : json;
+}
+/** What the collector's GET /api/file?tool=zed&path=threads.db&decode=zstd answers: one JSON line per thread row, data decoded (data_type 'json'),
+ *  an `error` line for a blob that does not decode. tests/fixtures/gen.mjs writes it as the page-side fixture of the collector path. */
+export function zedDecodedJsonl() {
+  return ZED_THREADS.map((r) => JSON.stringify(r.corrupt
+    ? { id: r.id, summary: r.summary, updated_at: r.updated_at, error: 'zstd decode failed: Unknown frame descriptor' }
+    : { id: r.id, summary: r.summary, updated_at: r.updated_at, data_type: 'json', data: JSON.stringify(r.thread) })).join('\n') + '\n';
+}
 
 async function loadSqlite() {   // null when node:sqlite is unavailable; the ExperimentalWarning some Node versions print is silenced
   const origEmit = process.emitWarning;
@@ -125,20 +168,31 @@ function buildDevin(sqlite, file) {
   db.close();
 }
 
-/** Writes the four fixtures into `dir`. Returns false (writing nothing) when node:sqlite is unavailable. */
-export async function buildSqliteFixtures(dir) {
+/** Zed threads.db — see ZED_THREADS above for the rows and the expected totals. 1 KB pages; the t1 blob (~600 bytes compressed) stays local. */
+function buildZed(sqlite, file) {
+  const db = openFresh(sqlite, file);
+  db.exec('CREATE TABLE threads(id TEXT PRIMARY KEY, summary TEXT NOT NULL, updated_at TEXT NOT NULL, data_type TEXT NOT NULL, data BLOB NOT NULL)');
+  const ins = db.prepare('INSERT INTO threads VALUES (?,?,?,?,?)');
+  for (const r of ZED_THREADS) ins.run(r.id, r.summary, r.updated_at, r.data_type, zedThreadBlob(r));
+  db.close();
+}
+
+const BUILDERS = { 'opencode.db': buildOpenCode, 'opencode-v2.db': buildOpenCodeV2, 'goose-sessions.db': buildGoose, 'devin-sessions.db': buildDevin, 'zed-threads.db': buildZed };
+/** Writes the fixtures named in `only` (default: every one this Node can build — zed-threads.db needs zlib zstd) into `dir`.
+ *  Returns the list of files written, or false (writing nothing) when node:sqlite is unavailable. */
+export async function buildSqliteFixtures(dir, only = SQLITE_FIXTURES) {
   const sqlite = await loadSqlite();
   if (!sqlite) return false;
-  buildOpenCode(sqlite, path.join(dir, 'opencode.db'));
-  buildOpenCodeV2(sqlite, path.join(dir, 'opencode-v2.db'));
-  buildGoose(sqlite, path.join(dir, 'goose-sessions.db'));
-  buildDevin(sqlite, path.join(dir, 'devin-sessions.db'));
-  return true;
+  const names = only.filter((f) => f !== 'zed-threads.db' || hasZstd);
+  for (const f of names) BUILDERS[f](sqlite, path.join(dir, f));
+  return names;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase()) {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const done = await buildSqliteFixtures(here);
+  const only = process.argv.slice(2).filter((f) => SQLITE_FIXTURES.includes(f));   // node gen-sqlite.mjs [name…] — regenerate a subset (default: all)
+  const done = await buildSqliteFixtures(here, only.length ? only : SQLITE_FIXTURES);
   if (!done) { console.error('node:sqlite is unavailable in this Node — the committed .db files were left untouched'); process.exit(1); }
-  for (const f of SQLITE_FIXTURES) console.log(`${f}  ${fs.statSync(path.join(here, f)).size} bytes`);
+  if (!hasZstd) console.error('zlib has no zstd in this Node (needs >= 22.15) — zed-threads.db was left untouched');
+  for (const f of done) console.log(`${f}  ${fs.statSync(path.join(here, f)).size} bytes`);
 }

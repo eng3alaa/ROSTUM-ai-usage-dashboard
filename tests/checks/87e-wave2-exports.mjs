@@ -473,6 +473,73 @@ export async function run({ browser, ok }) {
     ok('alibaba bill CSV (B4): a bill import is a sync of the alibaba-modelstudio card (warn after 8 days → ok, keyed label kept, lastSync fresh); an all-undated bill imports nothing, connects nothing and says so; the Imports card copy names the Model Studio bill CSV',
       !al.missing && al.before === 'warn' && al.after.status === 'ok' && al.after.label === 'dashscope-intl.aliyuncs.com · 3 models' && al.after.fresh && !al.empty.src && al.empty.billed === 0 && !al.empty.connected && /bill-empty\.csv: Model Studio bill CSV — no usable lines/.test(al.empty.note)
       && /Alibaba bill CSV/.test(al.badge) && /Model Studio/.test(al.desc) && /Export Bill CSV/.test(al.desc), JSON.stringify({ before: al.before, after: al.after, empty: al.empty, badge: al.badge }));
+    // ---- Plan 9 B6: export-file cards — Mistral Vibe / Sourcegraph Cody / Character.ai (estimated from text, est:1, undated replies skipped + counted per A0 #7)
+    //      + the Cursor front door (an export-file card in Coding tools over the existing cursor-csv importer). Fixtures: out/b6/ (gen.mjs documents the totals). ----
+    const mvTxt = read('b6', 'mistral-vibe', 'mistral-export.json'), cdTxt = read('b6', 'cody', 'cody-history.json'), caTxt = read('b6', 'characterai', 'character_ai_messages.json'), cursorCsv = read('cursor', 'usage-events.csv');
+    const b6 = await page.evaluate(async (mvTxt, cdTxt, caTxt, grokTxt, dscTxt, metaTxt, pxTxt, cursorCsv) => {
+      if (typeof parseMistralVibeExport !== 'function' || typeof parseCodyExport !== 'function' || typeof parseCharacterAiExport !== 'function') return { missing: true };
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const sum = (rows) => rows.reduce((a, r) => ({ in: a.in + r.in, out: a.out + r.out, msgs: a.msgs + r.msgs, est: a.est && r.est === 1 }), { in: 0, out: 0, msgs: 0, est: true });
+      const H = (iso) => new Date(iso).getHours();
+      const hours = (rows) => [...new Set(rows.map(r => r.hour))].sort((a, b) => a - b);
+      const mv = parseMistralVibeExport(JSON.parse(mvTxt)), cd = parseCodyExport(JSON.parse(cdTxt)), ca = parseCharacterAiExport(JSON.parse(caTxt), 'character_ai_messages.json');
+      const noMarks = JSON.parse(mvTxt); delete noMarks.account; noMarks.conversations.forEach(c => delete c.model);
+      const kinds = { mv: sniffJSON(JSON.parse(mvTxt), 'mistral-export.json'), mvUnnamed: sniffJSON(JSON.parse(mvTxt), 'export.json'), mvNoMarks: sniffJSON(noMarks, 'conversations.json'),
+        cd: sniffJSON(JSON.parse(cdTxt), 'cody-history.json'), ca: sniffJSON(JSON.parse(caTxt), 'character_ai_messages.json'), caUnnamed: sniffJSON(JSON.parse(caTxt), 'messages.json'),
+        grok: sniffJSON(JSON.parse(grokTxt), 'grok-export.json'), ds: sniffJSON(JSON.parse(dscTxt), 'deepseek-conversations.json'), meta: sniffJSON(JSON.parse(metaTxt), 'message_1.json'), px: sniffJSON(JSON.parse(pxTxt), 'threads.json') };
+      // worker parity: the three kinds rebuild inside parseInWorker exactly like the inline parsers
+      const J = JSON.stringify;
+      const parity = { mv: J(await parseInWorker('mistral-vibe', mvTxt, null, 'mistral-export.json')) === J(mv), cd: J(await parseInWorker('cody', cdTxt, null, 'cody-history.json')) === J(cd), ca: J(await parseInWorker('characterai', caTxt, null, 'character_ai_messages.json')) === J(ca) };
+      // Imports: the three files in one batch → own sources, export-file hub cards green, the Imports card counts them
+      await App.handleImportFiles([new File([mvTxt], 'mistral-export.json', { type: 'application/json' }), new File([cdTxt], 'cody-history.json', { type: 'application/json' }), new File([caTxt], 'character_ai_messages.json', { type: 'application/json' })]);
+      const note = document.getElementById('import-status').textContent, importsLabel = (Store.connectors.imports || {}).label || null;   // the batch's own label (the single-file drops below rewrite it)
+      const srcs = ['mistral-vibe-export', 'cody-export', 'characterai-export'].map(id => Store.sources[id] ? sum(Store.sources[id].rows).msgs : null);
+      // a second Character.ai message file merges; re-importing the first replaces only itself (perSid, like Perplexity / Meta AI)
+      const ca2 = JSON.parse(caTxt); ca2.chats[0].messages = ca2.chats[0].messages.slice(0, 2); ca2.chats[0].external_id = 'chat2';
+      await App.handleImportFiles([new File([JSON.stringify(ca2)], 'character_ai_messages_2.json', { type: 'application/json' })]);
+      const caAfterSecond = sum(Store.sources['characterai-export'].rows).msgs;
+      await App.handleImportFiles([new File([caTxt], 'character_ai_messages.json', { type: 'application/json' })]);
+      const caAfterReimport = sum(Store.sources['characterai-export'].rows).msgs;
+      App.renderHub();
+      const hub = ['mistral-vibe', 'cody', 'characterai'].map(id => (document.querySelector(`#accounts-hub .acct[data-connector="${id}"] .dot`) || {}).className || 'missing');
+      // the Cursor front door: off before the CSV, ok (green in the Coding group) after
+      const cur = connectorById('cursor');
+      const curBefore = cur ? Store.connectorStatus(cur) : null;
+      await App.handleImportFiles([new File([cursorCsv], 'usage-events.csv', { type: 'text/csv' })]);
+      const curAfter = cur ? Store.connectorStatus(cur) : null;
+      App.renderHub();
+      const curHub = (document.querySelector('#accounts-hub .hub-group[data-group="coding"] .acct[data-connector="cursor"] .dot') || {}).className || 'missing';
+      const badge = document.querySelector('#src-import .badge').textContent, desc = document.querySelector('#src-import .desc').textContent;
+      const out = { mv: { ...sum(mv.rows), meta: mv.meta, models: [...new Set(mv.rows.map(r => r.model))].sort(), plat: mv.rows[0] && mv.rows[0].platform, hours: hours(mv.rows), expHours: [...new Set([H('2026-08-10T09:00:05Z'), H('2026-08-10T09:00:00Z'), H('2026-08-11T08:00:03Z')])].sort((a, b) => a - b) },
+        cd: { ...sum(cd.rows), meta: cd.meta, models: [...new Set(cd.rows.map(r => r.model))].sort(), plat: cd.rows[0] && cd.rows[0].platform, days: [...new Set(cd.rows.map(r => r.d))].sort(), expDays: [...new Set([dayKey(new Date('2026-08-10T09:00:05Z')), dayKey(new Date('2026-08-11T08:00:03Z'))])].sort() },
+        ca: { ...sum(ca.rows), meta: ca.meta, plat: ca.rows[0] && ca.rows[0].platform, model: ca.rows[0] && ca.rows[0].model, sid: ca.rows[0] && ca.rows[0].sid, hours: hours(ca.rows), expHours: [...new Set([H('2026-08-10T09:00:05Z'), H('2026-08-10T21:30:05Z'), H('2026-08-11T08:00:03Z')])].sort((a, b) => a - b) },
+        kinds, parity, note, srcs, caAfterSecond, caAfterReimport, hub, importsLabel, badge, desc, order: PLATFORM_ORDER, imports: connectorById('imports').srcIds,
+        cursor: cur ? { kind: cur.kind, cat: cur.category, quality: cur.quality, srcIds: cur.srcIds, platform: cur.platform, before: curBefore, after: curAfter, hub: curHub, note: cur.qualityNote, usage: (cur.links || {}).usage || '', inImports: connectorById('imports').srcIds.includes('cursor-csv') } : null };
+      Store.sources = {}; Store.connectors = {}; Store.billed = {}; Store.persist(); App._render();
+      return out;
+    }, mvTxt, cdTxt, caTxt, grokTxt, dscTxt, metaTxt, pxTxt, cursorCsv);
+    ok('mistral vibe (B6): export parsed (est. in=16 out=23 msgs=3; 3 conversations; 1 undated reply skipped; model per conversation — mistral-large-latest, else "mistral"; a message created_at, else the conversation\'s; parts[] content; hours kept) as platform "Mistral Vibe"',
+      !b6.missing && b6.mv.in === 16 && b6.mv.out === 23 && b6.mv.msgs === 3 && b6.mv.est && b6.mv.meta.convs === 3 && b6.mv.meta.skipped === 1 && JSON.stringify(b6.mv.models) === JSON.stringify(['mistral', 'mistral-large-latest']) && b6.mv.plat === 'Mistral Vibe'
+      && JSON.stringify(b6.mv.hours) === JSON.stringify(b6.mv.expHours), JSON.stringify(b6.mv));
+    ok('cody (B6): History > Export JSON parsed (est. in=16 out=23 msgs=3 of 3 chats; 1 undated reply skipped; the interaction timestamp, else the chat\'s key; chatModel else "cody"; displayText fallback; an unanswered turn is nothing) as platform "Sourcegraph Cody"',
+      !b6.missing && b6.cd.in === 16 && b6.cd.out === 23 && b6.cd.msgs === 3 && b6.cd.est && b6.cd.meta.chats === 3 && b6.cd.meta.skipped === 1 && JSON.stringify(b6.cd.models) === JSON.stringify(['anthropic/claude-sonnet-4-5', 'cody']) && b6.cd.plat === 'Sourcegraph Cody'
+      && JSON.stringify(b6.cd.days) === JSON.stringify(b6.cd.expDays), JSON.stringify(b6.cd));
+    ok('character.ai (B6): the message list parsed with the tolerant human flags (author.is_human / is_human / src__is_human), text / raw_content and create_time / created_at / created (est. in=16 out=23 msgs=3; 1 undated reply skipped; hours kept) as platform "Character.ai", model character.ai, sid = file name',
+      !b6.missing && b6.ca.in === 16 && b6.ca.out === 23 && b6.ca.msgs === 3 && b6.ca.est && b6.ca.meta.skipped === 1 && b6.ca.plat === 'Character.ai' && b6.ca.model === 'character.ai' && b6.ca.sid === 'character_ai_messages.json'
+      && JSON.stringify(b6.ca.hours) === JSON.stringify(b6.ca.expHours), JSON.stringify(b6.ca));
+    ok('sniff (B6): mistral-vibe-export (by name, or by the account block / a Mistral-family model — conversations.json with neither stays unknown) / cody-export / characterai-export (name-gated: messages.json → unknown); the Wave 2 fixtures still sniff as grok / deepseek-chat / meta-ai / perplexity; the three kinds rebuild in parseInWorker with identical output',
+      !b6.missing && b6.kinds.mv === 'mistral-vibe-export' && b6.kinds.mvUnnamed === 'mistral-vibe-export' && b6.kinds.mvNoMarks === 'unknown' && b6.kinds.cd === 'cody-export' && b6.kinds.ca === 'characterai-export' && b6.kinds.caUnnamed === 'unknown'
+      && b6.kinds.grok === 'grok-export' && b6.kinds.ds === 'deepseek-chat-export' && b6.kinds.meta === 'meta-ai-export' && b6.kinds.px === 'perplexity-export' && b6.parity.mv && b6.parity.cd && b6.parity.ca, JSON.stringify({ kinds: b6.kinds, parity: b6.parity }));
+    ok('imports (B6): one batch lands the three exports under their own sources (msgs 3 / 3 / 3), the notes name each with the undated count, the export-file hub cards turn green and the Imports card reads "3 file(s) imported"; a second Character.ai message file merges (4) and the first re-imported replaces only itself (4); srcIds / PLATFORM_ORDER / badge / copy list Mistral Vibe, Cody and Character.ai',
+      !b6.missing && JSON.stringify(b6.srcs) === JSON.stringify([3, 3, 3]) && /Mistral Vibe export — 3 conversations, 3 replies/.test(b6.note) && /1 undated reply skipped/.test(b6.note) && /Cody export — 3 chats, 3 replies/.test(b6.note) && /Character\.ai export — 3 replies/.test(b6.note)
+      && b6.hub.every(cls => /\bok\b/.test(cls)) && b6.importsLabel === '3 file(s) imported' && b6.caAfterSecond === 4 && b6.caAfterReimport === 4
+      && ['mistral-vibe-export', 'cody-export', 'characterai-export'].every(id => b6.imports.includes(id)) && ['Mistral Vibe', 'Sourcegraph Cody', 'Character.ai'].every(p => b6.order.includes(p))
+      && /Mistral Vibe/.test(b6.badge) && /Cody/.test(b6.badge) && /Character\.ai/.test(b6.badge) && /Mistral Vibe/.test(b6.desc) && /Cody/.test(b6.desc) && /Character\.ai/.test(b6.desc),
+      JSON.stringify({ srcs: b6.srcs, note: b6.note, hub: b6.hub, importsLabel: b6.importsLabel, caAfterSecond: b6.caAfterSecond, caAfterReimport: b6.caAfterReimport, badge: b6.badge }));
+    ok('cursor (B6 front door): the Cursor card is an export-file entry in Coding tools (quality exact, srcIds [cursor-csv] ⊂ imports.srcIds, platform Cursor, usage link = cursor.com/dashboard) whose copy says the local state.vscdb carries no real token counts, points at Export CSV and marks the team Admin API collector-only; off before a usage-events CSV import, ok (green in the Coding group) after it',
+      !b6.missing && !!b6.cursor && b6.cursor.kind === 'export-file' && b6.cursor.cat === 'coding' && b6.cursor.quality === 'exact' && JSON.stringify(b6.cursor.srcIds) === JSON.stringify(['cursor-csv']) && b6.cursor.platform === 'Cursor' && b6.cursor.inImports
+      && /cursor\.com\/dashboard/.test(b6.cursor.usage) && /state\.vscdb/.test(b6.cursor.note) && /no real token counts/i.test(b6.cursor.note) && /Export CSV/.test(b6.cursor.note) && /Admin API/.test(b6.cursor.note) && /collector/i.test(b6.cursor.note)
+      && b6.cursor.before === 'off' && b6.cursor.after === 'ok' && /\bok\b/.test(b6.cursor.hub), JSON.stringify(b6.cursor && { ...b6.cursor, note: b6.cursor.note.slice(0, 120) }));
   } finally {
     await page.close();
   }

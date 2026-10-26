@@ -50,13 +50,29 @@ const undatedNote = (meta) => meta.skipped ? `; ${meta.skipped} undated ${meta.s
 /** deflate-raw → bytes, refusing to inflate past `declared` (the central directory's uncompressed size). The size is attacker-controlled, so this
  *  bound is what stands between a small archive and an unbounded allocation (A0 #22); an honest entry is read whole. */
 async function inflateBounded(blob, declared) {
-  const reader = blob.stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+  return decompressBounded(blob, 'deflate-raw', declared, `ZIP entry inflates past its declared size (${declared} bytes) — refusing to read it`);
+}
+/** Plan 9 B6: does this browser's DecompressionStream know zstd (Zed's thread blobs)? Probed once; the Zed parser and remoteDecodeFor read it. */
+let _zstdInPage = null;
+function hasZstdDecompression() {
+  if (_zstdInPage === null) { try { new DecompressionStream('zstd'); _zstdInPage = true; } catch { _zstdInPage = false; } }   // a TypeError = the format is unknown here
+  return _zstdInPage;
+}
+const ZSTD_MAX_BYTES = 64 * 1024 * 1024;   // one decompressed Zed thread — a frame claiming more is refused, never allocated
+/** zstd frame → bytes through the page's DecompressionStream('zstd'), bounded. Throws when the browser lacks zstd (the caller says "needs the local collector"). */
+async function zstdDecompressBounded(bytes, limit = ZSTD_MAX_BYTES) {
+  if (!hasZstdDecompression()) throw new Error('needs the local collector on this browser — it cannot decompress zstd (DecompressionStream has no "zstd")');
+  return decompressBounded(new Blob([bytes]), 'zstd', limit, `zstd frame inflates past ${limit} bytes — refusing to read it`);
+}
+/** blob → bytes through DecompressionStream(format), refusing to grow past `limit` bytes (`tooBig` is the thrown message). */
+async function decompressBounded(blob, format, limit, tooBig) {
+  const reader = blob.stream().pipeThrough(new DecompressionStream(format)).getReader();
   const chunks = []; let total = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.length;
-    if (total > declared) { await reader.cancel(); throw new Error(`ZIP entry inflates past its declared size (${declared} bytes) — refusing to read it`); }
+    if (total > limit) { await reader.cancel(); throw new Error(tooBig); }
     chunks.push(value);
   }
   const out = new Uint8Array(total); let at = 0;
@@ -81,6 +97,7 @@ function sniffJsonlKind(o, fileName) {
   if (type === 'assistant' || type === 'user' || type === 'summary' || (o.message && typeof o.message === 'object' && o.message.usage) || 'parentUuid' in o || (o.sessionId && o.uuid)) return 'claude';
   const hasTs = o.ts != null || o.timestamp != null;
   if (o.prompt_eval_count != null || o.eval_count != null || (hasTs && ['in', 'out', 'input_tokens', 'output_tokens', 'prompt_tokens', 'completion_tokens'].some(k => typeof o[k] === 'number'))) return 'ollama';   // usage-logger line (docs/tools/ollama-usage-logger.mjs, or anything scripted to that shape) — top-level counts only, which is all parseUsageLoggerJsonl reads
+  if (otelSpansOf(o).some(s => otelHasUsage(otelAttrs(s)))) return 'copilot-vscode';   // Plan 9 B6: an OTel span (or OTLP batch) line carrying gen_ai.usage.* — Copilot Chat's file exporter
   const name = String(fileName || '');
   if (/(^|\/)rollout-[^/]*\.jsonl$/i.test(name)) return 'codex';
   if (/(^|\/)tokensGenerated\.jsonl$/i.test(name)) return 'continue';
@@ -110,6 +127,7 @@ const JSONL_ROUTE = {
   continue: { id: 'continue', canon: (n) => n.replace(/\.jsonl$/i, '') + '/tokensGenerated.jsonl' },
   junie: { id: 'junie', canon: (n) => n.replace(/\.jsonl$/i, '') + '-events.jsonl' },
   ollama: { id: 'ollama', canon: (n) => 'usage-' + n },
+  'copilot-vscode': { id: 'copilot-vscode', canon: (n) => n },   // Plan 9 B6: the OTel outfile keeps its own name (the card's patterns take any .jsonl / .ndjson)
 };
 const jsonlRoutePath = (c, kind, name) => (c.patterns || []).some(re => re.test(name)) ? name : JSONL_ROUTE[kind].canon(name);
 function sniffJSON(obj, fileName) {
@@ -135,15 +153,19 @@ function sniffJSON(obj, fileName) {
     if (obj[0] && obj[0].chat_messages) return 'claudeai-export';
     if (dsConv(obj[0]) && dsMark(obj, fileName)) return 'deepseek-chat-export';
     if (pxItem(obj[0]) || (obj[0] && Array.isArray(obj[0].entries) && pxItem(obj[0].entries[0]))) return 'perplexity-export';
+    if (isCharacterAiExport(obj, fileName)) return 'characterai-export';   // Plan 9 B6: a bare message list (human flag + text + time), name-gated on "character"
   }
   if (obj && !Array.isArray(obj) && typeof obj === 'object') {
     const convs = Array.isArray(obj.conversations) ? obj.conversations : null;
     if (convs && convs[0] && Array.isArray(convs[0].responses)) return 'grok-export';   // grok.com: {conversations:[{conversation, responses:[{message, sender, create_time}]}]}
     const dsList = convs || (Array.isArray(obj.data) ? obj.data : null);
     if (dsList && dsConv(dsList[0]) && dsMark(obj, fileName)) return 'deepseek-chat-export';
+    if (convs && isMistralVibeExport(obj, convs, fileName)) return 'mistral-vibe-export';   // Plan 9 B6: {account, conversations:[{model, messages:[{role, content}]}]} — the name, the account block or a Mistral-family model marks it (a bare {conversations} stays unknown)
     if (Array.isArray(obj.participants) && Array.isArray(obj.messages) && (obj.participants.some(p => /meta\s*ai/i.test(p && p.name)) || obj.messages.some(m => /meta\s*ai/i.test(m && m.sender_name)))) return 'meta-ai-export';
     const pxList = Array.isArray(obj.threads) ? obj.threads : Array.isArray(obj.data) ? obj.data : null;   // {threads:[…]} or {data:[…]} — parsePerplexityExport reads both
     if (pxList && pxList[0] && (pxItem(pxList[0]) || (Array.isArray(pxList[0].entries) && pxItem(pxList[0].entries[0])))) return 'perplexity-export';
+    if (isCodyExport(obj)) return 'cody-export';   // Plan 9 B6: {"<ISO time>": {id, interactions:[{humanMessage, assistantMessage}]}} — Cody's History > Export
+    if (isCharacterAiExport(obj, fileName)) return 'characterai-export';   // Plan 9 B6: {chats:[{messages}]} / {messages} with human flags, name-gated on "character"
     if (convs && !convs.length) return 'empty-export';   // an empty {conversations:[]} (ChatGPT / Grok / DeepSeek chat alike) never reaches a parser, so it cannot replace an earlier import
     if (convs && convs[0] && convs[0].mapping) return 'chatgpt-export-wrapped';   // only ChatGPT mapping trees — any other {conversations:[…]} stays unknown
   }

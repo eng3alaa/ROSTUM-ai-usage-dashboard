@@ -284,6 +284,38 @@ export async function run({ browser, ok }) {
       b4.amazonq && b4.mistral && b4.noLambda, JSON.stringify({ amazonq: b4.amazonq, mistral: b4.mistral, noLambda: b4.noLambda }));
     ok('hub (B4): every registry card still renders at 74 entries (rendered = CONNECTORS.length ≥ 70; ≈85 after B5/B6) and a name search for "z.ai" narrows the hub to the two Z.ai cards',
       b4.rendered === b4.n && b4.n >= 70 && JSON.stringify(b4.zaiCards) === JSON.stringify(['zai', 'zai-chat']), JSON.stringify({ rendered: b4.rendered, n: b4.n, zaiCards: b4.zaiCards }));
+    // ---- Plan 9 B6: Zed + Copilot Chat OTel (folder-log), the Cursor front door and three export-file cards (Mistral Vibe, Cody, Character.ai) ----
+    const b6 = await page.evaluate(() => {
+      const want = { zed: ['Zed', 'coding', 'folder-log', 'exact', ['zed']], 'copilot-vscode': ['GitHub Copilot', 'coding', 'folder-log', 'exact', ['copilot-vscode']], cursor: ['Cursor', 'coding', 'export-file', 'exact', ['cursor-csv']],
+        'mistral-vibe': ['Mistral Vibe', 'chat', 'export-file', 'estimated', ['mistral-vibe-export']], cody: ['Sourcegraph Cody', 'coding', 'export-file', 'estimated', ['cody-export']], characterai: ['Character.ai', 'chat', 'export-file', 'estimated', ['characterai-export']] };
+      const imports = connectorById('imports');
+      const bad = [];
+      for (const [id, [platform, cat, kind, quality, srcIds]] of Object.entries(want)) {
+        const c = connectorById(id);
+        if (!c) { bad.push(id + ': missing'); continue; }
+        if (c.platform !== platform || c.category !== cat || c.kind !== kind || c.quality !== quality) bad.push(id + ': platform/category/kind/quality');
+        if (JSON.stringify(c.srcIds) !== JSON.stringify(srcIds)) bad.push(id + ': srcIds ' + JSON.stringify(c.srcIds));
+        if (c.statusEl !== id + '-status' || !document.getElementById(c.statusEl) || !document.getElementById('src-' + id)) bad.push(id + ': statusEl / card');
+        if (!c.links || !c.links.get || !c.links.docs) bad.push(id + ': links');
+        if (!Array.isArray(c.paths) || !c.paths.length || !c.hint) bad.push(id + ': paths / hint');
+        if (!(typeof c.qualityNote === 'string' && c.qualityNote.length >= 80 && /^(Exact|Estimated)/.test(c.qualityNote))) bad.push(id + ': copy must open with the quality');
+        if (kind === 'folder-log' && (typeof globalThis[c.parser] !== 'function' || !Array.isArray(c.patterns) || !c.patterns.length)) bad.push(id + ': parser / patterns');
+        if (kind === 'export-file' && (c.parser || c.fetch || c.keyLS || c.patterns || !c.srcIds.every(s => imports.srcIds.includes(s)))) bad.push(id + ': an export-file card parses / fetches nothing itself and its srcIds are Imports\' ');
+        if (!PLATFORM_ORDER.includes(c.platform)) bad.push(id + ': platform order');
+      }
+      const note = (id) => (connectorById(id) || {}).qualityNote || '';
+      const cur = connectorById('cursor') || {};
+      return { bad, n: CONNECTORS.length, dupIds: CONNECTORS.map(c => c.id).filter((x, i, a) => a.indexOf(x) !== i), cursorOnce: PLATFORM_ORDER.filter(p => p === 'Cursor').length === 1,
+        cursor: /^Exact/.test(note('cursor')) && /state\.vscdb/.test(note('cursor')) && /no real token counts/i.test(note('cursor')) && /Export CSV/.test(note('cursor')) && /Admin API/.test(note('cursor')) && /collector/i.test(note('cursor')) && /cursor\.com\/dashboard/.test((cur.links || {}).usage || ''),
+        zed: (connectorById('zed') || {}).decode === 'zstd' && /zstd/.test(note('zed')) && /threads\.db/.test(note('zed')) && /needs the local collector on this browser/.test(note('zed')),
+        estimatedHonest: ['mistral-vibe', 'cody', 'characterai'].every(id => /^Estimated/.test(note(id)) && /third-party|not documented|undocumented|sniff/i.test(note(id))),
+        cody: /Enterprise/.test(note('cody')), characterai: /weeks/.test(note('characterai')), mistral: /Le Chat/.test(note('mistral-vibe')) && /Vibe/.test(note('mistral-vibe')) && /admin\.mistral\.ai/.test(note('mistral-vibe')),
+        importsHas: ['mistral-vibe-export', 'cody-export', 'characterai-export', 'cursor-csv'].every(s => imports.srcIds.includes(s)) };
+    });
+    ok('registry (B6): zed / copilot-vscode (exact folder-log, Coding), cursor (exact export-file, Coding, srcIds [cursor-csv]), mistral-vibe / characterai (estimated export-file, Chat) and cody (estimated export-file, Coding) — platform, category, kind, quality, srcIds (export-file ⊂ imports.srcIds, no parser / fetch / patterns of its own), statusEl + card, get + docs links, paths + hint, copy opens with the quality; 85 entries, ids unique, platforms in PLATFORM_ORDER (Cursor once)',
+      b6.bad.length === 0 && b6.n === 85 && b6.dupIds.length === 0 && b6.cursorOnce && b6.importsHas, JSON.stringify({ bad: b6.bad, n: b6.n, dupIds: b6.dupIds, cursorOnce: b6.cursorOnce, importsHas: b6.importsHas }));
+    ok('registry (B6): honesty copy — Cursor opens "Exact", says state.vscdb carries no real token counts, names Export CSV and the team Admin API as collector-only, links cursor.com/dashboard as the usage page; zed carries decode "zstd" and names zstd, threads.db and "needs the local collector on this browser"; the three estimated cards open "Estimated" and say their export layout is third-party / undocumented / sniffed; Cody names Enterprise, Character.ai the weeks-long export, Mistral the Le Chat → Vibe rename and admin.mistral.ai',
+      b6.cursor && b6.zed && b6.estimatedHonest && b6.cody && b6.characterai && b6.mistral, JSON.stringify(b6));
   } finally {
     await page.close();
   }

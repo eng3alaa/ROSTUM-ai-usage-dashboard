@@ -3,7 +3,7 @@
 // same JSON in Node and asserts, in the page, that Pricing.resolve() lands where the JSON says for EVERY id: rows[].ids → the row's
 // label (ids that are also retired aliases price as their successor and carry aliasOf), overrides → the platform row only when the
 // platform is given, aliases → aliasOf === successor and never the fallback; the ids asserted by 88/97 keep their labels; a user-edited
-// LS 'prices' list still replaces the rows only; the drift guard (sync-prices --check) exits 0; the file stays ≤ 800 KB.
+// LS 'prices' list still replaces the rows only; the drift guard (sync-prices --check) exits 0; the file stays ≤ 1,024 KB (the Plan 9 gate, 800 KB until B6).
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -145,5 +145,5 @@ export async function run({ browser, ok }) {
   const chk = spawnSync(process.execPath, [path.join(ROOT, 'tests', 'tools', 'sync-prices.mjs'), '--check'], { cwd: ROOT, encoding: 'utf8' });
   ok('prices: node tests/tools/sync-prices.mjs --check exits 0 (PRICES block == fresh render of the JSON)', chk.status === 0, String((chk.stdout || '') + (chk.stderr || '')).trim().slice(0, 400));
   const html = fs.readFileSync(path.join(ROOT, 'AI Usage Dashboard.html'));
-  ok('prices: AI Usage Dashboard.html is ≤ 800 KB with the full price list inline', html.length <= 800 * 1024, Math.round(html.length / 1024) + ' KB');
+  ok('prices: AI Usage Dashboard.html is ≤ 1,024 KB with the full price list inline (the Plan 9 gate, raised from 800 KB in B6)', html.length <= 1024 * 1024, Math.round(html.length / 1024) + ' KB');
 }

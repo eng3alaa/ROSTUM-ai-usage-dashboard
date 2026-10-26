@@ -29,16 +29,18 @@ function matchConnectorFiles(c, entries) {
  *  same parser, same cache keys (path + size + lastModified → unchanged files stay cache hits). Nothing is fetched until a reader asks:
  *  stream() is a ReadableStream (highWaterMark 0) whose first pull opens the request and then pumps the response body chunk by chunk —
  *  readLines never holds a whole log in memory. An HTTP error rejects with its status ("HTTP 404 Not Found reading <path> …"), which
- *  parseFolderCached counts as one unreadable file and moves on. The token travels in the Authorization header only — never in the URL. */
+ *  parseFolderCached counts as one unreadable file and moves on. The token travels in the Authorization header only — never in the URL.
+ *  decode (Plan 9 B6): 'zstd' adds &decode=zstd — the collector then decodes Zed's zstd data (a frame → its bytes; threads.db → one JSON line per row) for a
+ *  browser whose DecompressionStream lacks zstd (remoteDecodeFor decides); the file's cache signature is unchanged, the parser accepts both forms. */
 class RemoteFile {
-  constructor(base, token, tool, entry) {
+  constructor(base, token, tool, entry, decode = null) {
     const rel = String(entry.path);
     this.name = rel.split('/').pop();
     this.size = +entry.size || 0;
     this.lastModified = +entry.mtime || 0;
     this.webkitRelativePath = rel;
     this.tool = tool;
-    this._url = String(base).replace(/\/+$/, '') + '/api/file?tool=' + encodeURIComponent(tool) + '&path=' + encodeURIComponent(rel);
+    this._url = String(base).replace(/\/+$/, '') + '/api/file?tool=' + encodeURIComponent(tool) + '&path=' + encodeURIComponent(rel) + (decode ? '&decode=' + encodeURIComponent(decode) : '');   // decode (B6): 'zstd' asks the collector to decode Zed's zstd data for a browser that cannot
     this._headers = { Authorization: 'Bearer ' + token };
   }
   async _open() {
@@ -68,6 +70,11 @@ class RemoteFile {
   }
   async text() { return (await this._open()).text(); }
   async arrayBuffer() { return (await this._open()).arrayBuffer(); }
+}
+/** Plan 9 B6 (design 8): the decode a collector-fed file of this connector needs — 'zstd' for a connector whose data is zstd-compressed (Zed's threads.db, registry
+ *  `decode: 'zstd'`) when THIS browser cannot decompress zstd itself, else null (the page decodes in place; the collector streams the bytes as they are). */
+function remoteDecodeFor(c) {
+  return c && c.decode === 'zstd' && !hasZstdDecompression() ? 'zstd' : null;
 }
 
 /** Generic incremental scan: per-file aggregates cached by (connectorId, path, size, lastModified).
@@ -100,7 +107,7 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
   const sibSig = new Map();   // dir → 'size\u0001lastModified' per sibling, path-sorted so the string is stable across scans
   for (const s of [...siblingFiles].sort((a, b) => a.path < b.path ? -1 : 1)) { const dir = s.path.slice(0, s.path.lastIndexOf('/') + 1); sibSig.set(dir, (sibSig.get(dir) || '') + '\u0001' + s.file.size + '\u0001' + s.file.lastModified); }
   const rows = [], projects = [];
-  let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0, lines = 0, badLines = 0, badFiles = 0, cowork = null;
+  let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0, lines = 0, badLines = 0, badFiles = 0, cowork = null, badFileReason = null;
   const runningSeen = new Set();
   const seen = new Set();   // signatures present in THIS scan — stale entries for absent files get pruned below
   const prefix = connector.id + '\u0001';
@@ -117,7 +124,12 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
       // appending to its live session log mid-scan) or one throwing parser must NEVER abort the batch:
       // count it, don't cache it, move on. Surfaced as meta.badFiles → "N file(s) unreadable" in the status line.
       try { res = await parser([f], null, runningSeen, connector, siblingFiles); }
-      catch (e) { badFiles++; done++; if (onProgress) onProgress(done, main.length); continue; }
+      catch (e) {
+        badFiles++; done++;
+        if (!badFileReason) badFileReason = String((e && e.message) || e).slice(0, 200);   // the first failure's reason travels to the status line (B6: "needs the local collector on this browser")
+        if (onProgress) onProgress(done, main.length);
+        continue;
+      }
       entry = { rows: res.rows, projects: res.projects || [], msgs: res.meta.msgs || 0, ids: res.meta.addedIds || [], lines: res.meta.lines || 0, badLines: res.meta.badLines || 0 };
       if (res.meta.cowork) entry.cowork = res.meta.cowork;   // Plan 9 B1: a Cowork transcript's session ids / an audit's reported figures travel with the file's entry
       // ids this file skipped as duplicates of an EARLIER file (an in-file repeat is the file's own id, not another file's)
@@ -148,7 +160,7 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
   // badFiles also folds in the walker's getFile() failures (collectFilesFromHandle tags the list with .unreadable);
   // skipped = files handed in that matched neither patterns nor siblings (not this connector's — never an error)
   return { rows, projects: [...pm.values()], meta: { files: main.length, msgs, parsedFiles, cachedFiles, lines, badLines,
-    badFiles: badFiles + (files.unreadable || 0), skipped: Math.max(0, files.length - main.length - siblingFiles.length), ...(cowork ? { cowork } : {}) } };
+    badFiles: badFiles + (files.unreadable || 0), skipped: Math.max(0, files.length - main.length - siblingFiles.length), ...(cowork ? { cowork } : {}), ...(badFileReason ? { badFileReason } : {}) } };
 }
 /** Plan 9 B1: folds one file's meta.cowork (parseClaudeLogs) into the scan's — session ids union; a session's reported figure comes from the
  *  LAST file (path order) that carried it (two audit files for one session would be a copy, never two halves); the counters add up. */

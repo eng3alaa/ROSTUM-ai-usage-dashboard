@@ -329,7 +329,7 @@ export async function run({ browser, ok }) {
       const sync = { open: dlg.open, hostsImports: !!dlg.querySelector('#src-import') };
       closed = new Promise(r => dlg.addEventListener('close', r, { once: true })); dlg.close(); await closed;
       const kinds = CONNECTORS.filter(x => x.kind === 'export-file').map(x => [x.id, x.platform, x.category, x.quality, x.srcIds.join('|')]);
-      const copyOk = CONNECTORS.filter(x => x.kind === 'export-file').every(x => /^Estimated/.test(x.qualityNote) && /export/i.test(x.qualityNote) && !!x.links && !!x.paths && !!x.hint && document.getElementById(x.statusEl));
+      const copyOk = CONNECTORS.filter(x => x.kind === 'export-file').every(x => /^(Estimated|Exact)/.test(x.qualityNote) && /export/i.test(x.qualityNote) && !!x.links && !!x.paths && !!x.hint && document.getElementById(x.statusEl));   // quality-first: Exact only for Cursor (its CSV carries real counts — Plan 9 B6)
       Store.sources = {}; Store.persist(); App._render();
       return { before, opened, after, manage, afterManage, sync, kinds, copyOk };
     });
@@ -340,9 +340,11 @@ export async function run({ browser, ok }) {
       exp.after.status === 'ok' && /\bok\b/.test(exp.after.dot) && JSON.stringify(exp.after.btns) === JSON.stringify(['Manage', 'Import file…']) && exp.after.label === 'from your data export' && /^Imported /.test(exp.after.sync) && /150/.test(exp.after.stats) && exp.after.noEntry
       && exp.after.srcRevealed && /Imported/.test(exp.after.statusText) && /2 messages/.test(exp.after.statusText) && exp.manage.open && exp.manage.hostsOwn && exp.manage.importBtn && /estimated/.test(exp.manage.badge || '') && exp.afterManage.srcStillRevealed
       && exp.sync.open && exp.sync.hostsImports, JSON.stringify({ after: exp.after, manage: exp.manage, afterManage: exp.afterManage, sync: exp.sync }));
-    ok('hub: the seven export-file cards (ChatGPT, Claude.ai, Grok, Microsoft Copilot, Perplexity, Meta AI, DeepSeek chat) are chat / estimated, copy is quality-first and export-based, each has links, paths, hint and a live status element',
-      JSON.stringify(exp.kinds) === JSON.stringify([['chatgpt-app', 'ChatGPT', 'chat', 'estimated', 'chatgpt'], ['claudeai-app', 'Claude.ai', 'chat', 'estimated', 'claudeai'], ['grok', 'Grok', 'chat', 'estimated', 'grok-export'], ['mscopilot', 'Microsoft Copilot', 'chat', 'estimated', 'copilot-activity-csv'],
-        ['perplexity', 'Perplexity', 'chat', 'estimated', 'perplexity-export'], ['meta-ai', 'Meta AI', 'chat', 'estimated', 'meta-ai-export'], ['deepseek-chat', 'DeepSeek chat', 'chat', 'estimated', 'deepseek-chat-export']]) && exp.copyOk, JSON.stringify(exp.kinds));
+    ok('hub: the eleven export-file cards — Cursor (coding / exact, over cursor-csv) and Sourcegraph Cody (coding / estimated) from Plan 9 B6 in registry order ahead of the chat ones: ChatGPT, Claude.ai, Grok, Microsoft Copilot, Perplexity, Meta AI, DeepSeek chat, Mistral Vibe, Character.ai (chat / estimated) — copy is quality-first (Exact / Estimated) and export-based, each has links, paths, hint and a live status element',
+      JSON.stringify(exp.kinds) === JSON.stringify([['cursor', 'Cursor', 'coding', 'exact', 'cursor-csv'], ['cody', 'Sourcegraph Cody', 'coding', 'estimated', 'cody-export'],
+        ['chatgpt-app', 'ChatGPT', 'chat', 'estimated', 'chatgpt'], ['claudeai-app', 'Claude.ai', 'chat', 'estimated', 'claudeai'], ['grok', 'Grok', 'chat', 'estimated', 'grok-export'], ['mscopilot', 'Microsoft Copilot', 'chat', 'estimated', 'copilot-activity-csv'],
+        ['perplexity', 'Perplexity', 'chat', 'estimated', 'perplexity-export'], ['meta-ai', 'Meta AI', 'chat', 'estimated', 'meta-ai-export'], ['deepseek-chat', 'DeepSeek chat', 'chat', 'estimated', 'deepseek-chat-export'],
+        ['mistral-vibe', 'Mistral Vibe', 'chat', 'estimated', 'mistral-vibe-export'], ['characterai', 'Character.ai', 'chat', 'estimated', 'characterai-export']]) && exp.copyOk, JSON.stringify(exp.kinds));
     // fix (modal): the in-modal "Import file…" of an export-file card switches the modal to Imports — the export card goes home first
     // (re-hidden while off), the Imports card is hosted alone, and close leaves #modal-body empty (no orphan, no stacked cards)
     const stack = await page.evaluate(async () => {

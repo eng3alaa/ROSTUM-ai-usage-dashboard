@@ -41,7 +41,7 @@ jobs:
 
       - name: Hygiene (no raw control bytes, size gate)
         run: |
-          node -e "const b=require('fs').readFileSync('AI Usage Dashboard.html');let n=0;for(const x of b)if(x<9)n++;console.log('control bytes:',n,'bytes:',b.length);if(n||b.length>800*1024)process.exit(1)"
+          node -e "const b=require('fs').readFileSync('AI Usage Dashboard.html');let n=0;for(const x of b)if(x<9)n++;console.log('control bytes:',n,'bytes:',b.length);if(n||b.length>1024*1024)process.exit(1)"
 
       - name: Run the suite
         env:
