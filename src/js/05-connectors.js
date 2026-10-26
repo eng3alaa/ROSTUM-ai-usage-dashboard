@@ -35,7 +35,7 @@ const CONNECTORS = [
     links: { docs: 'README.md#automatic-mode' } },
   { id: 'local',      platform: 'Claude Code/Desktop', name: 'Claude Code / Desktop', category: 'coding', kind: 'folder',
     statusEl: 'local-status',    brand: '#d97748', mark: 'CC', srcIds: ['local', 'local-import'],
-    patterns: [/\.jsonl$/i], exclude: /\/(todos|statsig)\//, parser: 'parseClaudeLogs' },
+    patterns: [/\.jsonl$/i], exclude: /\/(todos|statsig|outputs|uploads|uploads-tmp|\.project-cache)\//, parser: 'parseClaudeLogs' },   // Plan 9 B1: a Cowork session's outputs/ uploads/ .project-cache/ hold files the task wrote, not transcripts
   { id: 'anthropic',  platform: 'Anthropic API',       name: 'Anthropic API',         category: 'api', kind: 'admin-key',
     statusEl: 'anthropic-status', brand: '#d4a27f', mark: 'An', srcIds: ['anthropic'], keyLS: 'key:anthropic', fetch: 'fetchAnthropicAll',
     keyLabel: 'Admin key', keyHint: 'sk-ant-admin-… from console.anthropic.com → Settings → API keys',

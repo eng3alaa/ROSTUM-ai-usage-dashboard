@@ -3,7 +3,7 @@
  *  connector-prefixed signatures) → v4 (Roo/Cline inclusive tokensIn + per-request model, local:1 flags, Gemini CLI
  *  tool tokens) → v5 (folder-log project rows) → v6 (Codex per-turn last_token_usage; dupIds / dupTruncated entries). prune() sweeps
  *  EVERY older-version key so IDB keeps no dead entries. */
-const SCAN_CACHE_VER = 'scan:v6:';   // v6 (Plan 5 review): T3 books Codex per-turn last_token_usage — output changed for unchanged bytes — and T2's dupIds / dupOnly entries need a rewrite (pre-T2 entries carry none) → one-time re-parse. v5: folder-log parsers emit project rows (Plan 4b T15)
+const SCAN_CACHE_VER = 'scan:v7:';   // v7 (Plan 9 B1): a Cowork audit.jsonl parsed before B1 cached the audit's mirror lines as rows (sid "audit") and subagent rows under their agent-* sid; the entries now carry cowork findings → one-time re-parse. v6 (Plan 5 review): T3 books Codex per-turn last_token_usage — output changed for unchanged bytes — and T2's dupIds / dupOnly entries need a rewrite (pre-T2 entries carry none) → one-time re-parse. v5: folder-log parsers emit project rows (Plan 4b T15)
 const ScanCache = {
   async get(sig) { try { return await IDB.get(SCAN_CACHE_VER + sig); } catch { return null; } },
   async set(sig, entry) { try { await IDB.set(SCAN_CACHE_VER + sig, entry); } catch {} },

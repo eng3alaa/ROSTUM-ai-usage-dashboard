@@ -655,13 +655,14 @@ details.price-group table { margin: 0 0 8px; }
 
     <div class="card src" id="src-local">
       <div class="card-head"><h2>Claude Code / Desktop (local logs)</h2><span class="badge">exact</span></div>
-      <div class="desc">Reads the session logs Claude Code and the desktop app keep in the <b>.claude</b> folder in your user folder (e.g. <code>C:\Users\you\.claude</code>). Exact token counts per model, project and day. Or run the local collector (first card in Coding tools) and skip the folder picker entirely.</div>
+      <div class="desc">Reads the session logs Claude Code and the desktop app keep in the <b>.claude</b> folder in your user folder (e.g. <code>C:\Users\you\.claude</code>). Exact token counts per model, project and day. <b>Cowork</b> (the desktop app's agent mode) keeps its sessions elsewhere: pick <code>.claude</code> and, for Cowork, the Claude app folder — Windows <code>%APPDATA%\Claude</code> (Microsoft Store edition <code>%LOCALAPPDATA%\Claude-Data</code>, 3P edition <code>%LOCALAPPDATA%\Claude-3p</code>), macOS <code>~/Library/Application Support/Claude</code>, Linux <code>~/.config/Claude</code>. Its <code>local-agent-mode-sessions</code> folder holds the transcripts and, per session, an <code>audit.jsonl</code> with Anthropic's own cost figure, shown below next to our estimate for the same sessions (never counted as billed). The folder picker loads one folder at a time (the last pick replaces the previous one); the local collector (first card in Coding tools) reads both at once and skips the picker.</div>
       <div class="row">
         <button class="btn primary" id="pick-claude-folder">Choose .claude folder…</button>
         <button class="btn" id="rescan-local" hidden>Re-scan</button>
         <progress id="scan-progress" max="100" value="0" hidden></progress>
       </div>
       <div class="status" id="local-status">Not connected. Tip: in the folder picker, type <code>%USERPROFILE%\.claude</code> in the address bar.</div>
+      <div class="note" id="local-reported" hidden></div>
       <input type="file" id="folder-fallback" webkitdirectory multiple hidden>
       <div class="note">If the folder picker doesn't open, <a id="fallback-link" href="#">use the classic folder chooser</a> instead.</div>
     </div>
@@ -1768,7 +1769,7 @@ const CONNECTORS = [
     links: { docs: 'README.md#automatic-mode' } },
   { id: 'local',      platform: 'Claude Code/Desktop', name: 'Claude Code / Desktop', category: 'coding', kind: 'folder',
     statusEl: 'local-status',    brand: '#d97748', mark: 'CC', srcIds: ['local', 'local-import'],
-    patterns: [/\.jsonl$/i], exclude: /\/(todos|statsig)\//, parser: 'parseClaudeLogs' },
+    patterns: [/\.jsonl$/i], exclude: /\/(todos|statsig|outputs|uploads|uploads-tmp|\.project-cache)\//, parser: 'parseClaudeLogs' },   // Plan 9 B1: a Cowork session's outputs/ uploads/ .project-cache/ hold files the task wrote, not transcripts
   { id: 'anthropic',  platform: 'Anthropic API',       name: 'Anthropic API',         category: 'api', kind: 'admin-key',
     statusEl: 'anthropic-status', brand: '#d4a27f', mark: 'An', srcIds: ['anthropic'], keyLS: 'key:anthropic', fetch: 'fetchAnthropicAll',
     keyLabel: 'Admin key', keyHint: 'sk-ant-admin-… from console.anthropic.com → Settings → API keys',
@@ -2333,9 +2334,11 @@ async function* readLines(file) {
   if (buf.trim()) yield buf;
 }
 
-const SKIP_DIRS = /^(todos|statsig|shell-snapshots|ide|plugins|skills|commands|hooks|downloads|cache|node_modules|\.git)$/i;
+// Plan 9 B1: outputs / uploads / .project-cache / session-env / backups are a Cowork session's own files (what the task wrote), never transcripts
+const SKIP_DIRS = /^(todos|statsig|shell-snapshots|ide|plugins|skills|commands|hooks|downloads|cache|node_modules|\.git|outputs|uploads|uploads-tmp|\.project-cache|session-env|backups)$/i;
 async function collectJsonlFromHandle(dirHandle, path = '', out = [], depth = 0) {
-  if (depth > 6) return out;
+  // depth 10 reaches <Claude app folder>/local-agent-mode-sessions/<org>/<user>/<session>/.claude/projects/<slug>/<sid>/subagents/*.jsonl (Plan 9 B1)
+  if (depth > 10 || out.length > 20000) return out;
   const dirs = [], files = [];
   for await (const [name, h] of dirHandle.entries()) {
     if (h.kind === 'directory') dirs.push([name, h]);
@@ -2379,54 +2382,122 @@ function makeProjAgg(platform) {
   };
 }
 
-/** files: [{path, file}] → aggregated usage */
+/* ---------- Plan 9 B1: Claude Desktop Cowork ----------
+ * Cowork (the desktop app's agent mode) keeps each session under <Claude app folder>/local-agent-mode-sessions/<org>/<user>/<session>/:
+ * .claude/projects/<slug>/<sid>.jsonl (+ <sid>/subagents/agent-*.jsonl) are ordinary Claude Code transcripts — every line carries
+ * entrypoint 'local-agent' and sessionId — and audit.jsonl is Anthropic's own record of the session: assistant mirror lines (request_id
+ * instead of requestId) plus one `result` line per turn with total_cost_usd. Transcripts become rows; the audit becomes meta.cowork. */
+const COWORK_AUDIT = /(^|\/)audit\.jsonl$/i;
+const COWORK_PATH = /(^|\/)[^/]+\/\.claude\/projects\//i;   // a session folder in front of ".claude/projects/" — a ~/.claude or home-folder pick has none
+const isCoworkLine = (obj) => obj.entrypoint === 'local-agent';
+/** Cowork sessions run in a sandbox folder under local-agent-mode-sessions — one name for them all, not one truncated path per session. */
+const coworkProject = (cwdOrSlug) => /local-agent-mode-sessions/i.test(String(cwdOrSlug || '')) ? 'Cowork (Claude Desktop)' : prettyProject(cwdOrSlug);
+
+/** One assistant line's message.usage → token bundle: finite non-negative numbers only (A0 #14); cache_creation may arrive as a per-TTL object. */
+function claudeUsageTokens(u) {
+  let cw = u.cache_creation_input_tokens;
+  if (cw == null && u.cache_creation && typeof u.cache_creation === 'object') {
+    cw = Object.values(u.cache_creation).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
+  }
+  return { in: finTok(+u.input_tokens || 0), cw: finTok(+cw || 0), cr: finTok(+u.cache_read_input_tokens || 0), out: finTok(+u.output_tokens || 0), msgs: 1 };
+}
+
+/** The shared state of one parseClaudeLogs call: aggregation, line counters, message-id claims against `seen`, Cowork findings. */
+function claudeParseContext(seen) {
+  const agg = makeAgg(), projMap = new Map(), addedIds = [], dupIds = [];   // dupIds: ids skipped because `seen` already held them (parseFolderCached keeps them on the cache entry)
+  const cowork = { sids: new Set(), reported: {}, results: 0, dupResults: 0, badResults: 0 };
+  const ctx = { agg, cowork, msgs: 0, lines: 0, badLines: 0,
+    /** → the parsed object, or null for a blank line (not malformed) or a malformed one (counted) */
+    parseLine(line) {
+      if (!line.trim()) return null;   // blank, whitespace-only, or CR-only (Windows CRLF logs) — not malformed
+      ctx.lines++;
+      if (line[0] !== '{') { ctx.badLines++; return null; }   // has content but isn't even JSON-object-shaped — malformed
+      try { return JSON.parse(line); } catch { ctx.badLines++; return null; }
+    },
+    /** false when `seen` already holds the message (a streamed block, a copy of the file) */
+    claimId(id) {
+      if (id === ':') return true;
+      if (seen.has(id)) { dupIds.push(id); return false; }
+      seen.add(id); addedIds.push(id); return true;
+    },
+    addProject(project, model, t) {
+      const pk = project + '\u0001' + model;
+      let pb = projMap.get(pk);
+      if (!pb) { pb = { project, model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0 }; projMap.set(pk, pb); }
+      pb.in += t.in; pb.cw += t.cw; pb.cr += t.cr; pb.out += t.out; pb.msgs += 1;
+    },
+    result(files) {   // keep project×model rows raw — cost is computed at render time with live prices
+      const meta = { files, msgs: ctx.msgs, lines: ctx.lines, badLines: ctx.badLines, addedIds, dupIds };
+      if (cowork.sids.size || cowork.results || cowork.dupResults || cowork.badResults) meta.cowork = { ...cowork, sids: [...cowork.sids] };
+      return { rows: agg.rows(), projects: [...projMap.values()], meta };
+    } };
+  return ctx;
+}
+
+/** One transcript (Claude Code or Cowork) → rows. sid = the line's sessionId when present (a subagent transcript names its parent session —
+ *  the session Cowork's audit prices), else the file basename (older logs). A Cowork transcript's sids are recorded for the audit comparison. */
+async function parseClaudeTranscript(path, file, ctx) {
+  const m = path.match(/(?:^|\/)projects\/([^/]+)\//);   // project dir name = segment after "projects/"
+  const projectDir = m ? m[1] : null, baseSid = (path.split('/').pop() || '').replace(/\.jsonl$/i, '');
+  const fileSids = new Set(); let projectCwd = null, cowork = COWORK_PATH.test(path);
+  for await (const line of readLines(file)) {
+    const obj = ctx.parseLine(line); if (!obj) continue;
+    if (!projectCwd && obj.cwd) projectCwd = obj.cwd;
+    if (isCoworkLine(obj)) cowork = true;
+    if (obj.type !== 'assistant' || !obj.message || !obj.message.usage) continue;
+    const model = obj.message.model || 'unknown';
+    if (model === '<synthetic>') continue;
+    if (!ctx.claimId((obj.message.id || '') + ':' + (obj.requestId || ''))) continue;
+    const sid = typeof obj.sessionId === 'string' && obj.sessionId ? obj.sessionId : baseSid;
+    const t = claudeUsageTokens(obj.message.usage), ts = obj.timestamp ? new Date(obj.timestamp) : null;
+    ctx.agg.add(dayKey(ts || file.lastModified), 'Claude Code/Desktop', model, t, sid, ts && !isNaN(ts) ? ts.getHours() : undefined);
+    ctx.addProject(cowork ? coworkProject(projectCwd || projectDir) : prettyProject(projectCwd || projectDir), model, t);
+    fileSids.add(sid); ctx.msgs++;
+  }
+  if (cowork) fileSids.forEach(sid => ctx.cowork.sids.add(sid));
+}
+
+/** <session>/audit.jsonl — Anthropic's own record of a Cowork session. Only `result` lines are read (one per turn: uuid, session_id,
+ *  total_cost_usd, timestamp) into ctx.cowork.reported[sid] = { usd, d: last day, days: { d: usd } } — NEVER rows (the audit's assistant
+ *  lines mirror the transcript under request_id, so counting them would double every message) and never Store.billed (a flat plan is not a
+ *  bill). A result written twice (same uuid) counts once; one without a session or a numeric cost is counted as bad and surfaced, never $0. */
+async function parseCoworkAudit(file, ctx) {
+  const seenResults = new Set(), findings = ctx.cowork;
+  for await (const line of readLines(file)) {
+    const obj = ctx.parseLine(line); if (!obj || obj.type !== 'result') continue;
+    const sid = obj.session_id, usd = Number(obj.total_cost_usd);
+    if (typeof sid !== 'string' || !sid || !Number.isFinite(usd) || usd < 0) { findings.badResults++; continue; }
+    const key = typeof obj.uuid === 'string' && obj.uuid ? obj.uuid : sid + ':' + obj.timestamp + ':' + usd;
+    if (seenResults.has(key)) { findings.dupResults++; continue; }
+    seenResults.add(key); findings.results++;
+    const ts = obj.timestamp ? new Date(obj.timestamp) : null, d = dayKey(ts && !isNaN(ts) ? ts : file.lastModified);
+    const session = findings.reported[sid] || (findings.reported[sid] = { usd: 0, d: '', days: {} });
+    session.usd += usd; session.days[d] = (session.days[d] || 0) + usd; if (d > session.d) session.d = d;
+  }
+}
+
+/** files: [{path, file}] → aggregated usage. Transcripts (…/projects/… .jsonl) become rows; a Cowork session's audit.jsonl becomes
+ *  meta.cowork (present only when a Cowork transcript or audit was read): { sids: [Cowork session ids seen in rows], reported: { sid: { usd,
+ *  d, days } }, results, dupResults, badResults }. parseClaudeLogsCached turns it into Store.sources.local.meta.reported (coworkReported). */
 async function parseClaudeLogs(files, onProgress, seen = new Set()) {
-  const agg = makeAgg();
-  const addedIds = [], dupIds = [];   // dupIds: ids skipped because `seen` already held them (parseFolderCached keeps them on the cache entry)
-  const projMap = new Map(); // project\0model -> bundle
-  let msgs = 0, lines = 0, badLines = 0;
+  const ctx = claudeParseContext(seen);
   const jsonl = files.filter(f => f.path.endsWith('.jsonl') && !/\/(todos|statsig)\//.test('/' + f.path));
   for (let fi = 0; fi < jsonl.length; fi++) {
     const { path, file } = jsonl[fi];
-    // project dir name = segment after "projects/"
-    const m = path.match(/(?:^|\/)projects\/([^/]+)\//);
-    let projectDir = m ? m[1] : null;
-    let projectCwd = null;
-    const sid = (path.split('/').pop() || '').replace(/\.jsonl$/i, '');   // session UUID = file basename
-    for await (const line of readLines(file)) {
-      if (!line.trim()) continue;   // blank, whitespace-only, or CR-only (Windows CRLF logs) — not malformed
-      lines++;
-      if (line[0] !== '{') { badLines++; continue; }   // has content but isn't even JSON-object-shaped — malformed
-      let obj; try { obj = JSON.parse(line); } catch { badLines++; continue; }
-      if (!projectCwd && obj.cwd) projectCwd = obj.cwd;
-      if (obj.type !== 'assistant' || !obj.message || !obj.message.usage) continue;
-      const u = obj.message.usage;
-      const model = obj.message.model || 'unknown';
-      if (model === '<synthetic>') continue;
-      const id = (obj.message.id || '') + ':' + (obj.requestId || '');
-      if (id !== ':' && seen.has(id)) { dupIds.push(id); continue; }
-      if (id !== ':') { seen.add(id); addedIds.push(id); }
-      let cw = u.cache_creation_input_tokens;
-      if (cw == null && u.cache_creation && typeof u.cache_creation === 'object') {
-        cw = Object.values(u.cache_creation).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
-      }
-      const t = { in: finTok(+u.input_tokens || 0), cw: finTok(+cw || 0), cr: finTok(+u.cache_read_input_tokens || 0), out: finTok(+u.output_tokens || 0), msgs: 1 };   // finite non-negative numbers only — a string count would concatenate (A0 #14)
-      const ts = obj.timestamp ? new Date(obj.timestamp) : null;
-      const d = dayKey(ts || file.lastModified);
-      const hour = ts && !isNaN(ts) ? ts.getHours() : undefined;
-      agg.add(d, 'Claude Code/Desktop', model, t, sid, hour);
-      msgs++;
-      const projName = prettyProject(projectCwd || projectDir);
-      const pk = projName + '\u0001' + model;
-      let pb = projMap.get(pk);
-      if (!pb) { pb = { project: projName, model, in: 0, cw: 0, cr: 0, out: 0, msgs: 0 }; projMap.set(pk, pb); }
-      pb.in += t.in; pb.cw += t.cw; pb.cr += t.cr; pb.out += t.out; pb.msgs += 1;
-    }
+    if (COWORK_AUDIT.test(path)) await parseCoworkAudit(file, ctx); else await parseClaudeTranscript(path, file, ctx);
     if (onProgress) onProgress(fi + 1, jsonl.length);
   }
-  // keep project×model rows raw — cost is computed at render time with live prices
-  const projects = [...projMap.values()];
-  return { rows: agg.rows(), projects, meta: { files: jsonl.length, msgs, lines, badLines, addedIds, dupIds } };
+  return ctx.result(jsonl.length);
+}
+
+/** meta.cowork (merged over one scan) → Store.sources.local.meta.reported: Anthropic's figure per day and per session, plus the Cowork sessions
+ *  that have rows but no audit record (missing — disclosed, never estimated into the figure). Pure; null when the scan saw no Cowork data. */
+function coworkReported(cowork) {
+  if (!cowork) return null;
+  const sessions = cowork.reported || {}, days = {};
+  for (const s of Object.values(sessions)) for (const [d, usd] of Object.entries(s.days || {})) days[d] = (days[d] || 0) + usd;
+  const missingSids = (cowork.sids || []).filter(sid => !sessions[sid]).sort();
+  return { days, sessions, missing: missingSids.length, missingSids, results: cowork.results || 0, dupResults: cowork.dupResults || 0, badResults: cowork.badResults || 0 };
 }
 
 /** Generic folder walker: collects files whose relative path matches any RegExp in `patterns`
@@ -2531,7 +2602,7 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
   const sibSig = new Map();   // dir → 'size\u0001lastModified' per sibling, path-sorted so the string is stable across scans
   for (const s of [...siblingFiles].sort((a, b) => a.path < b.path ? -1 : 1)) { const dir = s.path.slice(0, s.path.lastIndexOf('/') + 1); sibSig.set(dir, (sibSig.get(dir) || '') + '\u0001' + s.file.size + '\u0001' + s.file.lastModified); }
   const rows = [], projects = [];
-  let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0, lines = 0, badLines = 0, badFiles = 0;
+  let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0, lines = 0, badLines = 0, badFiles = 0, cowork = null;
   const runningSeen = new Set();
   const seen = new Set();   // signatures present in THIS scan — stale entries for absent files get pruned below
   const prefix = connector.id + '\u0001';
@@ -2550,6 +2621,7 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
       try { res = await parser([f], null, runningSeen, connector, siblingFiles); }
       catch (e) { badFiles++; done++; if (onProgress) onProgress(done, main.length); continue; }
       entry = { rows: res.rows, projects: res.projects || [], msgs: res.meta.msgs || 0, ids: res.meta.addedIds || [], lines: res.meta.lines || 0, badLines: res.meta.badLines || 0 };
+      if (res.meta.cowork) entry.cowork = res.meta.cowork;   // Plan 9 B1: a Cowork transcript's session ids / an audit's reported figures travel with the file's entry
       // ids this file skipped as duplicates of an EARLIER file (an in-file repeat is the file's own id, not another file's)
       const own = new Set(entry.ids), dupIds = [...new Set(res.meta.dupIds || [])].filter(id => !own.has(id));
       if (dupIds.length) { entry.dupIds = dupIds.slice(0, DUP_IDS_CAP); if (dupIds.length > DUP_IDS_CAP) entry.dupTruncated = true; if (!entry.ids.length) entry.dupOnly = true; }   // capped: a truncated list cannot prove every skipped id is still claimed → dupTruncated = unconditional miss
@@ -2561,6 +2633,7 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
     }
     rows.push(...entry.rows); projects.push(...entry.projects); msgs += entry.msgs;
     lines += entry.lines ?? 0; badLines += entry.badLines ?? 0;   // pre-fix entries lack these — 0, not NaN
+    if (entry.cowork) cowork = mergeCoworkMeta(cowork, entry.cowork);
     done++; if (onProgress) onProgress(done, main.length);
   }
   if (cache && !opts.noPrune) {   // noPrune: a drop-sourced scan — its entries join the cache, the folder scan's entries stay for the next re-scan
@@ -2577,12 +2650,26 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
   // badFiles also folds in the walker's getFile() failures (collectFilesFromHandle tags the list with .unreadable);
   // skipped = files handed in that matched neither patterns nor siblings (not this connector's — never an error)
   return { rows, projects: [...pm.values()], meta: { files: main.length, msgs, parsedFiles, cachedFiles, lines, badLines,
-    badFiles: badFiles + (files.unreadable || 0), skipped: Math.max(0, files.length - main.length - siblingFiles.length) } };
+    badFiles: badFiles + (files.unreadable || 0), skipped: Math.max(0, files.length - main.length - siblingFiles.length), ...(cowork ? { cowork } : {}) } };
+}
+/** Plan 9 B1: folds one file's meta.cowork (parseClaudeLogs) into the scan's — session ids union; a session's reported figure comes from the
+ *  LAST file (path order) that carried it (two audit files for one session would be a copy, never two halves); the counters add up. */
+function mergeCoworkMeta(acc, part) {
+  const out = acc || { sids: [], reported: {}, results: 0, dupResults: 0, badResults: 0 };
+  for (const sid of part.sids || []) if (!out.sids.includes(sid)) out.sids.push(sid);
+  Object.assign(out.reported, part.reported || {});
+  out.results += part.results || 0; out.dupResults += part.dupResults || 0; out.badResults += part.badResults || 0;
+  return out;
 }
 /** Claude-logs wrapper kept for its callers and the 96/88 checks: identical behavior, now routed through
- *  the generic driver (signature gains the 'local' prefix → one-time re-parse of existing caches). */
+ *  the generic driver (signature gains the 'local' prefix → one-time re-parse of existing caches). Plan 9 B1: the merged meta.cowork becomes
+ *  meta.reported — Anthropic's own Cowork figure per day / session and the sessions without an audit record (coworkReported). */
 async function parseClaudeLogsCached(files, onProgress, cache) {
-  return parseFolderCached(connectorById('local'), files, onProgress, cache);
+  const res = await parseFolderCached(connectorById('local'), files, onProgress, cache);
+  const reported = coworkReported(res.meta.cowork);
+  delete res.meta.cowork;
+  if (reported) res.meta.reported = reported;
+  return res;
 }
 
 /** Shared JSONL walker for folder-log parsers: counts non-blank lines, counts (and skips) lines that
@@ -3207,7 +3294,7 @@ async function parseOllamaFiles(files, onProgress, seen = new Set(), c, siblingF
  *  connector-prefixed signatures) → v4 (Roo/Cline inclusive tokensIn + per-request model, local:1 flags, Gemini CLI
  *  tool tokens) → v5 (folder-log project rows) → v6 (Codex per-turn last_token_usage; dupIds / dupTruncated entries). prune() sweeps
  *  EVERY older-version key so IDB keeps no dead entries. */
-const SCAN_CACHE_VER = 'scan:v6:';   // v6 (Plan 5 review): T3 books Codex per-turn last_token_usage — output changed for unchanged bytes — and T2's dupIds / dupOnly entries need a rewrite (pre-T2 entries carry none) → one-time re-parse. v5: folder-log parsers emit project rows (Plan 4b T15)
+const SCAN_CACHE_VER = 'scan:v7:';   // v7 (Plan 9 B1): a Cowork audit.jsonl parsed before B1 cached the audit's mirror lines as rows (sid "audit") and subagent rows under their agent-* sid; the entries now carry cowork findings → one-time re-parse. v6 (Plan 5 review): T3 books Codex per-turn last_token_usage — output changed for unchanged bytes — and T2's dupIds / dupOnly entries need a rewrite (pre-T2 entries carry none) → one-time re-parse. v5: folder-log parsers emit project rows (Plan 4b T15)
 const ScanCache = {
   async get(sig) { try { return await IDB.get(SCAN_CACHE_VER + sig); } catch { return null; } },
   async set(sig, entry) { try { await IDB.set(SCAN_CACHE_VER + sig, entry); } catch {} },
@@ -5284,6 +5371,7 @@ const App = {
     this.renderShare(rows, metric);
     this.renderBreakdown(rows, hasEst);
     this.renderProjects(win);
+    this.renderCoworkReported(win);
     this.renderSubtitle(rows);
     this.refreshPricingOnDataChange();
   },
@@ -6266,7 +6354,7 @@ const App = {
     try {
       status.textContent = 'Reading folder…';
       const files = await collectJsonlFromHandle(handle);
-      if (!files.length) { status.textContent = 'No .jsonl session logs found in that folder. Pick your .claude folder (it contains a "projects" subfolder).'; return; }
+      if (!files.length) { status.textContent = 'No .jsonl session logs found in that folder. Pick your .claude folder (it contains a "projects" subfolder) or, for Cowork, the Claude app folder (it contains "local-agent-mode-sessions").'; return; }
       prog.hidden = false; prog.value = 0; prog.max = files.length;
       document.querySelectorAll('.card').forEach(c => c.classList.add('stale'));
       const res = await parseClaudeLogsCached(files, (done) => { prog.value = done; }, ScanCache);
@@ -6325,6 +6413,41 @@ const App = {
     this.render();
   },
   _unreadableNote(meta) { return meta.badFiles ? ` · ${fmtInt(meta.badFiles)} file(s) unreadable` : ''; },
+  /** Plan 9 B1 — the Claude Code card's Cowork line: Anthropic's own figure (the sessions' audit.jsonl total_cost_usd) next to OUR list-price
+   *  estimate, both over the SAME Cowork sessions — those with rows in the window — and the window's days only; Cowork sessions whose rows
+   *  have no audit record are disclosed, never guessed into the figure. Hidden when the window holds no Cowork session. Never Actual billed. */
+  renderCoworkReported(win) {
+    const node = $('local-reported'); if (!node) return;
+    const src = Store.sources.local, rep = src && src.meta && src.meta.reported;
+    const cmp = rep ? this._coworkCompare(rep, src.rows || [], win) : null;
+    node.hidden = !cmp || !(cmp.audited + cmp.missing);
+    node.textContent = node.hidden ? '' : this._coworkSentence(cmp, rep);
+  },
+  /** → { audited, missing, reported, estimate } over the local rows inside `win`: a row counts when every session it carries has an audit
+   *  record (a compacted day bucket may hold several); a Cowork session without one is counted as missing. */
+  _coworkCompare(rep, rows, win) {
+    const sessions = rep.sessions || {}, missingSids = Array.isArray(rep.missingSids) ? rep.missingSids : [];   // a stored meta is data, not a contract
+    const audited = new Set(), missing = new Set(); let estimate = 0;
+    for (const r of rows) {
+      if (r.d < win.from || r.d > win.to) continue;
+      const sids = r.sid ? [r.sid] : (Array.isArray(r.sids) ? r.sids : []);
+      if (!sids.length) continue;
+      if (sids.every(s => sessions[s])) { sids.forEach(s => audited.add(s)); estimate += Pricing.cost(r.model, r); }
+      else sids.filter(s => missingSids.includes(s)).forEach(s => missing.add(s));
+    }
+    let reported = 0;
+    for (const s of audited) for (const [d, usd] of Object.entries(sessions[s].days || {})) if (d >= win.from && d <= win.to) reported += +usd || 0;
+    return { audited: audited.size, missing: missing.size, reported, estimate };
+  },
+  _coworkSentence(cmp, rep) {
+    const count = (k, word) => `${fmtInt(k)} ${word}${k === 1 ? '' : 's'}`, have = (k) => (k === 1 ? 'has' : 'have');
+    let sentence = cmp.audited
+      ? `Anthropic's own figure for Cowork: ${fmtUSD(cmp.reported)} — our list-price estimate for the same ${count(cmp.audited, 'session')}: ${fmtUSD(cmp.estimate)}`
+      : `Anthropic's own figure for Cowork is unavailable here — our list-price estimate stands alone`;
+    if (cmp.missing) sentence += ` · ${count(cmp.missing, 'session')} ${have(cmp.missing)} no audit record`;
+    if (rep.badResults) sentence += ` · ${count(rep.badResults, 'audit result')} unreadable`;
+    return sentence + ' (from each session\u2019s audit.jsonl; a flat plan is not a bill — never counted as billed)';
+  },
   /* =================== generic folder-log / local-server connectors =================== */
   /** Renders the hidden source card for a registry entry (statusEl target + Manage-modal body). Idempotent. */
   ensureSourceCard(c) {

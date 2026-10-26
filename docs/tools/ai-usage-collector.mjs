@@ -23,7 +23,8 @@
  * Discovery is per tool folder, not per home: codex reads ~/.codex/sessions and ~/.codex/archived_sessions only (the rest of ~/.codex is
  * tens of thousands of unrelated files). A tool with two roots prefixes every path with the root's folder name ("sessions/2026/…",
  * "archived_sessions/rollout-…"); with a single root paths are relative to it — the dashboard's Codex parser matches rollout-*.jsonl
- * anywhere in the path, so both shapes land.
+ * anywhere in the path, so both shapes land. local (Plan 9 B1) has ~/.claude plus one root per Claude Desktop edition's
+ * local-agent-mode-sessions folder (Cowork transcripts + audit.jsonl) — paths ".claude/…" and "local-agent-mode-sessions/…" when both exist.
  *
  * Change-driven, not timed: each found root is watched (fs.watch recursive). A change marks the tool dirty (2 s debounce) and the next
  * /api/status re-walks ONLY the dirty tools — a clean tool costs nothing per poll, whatever the poll interval. Where recursive fs.watch is
@@ -104,9 +105,24 @@ function matterhornDirs() {
   return out;
 }
 const isDir = (d) => { try { return fs.statSync(d).isDirectory(); } catch { return false; } };
+// Plan 9 B1 — Claude Desktop keeps Cowork (agent mode) sessions in the app's data folder, not in ~/.claude: <data>/local-agent-mode-sessions/<org>/<user>/<session>/
+// holds .claude/projects/<slug>/*.jsonl (transcripts, the Claude Code format) and audit.jsonl (Anthropic's own cost per turn). Every edition that exists is its
+// own root: Windows %APPDATA%\Claude (installer build), %LOCALAPPDATA%\Claude-Data\<package>\ (Microsoft Store build since 2026-10; the old %APPDATA%\Claude keeps a
+// ".user-data-left.<package>" marker), %LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude (older Store builds), %LOCALAPPDATA%\Claude-3p (BYO-provider
+// edition); macOS ~/Library/Application Support/{Claude,Claude-3p}; Linux ~/.config/{Claude,Claude-3p}. Computed at each refresh (a readdir or two).
+const COWORK_DIR = 'local-agent-mode-sessions';
+const subdirs = (d) => { try { return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path.join(d, e.name)); } catch { return []; } };
+function coworkRoots() {
+  const apps = PLAT === 'win32'
+    ? [path.join(APPDATA, 'Claude'), path.join(LOCALAPPDATA, 'Claude-3p'), ...subdirs(path.join(LOCALAPPDATA, 'Claude-Data')),
+       ...subdirs(path.join(LOCALAPPDATA, 'Packages')).filter((d) => /^Claude_[^\\/]+$/i.test(path.basename(d))).map((d) => path.join(d, 'LocalCache', 'Roaming', 'Claude'))]
+    : PLAT === 'darwin' ? ['Claude', 'Claude-3p'].map((n) => path.join(HOME, 'Library', 'Application Support', n))
+    : ['Claude', 'Claude-3p'].map((n) => path.join(HOME, '.config', n));
+  return apps.map((d) => path.join(d, COWORK_DIR));
+}
 // groups: [[candidate, candidate…], …] — per group the FIRST existing directory is a root; a function computes groups at refresh time
 const TABLE = [
-  { id: 'local',       name: 'Claude Code / Desktop',           groups: [[env('CLAUDE_CONFIG_DIR') || path.join(HOME, '.claude')]] },
+  { id: 'local',       name: 'Claude Code / Desktop',           groups: () => [[env('CLAUDE_CONFIG_DIR') || path.join(HOME, '.claude')], ...coworkRoots().map((d) => [d])] },
   // codex: only sessions/ and archived_sessions/ (each its own root) — the rest of ~/.codex (cache/, browser/, …) is tens of thousands of
   // unrelated files. With both present the two-root rule prefixes paths "sessions/…" / "archived_sessions/…"; with one, paths are relative
   // to it ("2026/09/16/rollout-*.jsonl") — the dashboard's Codex parser matches rollout-*.jsonl anywhere in the path, so both shapes work.
@@ -192,8 +208,9 @@ const SERVE_EXT = new Set(['.jsonl', '.json', '.md', '.sqlite', '.db', '.csv', '
 //   settings.json       Claude Code and Gemini CLI settings may carry an env block with API keys
 //   config.json         Continue's legacy config.json holds provider apiKey values; ~/.copilot/config.json holds the GitHub token
 //   mcp.json            MCP server definitions carry env blocks with keys
+//   .claude.json        Claude Code's per-user config (account, prompt history) — a copy lives in every Cowork session's .claude folder (Plan 9 B1)
 // The collector's own token file is refused separately (isTokenFile). No tool's usage log uses these names.
-const DENY_NAME = /credential|oauth|(^|[^a-z])tokens?([^a-z]|$)|secret|password|api[-_]?key|^\.env(\.|$)|^(auth|settings|config|mcp)\.json$/i;
+const DENY_NAME = /credential|oauth|(^|[^a-z])tokens?([^a-z]|$)|secret|password|api[-_]?key|^\.env(\.|$)|^(auth|settings|config|mcp)\.json$|^\.claude\.json$/i;
 const servable = (name) => !DENY_NAME.test(name) && SERVE_EXT.has(path.extname(name).toLowerCase());
 
 // ---- roots + change-driven walk ------------------------------------------------------------------------------------------------------------

@@ -712,6 +712,43 @@ export async function generate() {
   //   Expected (estTok = round(chars/4)): m2 in=estTok(40)=10 out=estTok(6000+400)=1600 model gemma3:4b · m4 in=estTok(24)=6 out=estTok(100)=25 model 'ollama'
   //   (model_name NULL) → in=16 out=1625 msgs=2, both est:1, platform Ollama, $0.
   let sqlite = null;
+  // ---- Plan 9 B1 — Claude Desktop Cowork tree (cowork/local-agent-mode-sessions/<org>/<user>/local_<uuid>/…), shaped after the real folder
+  //   (2026-10-27, this machine): transcripts under <sessionDir>/.claude/projects/<slug>/<sid>.jsonl (+ <sid>/subagents/agent-*.jsonl; every line
+  //   carries entrypoint 'local-agent' and sessionId), Anthropic's audit at <sessionDir>/audit.jsonl: assistant mirror lines with request_id
+  //   (NOT rows — the transcript already has them; ids cw-m*/cw-r* are distinct from the Claude Code fixture's m*/r*) and result lines (one per turn: uuid, session_id, total_cost_usd, timestamp, modelUsage).
+  //   Session A: rows in=3300 out=1600 cr=500 cw=100 msgs=3 (m1 streamed twice → one; the subagent row joins the parent session); audit results
+  //   0.05 (09-01) + 0.07 (09-02), res-2 written twice (dedupe by uuid), one garbage line, one result without a numeric total_cost_usd;
+  //   outputs/notes.jsonl is a file the task wrote (99999 tokens — must be excluded). Session B: in=400 out=200 msgs=1 and NO audit (missing).
+  //   Totals: in=3700 out=1800 cr=500 cw=100 msgs=4 · reported: A usd=0.12 days {09-01: 0.05, 09-02: 0.07} · missing 1 · 2 results, 1 repeat, 1 bad.
+  const CW = 'cowork/local-agent-mode-sessions/0f0f0f0f-0000-4000-8000-000000000001/0f0f0f0f-0000-4000-8000-000000000002/';
+  const SID_A = 'aaaa0001-0000-4000-8000-00000000000a', SID_B = 'bbbb0002-0000-4000-8000-00000000000b';
+  const cwLine = (sid, o) => jl({ parentUuid: null, isSidechain: false, userType: 'external', entrypoint: 'local-agent', cwd: 'C:\\Users\\me\\cowork', sessionId: sid, version: '2.1.0', ...o });
+  const cwUse = (sid, id, req, ts, model, usage) => cwLine(sid, { type: 'assistant', uuid: 'u-' + id + '-' + req, timestamp: ts, requestId: req, message: { id, type: 'message', role: 'assistant', model, content: [], usage } });
+  const A = CW + 'local_aaaa0001-0000-4000-8000-000000000001/';
+  w(A + '.claude/projects/C--Users-me-cowork-A/' + SID_A + '.jsonl', [
+    cwLine(SID_A, { type: 'user', uuid: 'u-1', timestamp: '2026-09-01T09:59:00.000Z', message: { role: 'user', content: 'hello' } }),
+    cwUse(SID_A, 'cw-m1', 'cw-r1', '2026-09-01T10:00:00.000Z', 'claude-sonnet-5', { input_tokens: 1000, output_tokens: 500 }),
+    cwUse(SID_A, 'cw-m1', 'cw-r1', '2026-09-01T10:00:02.000Z', 'claude-sonnet-5', { input_tokens: 1000, output_tokens: 500 }),   // second content block of the same message → one row
+    cwUse(SID_A, 'cw-m2', 'cw-r2', '2026-09-02T10:00:00.000Z', 'claude-sonnet-5', { input_tokens: 2000, output_tokens: 1000, cache_read_input_tokens: 500, cache_creation_input_tokens: 100 }),
+  ].join('\n') + '\n');
+  w(A + '.claude/projects/C--Users-me-cowork-A/' + SID_A + '/subagents/agent-a0001.jsonl', cwUse(SID_A, 'cw-m3', 'cw-r3', '2026-09-02T11:00:00.000Z', 'claude-fable-5', { input_tokens: 300, output_tokens: 100 }) + '\n');
+  const auditLine = (o) => jl({ ...o, _audit_timestamp: o.timestamp, _audit_hmac: 'fixture' });
+  const result = (uuid, usd, ts) => auditLine({ type: 'result', subtype: 'success', uuid, session_id: SID_A, total_cost_usd: usd, timestamp: ts, num_turns: 1, duration_ms: 1000, is_error: false,
+    usage: { input_tokens: 1, output_tokens: 1 }, modelUsage: { 'claude-sonnet-5': { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: usd } } });
+  w(A + 'audit.jsonl', [
+    auditLine({ type: 'user', uuid: 'au-1', session_id: SID_A, timestamp: '2026-09-01T09:59:00.000Z', message: { role: 'user', content: 'hello' } }),
+    auditLine({ type: 'assistant', uuid: 'aa-1', session_id: SID_A, request_id: 'cw-r1', timestamp: '2026-09-01T10:00:00.000Z', message: { id: 'cw-m1', model: 'claude-sonnet-5', role: 'assistant', content: [], usage: { input_tokens: 1000, output_tokens: 500 } } }),
+    result('res-1', 0.05, '2026-09-01T10:01:00.000Z'),
+    result('res-2', 0.07, '2026-09-02T10:02:00.000Z'),
+    result('res-2', 0.07, '2026-09-02T10:02:00.000Z'),   // the same result written twice → counted once
+    'this line is not JSON',
+    result('res-3', 'n/a', '2026-09-02T10:03:00.000Z'),   // no numeric total_cost_usd → a bad result (surfaced), never $0
+  ].join('\n') + '\n');
+  w(A + 'outputs/notes.jsonl', cwUse(SID_A, 'cw-m9', 'cw-r9', '2026-09-02T12:00:00.000Z', 'claude-sonnet-5', { input_tokens: 99999, output_tokens: 99999 }) + '\n');   // written by the task, not a transcript
+  w(A + '.claude/.credentials.json', '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-SECRET-FIXTURE"}}\n');   // the collector must never list it
+  const B = CW + 'local_bbbb0002-0000-4000-8000-000000000002/';
+  w(B + '.claude/projects/C--Users-me-cowork-B/' + SID_B + '.jsonl', cwUse(SID_B, 'cw-m4', 'cw-r4', '2026-09-03T09:00:00.000Z', 'claude-sonnet-5', { input_tokens: 400, output_tokens: 200 }) + '\n');
+
   const origEmit = process.emitWarning;   // some Node versions print an ExperimentalWarning when node:sqlite loads — keep the suite output clean
   process.emitWarning = (w, ...a) => { if (/SQLite/i.test(String((w && w.message) || w))) return; return origEmit.call(process, w, ...a); };
   try { sqlite = await import('node:sqlite'); } catch { sqlite = null; }

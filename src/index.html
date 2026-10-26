@@ -254,13 +254,14 @@
 
     <div class="card src" id="src-local">
       <div class="card-head"><h2>Claude Code / Desktop (local logs)</h2><span class="badge">exact</span></div>
-      <div class="desc">Reads the session logs Claude Code and the desktop app keep in the <b>.claude</b> folder in your user folder (e.g. <code>C:\Users\you\.claude</code>). Exact token counts per model, project and day. Or run the local collector (first card in Coding tools) and skip the folder picker entirely.</div>
+      <div class="desc">Reads the session logs Claude Code and the desktop app keep in the <b>.claude</b> folder in your user folder (e.g. <code>C:\Users\you\.claude</code>). Exact token counts per model, project and day. <b>Cowork</b> (the desktop app's agent mode) keeps its sessions elsewhere: pick <code>.claude</code> and, for Cowork, the Claude app folder — Windows <code>%APPDATA%\Claude</code> (Microsoft Store edition <code>%LOCALAPPDATA%\Claude-Data</code>, 3P edition <code>%LOCALAPPDATA%\Claude-3p</code>), macOS <code>~/Library/Application Support/Claude</code>, Linux <code>~/.config/Claude</code>. Its <code>local-agent-mode-sessions</code> folder holds the transcripts and, per session, an <code>audit.jsonl</code> with Anthropic's own cost figure, shown below next to our estimate for the same sessions (never counted as billed). The folder picker loads one folder at a time (the last pick replaces the previous one); the local collector (first card in Coding tools) reads both at once and skips the picker.</div>
       <div class="row">
         <button class="btn primary" id="pick-claude-folder">Choose .claude folder…</button>
         <button class="btn" id="rescan-local" hidden>Re-scan</button>
         <progress id="scan-progress" max="100" value="0" hidden></progress>
       </div>
       <div class="status" id="local-status">Not connected. Tip: in the folder picker, type <code>%USERPROFILE%\.claude</code> in the address bar.</div>
+      <div class="note" id="local-reported" hidden></div>
       <input type="file" id="folder-fallback" webkitdirectory multiple hidden>
       <div class="note">If the folder picker doesn't open, <a id="fallback-link" href="#">use the classic folder chooser</a> instead.</div>
     </div>

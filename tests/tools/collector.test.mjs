@@ -125,7 +125,8 @@ export async function run() {
   const summary = () => ({ pass: results.every((r) => r.pass), detail: results.filter((r) => !r.pass).map((r) => r.name + ': ' + r.detail).join(' | '), results });
   if (!fs.existsSync(path.join(OUT_DIR, 'codex', 'sessions'))) { const { generate } = await import('../fixtures/gen.mjs'); await generate(); }   // standalone run before the suite ever generated fixtures
   seedHome();
-  let a = null, b = null;
+  let a = null, b = null, c = null;
+  const HOME_CW = path.join(OUT_DIR, `collector-cowork-${process.pid}`);   // B1 block: its own HOME (APPDATA / LOCALAPPDATA point at it too — see start())
   try {
     // ---------------------------------------------------------------- default discovery ----------------------------------------------------------------
     a = await start([]);
@@ -352,14 +353,48 @@ export async function run() {
     add('collector: two --root aider=… folders → one tool with two roots: paths are prefixed with the root folder name (".codex/…", ".copilot/…"), 9 files (config.toml / notes.yaml never listed), and /api/file resolves the prefixed path byte-exact',
       t2('aider').found === true && (t2('aider').roots || []).length === 2 && t2('aider').files === 9 && p2.length === 9 && p2.every((p) => /^\.(codex|copilot)\//.test(p)) && p2.includes('.copilot/' + COPILOT_FILE) && p2.includes('.codex/cache/junk.txt') && !p2.some((p) => /\.(toml|yaml)$/.test(p)) && f2.status === 200 && f2.body.equals(want2),
       `roots=${JSON.stringify(t2('aider').roots)} files=${t2('aider').files} paths=${p2.join(',')} file=${f2.status}`);
+    await b.stop();
+
+    // ---------------------------------------------------------------- Plan 9 B1: Cowork — a second `local` root under the Claude app folder ----------------------------------------------------------------
+    // ~/.claude/projects (the Claude Code fixture) + <APPDATA>/Claude/local-agent-mode-sessions (the Cowork fixture) → one tool, two roots, paths prefixed
+    // ".claude/…" and "local-agent-mode-sessions/…"; audit.jsonl is listed (.jsonl passes the allow-list); the session's .claude/.credentials.json never is.
+    fs.rmSync(HOME_CW, { recursive: true, force: true });
+    fs.cpSync(path.join(OUT_DIR, 'claude-logs', 'projects'), path.join(HOME_CW, '.claude', 'projects'), { recursive: true });
+    fs.cpSync(path.join(OUT_DIR, 'cowork', 'local-agent-mode-sessions'), path.join(HOME_CW, 'Claude', 'local-agent-mode-sessions'), { recursive: true });
+    c = await start([], HOME_CW);
+    add('collector (B1): starts against a HOME that holds both ~/.claude and <APPDATA>/Claude/local-agent-mode-sessions', c.port > 0, c.io());
+    if (!c.port) return summary();
+    const tok3 = fs.readFileSync(path.join(HOME_CW, '.ai-usage', 'collector.token'), 'utf8').trim();
+    const C = (p) => request(c.port, 'GET', p, { authorization: 'Bearer ' + tok3 });
+    const s3 = asJson(await C('/api/status')) || {};
+    const loc = (s3.tools || []).find((t) => t.id === 'local') || {};
+    const locRoots = (loc.roots || []).map((r) => path.resolve(r));
+    const cwRoot = path.join(HOME_CW, 'Claude', 'local-agent-mode-sessions');
+    add('collector (B1): /api/status → local found with TWO roots — ~/.claude then <Claude app folder>/local-agent-mode-sessions — 7 files (2 Claude Code + 3 Cowork transcripts + audit.jsonl + the task\'s outputs/notes.jsonl; .credentials.json never counted); the candidates name the Cowork folder; the banner says "2 roots" for local',
+      loc.found === true && locRoots.length === 2 && locRoots[0] === path.join(HOME_CW, '.claude') && locRoots[1] === cwRoot && loc.files === 7 && (loc.candidates || []).map((x) => path.resolve(x)).includes(cwRoot)
+        && /^\s*local\b[^\n]*\b7 files\b[^\n]*\+/m.test(c.out.slice(0, c.out.indexOf('listening on'))),
+      JSON.stringify(loc).slice(0, 800) + ' · banner: ' + c.out.slice(0, c.out.indexOf('listening on')).replace(/\s+/g, ' ').slice(0, 400));
+    const l3 = asJson(await C('/api/list?tool=local')) || {};
+    const p3 = (l3.files || []).map((f) => f.path).sort();
+    const cwTranscript = p3.find((p) => /^local-agent-mode-sessions\/[^/]+\/[^/]+\/local_aaaa[^/]+\/\.claude\/projects\/[^/]+\/aaaa0001-0000-4000-8000-00000000000a\.jsonl$/.test(p));
+    const cwAudit = p3.find((p) => /^local-agent-mode-sessions\/[^/]+\/[^/]+\/local_aaaa[^/]+\/audit\.jsonl$/.test(p));
+    add('collector (B1): /api/list?tool=local → roots = both; paths prefixed ".claude/…" (2) and "local-agent-mode-sessions/…" (5) including the Cowork transcript, its subagents/agent-*.jsonl and audit.jsonl; no credential file',
+      (l3.roots || []).length === 2 && p3.length === 7 && p3.filter((p) => p.startsWith('.claude/')).length === 2 && p3.filter((p) => p.startsWith('local-agent-mode-sessions/')).length === 5
+        && !!cwTranscript && !!cwAudit && p3.some((p) => /\/subagents\/agent-a0001\.jsonl$/.test(p)) && !p3.some((p) => /credentials/i.test(p)),
+      p3.join(','));
+    const wantAudit = cwAudit ? fs.readFileSync(path.join(HOME_CW, 'Claude', ...cwAudit.split('/'))) : Buffer.alloc(0);
+    const fAudit = await C('/api/file?tool=local&path=' + encodeURIComponent(cwAudit || 'none'));
+    add('collector (B1): /api/file resolves the "local-agent-mode-sessions/…/audit.jsonl" path through the second root byte-exact',
+      !!cwAudit && fAudit.status === 200 && wantAudit.length > 0 && fAudit.body.equals(wantAudit), `status ${fAudit.status} · ${fAudit.body.length}/${wantAudit.length} bytes`);
     return summary();
   } catch (e) {
-    add('collector: test threw', false, (e && e.stack || String(e)) + ' · ' + (a ? a.io() : '') + (b ? ' · ' + b.io() : ''));
+    add('collector: test threw', false, (e && e.stack || String(e)) + ' · ' + (a ? a.io() : '') + (b ? ' · ' + b.io() : '') + (c ? ' · ' + c.io() : ''));
     return summary();
   } finally {
     if (a) await a.stop();
     if (b) await b.stop();
-    for (let i = 0; i < 5; i++) { try { fs.rmSync(HOME, { recursive: true, force: true }); break; } catch { await sleep(200); } }   // Windows: a just-killed child may still hold a handle for a moment
+    if (c) await c.stop();
+    for (let i = 0; i < 5; i++) { try { fs.rmSync(HOME, { recursive: true, force: true }); fs.rmSync(HOME_CW, { recursive: true, force: true }); break; } catch { await sleep(200); } }   // Windows: a just-killed child may still hold a handle for a moment
   }
 }
 

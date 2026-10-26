@@ -100,7 +100,7 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
   const sibSig = new Map();   // dir → 'size\u0001lastModified' per sibling, path-sorted so the string is stable across scans
   for (const s of [...siblingFiles].sort((a, b) => a.path < b.path ? -1 : 1)) { const dir = s.path.slice(0, s.path.lastIndexOf('/') + 1); sibSig.set(dir, (sibSig.get(dir) || '') + '\u0001' + s.file.size + '\u0001' + s.file.lastModified); }
   const rows = [], projects = [];
-  let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0, lines = 0, badLines = 0, badFiles = 0;
+  let msgs = 0, parsedFiles = 0, cachedFiles = 0, done = 0, lines = 0, badLines = 0, badFiles = 0, cowork = null;
   const runningSeen = new Set();
   const seen = new Set();   // signatures present in THIS scan — stale entries for absent files get pruned below
   const prefix = connector.id + '\u0001';
@@ -119,6 +119,7 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
       try { res = await parser([f], null, runningSeen, connector, siblingFiles); }
       catch (e) { badFiles++; done++; if (onProgress) onProgress(done, main.length); continue; }
       entry = { rows: res.rows, projects: res.projects || [], msgs: res.meta.msgs || 0, ids: res.meta.addedIds || [], lines: res.meta.lines || 0, badLines: res.meta.badLines || 0 };
+      if (res.meta.cowork) entry.cowork = res.meta.cowork;   // Plan 9 B1: a Cowork transcript's session ids / an audit's reported figures travel with the file's entry
       // ids this file skipped as duplicates of an EARLIER file (an in-file repeat is the file's own id, not another file's)
       const own = new Set(entry.ids), dupIds = [...new Set(res.meta.dupIds || [])].filter(id => !own.has(id));
       if (dupIds.length) { entry.dupIds = dupIds.slice(0, DUP_IDS_CAP); if (dupIds.length > DUP_IDS_CAP) entry.dupTruncated = true; if (!entry.ids.length) entry.dupOnly = true; }   // capped: a truncated list cannot prove every skipped id is still claimed → dupTruncated = unconditional miss
@@ -130,6 +131,7 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
     }
     rows.push(...entry.rows); projects.push(...entry.projects); msgs += entry.msgs;
     lines += entry.lines ?? 0; badLines += entry.badLines ?? 0;   // pre-fix entries lack these — 0, not NaN
+    if (entry.cowork) cowork = mergeCoworkMeta(cowork, entry.cowork);
     done++; if (onProgress) onProgress(done, main.length);
   }
   if (cache && !opts.noPrune) {   // noPrune: a drop-sourced scan — its entries join the cache, the folder scan's entries stay for the next re-scan
@@ -146,12 +148,26 @@ async function parseFolderCached(connector, files, onProgress, cache, opts = {})
   // badFiles also folds in the walker's getFile() failures (collectFilesFromHandle tags the list with .unreadable);
   // skipped = files handed in that matched neither patterns nor siblings (not this connector's — never an error)
   return { rows, projects: [...pm.values()], meta: { files: main.length, msgs, parsedFiles, cachedFiles, lines, badLines,
-    badFiles: badFiles + (files.unreadable || 0), skipped: Math.max(0, files.length - main.length - siblingFiles.length) } };
+    badFiles: badFiles + (files.unreadable || 0), skipped: Math.max(0, files.length - main.length - siblingFiles.length), ...(cowork ? { cowork } : {}) } };
+}
+/** Plan 9 B1: folds one file's meta.cowork (parseClaudeLogs) into the scan's — session ids union; a session's reported figure comes from the
+ *  LAST file (path order) that carried it (two audit files for one session would be a copy, never two halves); the counters add up. */
+function mergeCoworkMeta(acc, part) {
+  const out = acc || { sids: [], reported: {}, results: 0, dupResults: 0, badResults: 0 };
+  for (const sid of part.sids || []) if (!out.sids.includes(sid)) out.sids.push(sid);
+  Object.assign(out.reported, part.reported || {});
+  out.results += part.results || 0; out.dupResults += part.dupResults || 0; out.badResults += part.badResults || 0;
+  return out;
 }
 /** Claude-logs wrapper kept for its callers and the 96/88 checks: identical behavior, now routed through
- *  the generic driver (signature gains the 'local' prefix → one-time re-parse of existing caches). */
+ *  the generic driver (signature gains the 'local' prefix → one-time re-parse of existing caches). Plan 9 B1: the merged meta.cowork becomes
+ *  meta.reported — Anthropic's own Cowork figure per day / session and the sessions without an audit record (coworkReported). */
 async function parseClaudeLogsCached(files, onProgress, cache) {
-  return parseFolderCached(connectorById('local'), files, onProgress, cache);
+  const res = await parseFolderCached(connectorById('local'), files, onProgress, cache);
+  const reported = coworkReported(res.meta.cowork);
+  delete res.meta.cowork;
+  if (reported) res.meta.reported = reported;
+  return res;
 }
 
 /** Shared JSONL walker for folder-log parsers: counts non-blank lines, counts (and skips) lines that

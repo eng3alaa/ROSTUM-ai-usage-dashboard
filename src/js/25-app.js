@@ -102,6 +102,7 @@ const App = {
     this.renderShare(rows, metric);
     this.renderBreakdown(rows, hasEst);
     this.renderProjects(win);
+    this.renderCoworkReported(win);
     this.renderSubtitle(rows);
     this.refreshPricingOnDataChange();
   },
@@ -1084,7 +1085,7 @@ const App = {
     try {
       status.textContent = 'Reading folder…';
       const files = await collectJsonlFromHandle(handle);
-      if (!files.length) { status.textContent = 'No .jsonl session logs found in that folder. Pick your .claude folder (it contains a "projects" subfolder).'; return; }
+      if (!files.length) { status.textContent = 'No .jsonl session logs found in that folder. Pick your .claude folder (it contains a "projects" subfolder) or, for Cowork, the Claude app folder (it contains "local-agent-mode-sessions").'; return; }
       prog.hidden = false; prog.value = 0; prog.max = files.length;
       document.querySelectorAll('.card').forEach(c => c.classList.add('stale'));
       const res = await parseClaudeLogsCached(files, (done) => { prog.value = done; }, ScanCache);
@@ -1143,6 +1144,41 @@ const App = {
     this.render();
   },
   _unreadableNote(meta) { return meta.badFiles ? ` · ${fmtInt(meta.badFiles)} file(s) unreadable` : ''; },
+  /** Plan 9 B1 — the Claude Code card's Cowork line: Anthropic's own figure (the sessions' audit.jsonl total_cost_usd) next to OUR list-price
+   *  estimate, both over the SAME Cowork sessions — those with rows in the window — and the window's days only; Cowork sessions whose rows
+   *  have no audit record are disclosed, never guessed into the figure. Hidden when the window holds no Cowork session. Never Actual billed. */
+  renderCoworkReported(win) {
+    const node = $('local-reported'); if (!node) return;
+    const src = Store.sources.local, rep = src && src.meta && src.meta.reported;
+    const cmp = rep ? this._coworkCompare(rep, src.rows || [], win) : null;
+    node.hidden = !cmp || !(cmp.audited + cmp.missing);
+    node.textContent = node.hidden ? '' : this._coworkSentence(cmp, rep);
+  },
+  /** → { audited, missing, reported, estimate } over the local rows inside `win`: a row counts when every session it carries has an audit
+   *  record (a compacted day bucket may hold several); a Cowork session without one is counted as missing. */
+  _coworkCompare(rep, rows, win) {
+    const sessions = rep.sessions || {}, missingSids = Array.isArray(rep.missingSids) ? rep.missingSids : [];   // a stored meta is data, not a contract
+    const audited = new Set(), missing = new Set(); let estimate = 0;
+    for (const r of rows) {
+      if (r.d < win.from || r.d > win.to) continue;
+      const sids = r.sid ? [r.sid] : (Array.isArray(r.sids) ? r.sids : []);
+      if (!sids.length) continue;
+      if (sids.every(s => sessions[s])) { sids.forEach(s => audited.add(s)); estimate += Pricing.cost(r.model, r); }
+      else sids.filter(s => missingSids.includes(s)).forEach(s => missing.add(s));
+    }
+    let reported = 0;
+    for (const s of audited) for (const [d, usd] of Object.entries(sessions[s].days || {})) if (d >= win.from && d <= win.to) reported += +usd || 0;
+    return { audited: audited.size, missing: missing.size, reported, estimate };
+  },
+  _coworkSentence(cmp, rep) {
+    const count = (k, word) => `${fmtInt(k)} ${word}${k === 1 ? '' : 's'}`, have = (k) => (k === 1 ? 'has' : 'have');
+    let sentence = cmp.audited
+      ? `Anthropic's own figure for Cowork: ${fmtUSD(cmp.reported)} — our list-price estimate for the same ${count(cmp.audited, 'session')}: ${fmtUSD(cmp.estimate)}`
+      : `Anthropic's own figure for Cowork is unavailable here — our list-price estimate stands alone`;
+    if (cmp.missing) sentence += ` · ${count(cmp.missing, 'session')} ${have(cmp.missing)} no audit record`;
+    if (rep.badResults) sentence += ` · ${count(rep.badResults, 'audit result')} unreadable`;
+    return sentence + ' (from each session\u2019s audit.jsonl; a flat plan is not a bill — never counted as billed)';
+  },
   /* =================== generic folder-log / local-server connectors =================== */
   /** Renders the hidden source card for a registry entry (statusEl target + Manage-modal body). Idempotent. */
   ensureSourceCard(c) {

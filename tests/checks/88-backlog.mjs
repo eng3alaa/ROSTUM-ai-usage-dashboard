@@ -310,7 +310,7 @@ export async function run({ browser, ok }) {
     const dropOver = await page.evaluate(async (files, codex) => {
       Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set();
       const sum = (rows) => rows.reduce((t, r) => ({ in: t.in + (r.in || 0), cr: t.cr + (r.cr || 0), out: t.out + (r.out || 0), msgs: t.msgs + (r.msgs || 0) }), { in: 0, cr: 0, out: 0, msgs: 0 });
-      const c = connectorById('codex'), prefix = 'scan:v6:codex\u0001';
+      const c = connectorById('codex'), prefix = 'scan:v7:codex\u0001';
       const codexKeys = async () => (await IDB.keys('scan:')).filter(k => k.startsWith(prefix));
       for (const k of await codexKeys()) await IDB.del(k);
       await App.scanFiles(c, files.map((f, i) => ({ path: f.path, file: new File([f.text], f.path.split('/').pop(), { lastModified: 1754000000000 + i }) })));   // the folder scan
@@ -334,7 +334,7 @@ export async function run({ browser, ok }) {
     const twoSids = await page.evaluate(async (a, b) => {
       Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set();
       const sum = (rows) => rows.reduce((t, r) => ({ in: t.in + (r.in || 0), cw: t.cw + (r.cw || 0), cr: t.cr + (r.cr || 0), out: t.out + (r.out || 0), msgs: t.msgs + (r.msgs || 0) }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
-      const prefix = 'scan:v6:copilot-cli\u0001';
+      const prefix = 'scan:v7:copilot-cli\u0001';
       for (const k of (await IDB.keys('scan:')).filter(k => k.startsWith(prefix))) await IDB.del(k);
       await App.handleImportFiles([new File([a], 'events.jsonl'), new File([b], 'events.jsonl')]);
       const keys = (await IDB.keys('scan:')).filter(k => k.startsWith(prefix));

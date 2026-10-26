@@ -689,6 +689,58 @@ export async function run({ browser, ok }) {
     ok('projects (4b): disconnect keep-data keeps projectsBy; delete-data removes it; clearAll empties it; load() defaults to {}; empty state names the folder-log tools',
       pj.keptAfterKeep === 1 && pj.goneAfterDelete && pj.afterClear === 0 && pj.loadDefault && /Codex/.test(pj.emptyText) && /Gemini CLI/.test(pj.emptyText),
       JSON.stringify({ keptAfterKeep: pj.keptAfterKeep, goneAfterDelete: pj.goneAfterDelete, afterClear: pj.afterClear, loadDefault: pj.loadDefault, emptyText: pj.emptyText }));
+
+    // ---- Plan 9 B1: Claude Desktop Cowork — transcripts land under local; audit.jsonl → meta.reported (Anthropic's own figure, never rows, never billed);
+    //      the status sentence compares it with OUR estimate over the SAME sessions and window; sessions without an audit record are disclosed ----
+    const SID_A = 'aaaa0001-0000-4000-8000-00000000000a', SID_B = 'bbbb0002-0000-4000-8000-00000000000b';
+    const walk = (dir, rel = '') => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(dir, e.name), rel + e.name + '/') : [{ path: rel + e.name, text: fs.readFileSync(path.join(dir, e.name), 'utf8') }]);
+    const cwFiles = walk(path.join(OUT, 'cowork'));   // paths as the collector lists them under the second root: local-agent-mode-sessions/<org>/<user>/local_<uuid>/…
+    const ccFiles = walk(path.join(OUT, 'claude-logs')).map((f) => ({ ...f, path: '.claude/' + f.path }));   // the first root's prefix once the collector has two roots
+    const cw = await page.evaluate(async ({ cwFiles, ccFiles, SID_A, SID_B }) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {};
+      const mk = (list) => list.map((f) => ({ path: f.path, file: new File([f.text], f.path.split('/').pop(), { lastModified: 1756800000000 }) }));
+      const tot = (rows) => rows.reduce((a, r) => ({ in: a.in + r.in, cw: a.cw + (r.cw || 0), cr: a.cr + (r.cr || 0), out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
+      await App.scanLocalFiles(mk(cwFiles));
+      const src = Store.sources.local, rows = src.rows, rep = src.meta.reported;
+      const sids = [...new Set(rows.map((r) => r.sid))].sort();
+      const perSid = Object.fromEntries(sids.map((s) => [s, tot(rows.filter((r) => r.sid === s))]));
+      const status = document.getElementById('local-status').textContent, label = (Store.connectors.local || {}).label;
+      const node = () => document.getElementById('local-reported');
+      const range = App.filters.range;
+      App.filters.range = 'all'; App._render();   // the fixture is dated 2026-09 — the default 30-day window would hide it
+      const sentence = node() ? node().textContent : null, hiddenAll = node() ? node().hidden : null;
+      const estA = rows.filter((r) => r.sid === SID_A).reduce((a, r) => a + Pricing.cost(r.model, r), 0);
+      App.filters.range = 'custom'; App.filters.from = '2026-01-01'; App.filters.to = '2026-01-31'; App._render();   // a window without a Cowork session
+      const hiddenOut = node() ? node().hidden : null;
+      App.filters.range = range; App.filters.from = null; App.filters.to = null;
+      // .claude + Cowork in ONE list (what the collector hands over with two roots): the sum of both fixtures, nothing twice; the same list again is stable
+      await App.scanLocalFiles(mk(ccFiles.concat(cwFiles)));
+      const both = tot(Store.sources.local.rows), bothRep = Store.sources.local.meta.reported;
+      await App.scanLocalFiles(mk(ccFiles.concat(cwFiles)));
+      const again = tot(Store.sources.local.rows);
+      const billed = JSON.stringify(Store.billed);
+      Store.sources = {}; Store.connectors = {}; Store.projects = []; Store.persist(); App._render();
+      return { total: tot(rows), files: src.meta.files, msgs: src.meta.msgs, badLines: src.meta.badLines, sids, perSid, platforms: [...new Set(rows.map((r) => r.platform))], rep, status, label,
+        sentence, hiddenAll, hiddenOut, estA, estAText: fmtUSD(estA), both, bothRep, again, billed };
+    }, { cwFiles, ccFiles, SID_A, SID_B });
+    const near = (a, b) => typeof a === 'number' && Math.abs(a - b) < 1e-9;
+    const repA = (cw.rep && cw.rep.sessions && cw.rep.sessions[SID_A]) || {};
+    ok('cowork (B1): a pick of the Cowork tree lands rows under local — in=3700 cw=100 cr=500 out=1800 msgs=4 over 4 log files (3 transcripts + audit.jsonl); the audit\'s assistant mirror lines and outputs/*.jsonl are never rows; subagent rows join the parent session (sids = A, B only)',
+      JSON.stringify(cw.total) === JSON.stringify({ in: 3700, cw: 100, cr: 500, out: 1800, msgs: 4 }) && cw.files === 4 && cw.msgs === 4 && JSON.stringify(cw.sids) === JSON.stringify([SID_A, SID_B])
+        && JSON.stringify(cw.perSid[SID_A]) === JSON.stringify({ in: 3300, cw: 100, cr: 500, out: 1600, msgs: 3 }) && JSON.stringify(cw.perSid[SID_B]) === JSON.stringify({ in: 400, cw: 0, cr: 0, out: 200, msgs: 1 })
+        && JSON.stringify(cw.platforms) === JSON.stringify(['Claude Code/Desktop']) && /4 log files/.test(cw.status) && cw.label === '4 log files' && cw.badLines >= 1,
+      JSON.stringify({ total: cw.total, files: cw.files, msgs: cw.msgs, sids: cw.sids, perSid: cw.perSid, platforms: cw.platforms, status: cw.status, label: cw.label, badLines: cw.badLines }));
+    ok('cowork (B1): meta.reported sums total_cost_usd per day and per session with the repeat de-duplicated (A: 0.12 = 0.05 on 09-01 + 0.07 on 09-02, last day 09-02; 2 results, 1 repeat, 1 bad), names the session without an audit record (missing 1 = B) and never touches Store.billed',
+      cw.rep && near(cw.rep.days['2026-09-01'], 0.05) && near(cw.rep.days['2026-09-02'], 0.07) && Object.keys(cw.rep.days).length === 2 && near(repA.usd, 0.12) && repA.d === '2026-09-02' && near(repA.days['2026-09-01'], 0.05) && near(repA.days['2026-09-02'], 0.07)
+        && !cw.rep.sessions[SID_B] && cw.rep.missing === 1 && JSON.stringify(cw.rep.missingSids) === JSON.stringify([SID_B]) && cw.rep.results === 2 && cw.rep.dupResults === 1 && cw.rep.badResults === 1 && cw.billed === '{}',
+      JSON.stringify({ rep: cw.rep, billed: cw.billed }));
+    ok('cowork (B1): the card sentence names Anthropic\'s figure ($0.120) and OUR list-price estimate over the SAME 1 session (= Pricing.cost over that session\'s rows), says 1 session has no audit record and 1 audit result was unreadable; hidden when the window holds no Cowork session',
+      typeof cw.sentence === 'string' && /Anthropic's own figure for Cowork: \$0\.120 — our list-price estimate for the same 1 session: /.test(cw.sentence) && cw.sentence.includes('same 1 session: ' + cw.estAText) && cw.estA > 0
+        && /1 session has no audit record/.test(cw.sentence) && /1 audit result unreadable/.test(cw.sentence) && cw.hiddenAll === false && cw.hiddenOut === true,
+      JSON.stringify({ sentence: cw.sentence, estAText: cw.estAText, estA: cw.estA, hiddenAll: cw.hiddenAll, hiddenOut: cw.hiddenOut }));
+    ok('cowork (B1): ~/.claude + the Cowork root in one list (the collector\'s two-root shape) → the sum of both fixtures (in=3840 cw=125 cr=550 out=2050 msgs=9), stable on a second scan; Claude Code sessions are not "missing" audit records (missing stays 1)',
+      JSON.stringify(cw.both) === JSON.stringify({ in: 3840, cw: 125, cr: 550, out: 2050, msgs: 9 }) && JSON.stringify(cw.again) === JSON.stringify(cw.both) && cw.bothRep && cw.bothRep.missing === 1 && Object.keys(cw.bothRep.sessions).length === 1,
+      JSON.stringify({ both: cw.both, again: cw.again, bothRep: cw.bothRep }));
   } finally {
     await page.close();
   }

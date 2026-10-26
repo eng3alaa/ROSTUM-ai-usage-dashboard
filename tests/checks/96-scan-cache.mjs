@@ -112,7 +112,7 @@ export async function run({ browser, ok }) {
     ok('scan-cache: v4 prefix — a v3 entry misses, is re-parsed (parsedFiles=1, cachedFiles=0) and swept from IDB; the current-prefix twin is kept',
       v4.getMiss && v4.parsed === 1 && v4.cached === 0 && v4.msgs === 3 && v4.v3Gone && v4.curKept && v4.pruneV3Gone && v4.pruneCurKept, JSON.stringify(v4));
     // v6 (Plan 5 review, item 1): T3 books Codex per-turn last_token_usage (output changed for unchanged bytes) and T2's dupIds / dupOnly
-    // entries need a rewrite → the prefix is bumped to 'scan:v6:'. Mirror of the v3→v4 check: a 'scan:v5:' entry must (a) MISS under
+    // entries need a rewrite → the prefix is bumped to 'scan:v7:'. Mirror of the v3→v4 check: a 'scan:v5:' entry must (a) MISS under
     // ScanCache.get, (b) be re-parsed by parseFolderCached and (c) be DELETED by prune, while the current-prefix twin survives.
     const v6 = await page.evaluate(async (text) => {
       const tmp = { id: 'tmp-v6', platform: 'TmpV6', parser: 'parseUsageLoggerJsonl', patterns: [/\.jsonl$/i] };
@@ -126,7 +126,7 @@ export async function run({ browser, ok }) {
       const keys = await IDB.keys('scan:');
       const cur = keys.filter(k => k.endsWith(sig));
       const out = { ver: SCAN_CACHE_VER, getMiss, parsed: res.meta.parsedFiles, cached: res.meta.cachedFiles, msgs: res.meta.msgs, v5Gone: !keys.includes('scan:v5:' + sig),
-        curKeys: cur, curKept: cur.length === 1 && cur[0].startsWith('scan:v6:') };
+        curKeys: cur, curKept: cur.length === 1 && cur[0].startsWith('scan:v7:') };
       // and prune alone (the public sweep) with the current key in `keep`: v5 twin deleted, current twin kept
       await IDB.set('scan:v5:' + sig, stale);
       await ScanCache.prune(new Set([sig]), 'tmp-v6\u0001');
@@ -135,8 +135,8 @@ export async function run({ browser, ok }) {
       for (const k of keys2) if (k.endsWith(sig)) await IDB.del(k);   // cleanup
       return out;
     }, usageLog);
-    ok('scan-cache: v6 prefix (Plan 5 review) — SCAN_CACHE_VER is scan:v6:, a v5 entry misses, is re-parsed (parsedFiles=1, cachedFiles=0) and swept from IDB; the current-prefix twin is kept',
-      v6.ver === 'scan:v6:' && v6.getMiss && v6.parsed === 1 && v6.cached === 0 && v6.msgs === 3 && v6.v5Gone && v6.curKept && v6.pruneV5Gone && v6.pruneCurKept, JSON.stringify(v6));
+    ok('scan-cache: current prefix (v7 — Plan 9 B1; v6 was the Plan 5 review) — SCAN_CACHE_VER is scan:v7:, a v5 entry misses, is re-parsed (parsedFiles=1, cachedFiles=0) and swept from IDB; the current-prefix twin is kept',
+      v6.ver === 'scan:v7:' && v6.getMiss && v6.parsed === 1 && v6.cached === 0 && v6.msgs === 3 && v6.v5Gone && v6.curKept && v6.pruneV5Gone && v6.pruneCurKept, JSON.stringify(v6));
 
     // Cline/Roo: the model comes from the SIBLING task_metadata.json, so a changed sibling must invalidate the
     // cached ui_messages.json rows (signature = main file + same-dir sibling size/lastModified), while an
