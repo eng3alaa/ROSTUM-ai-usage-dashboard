@@ -1,0 +1,40 @@
+name: price-check
+
+# Plan 10 Task 1 — re-fetches every vendor pricing page named in docs/superpowers/specs/2026-10-15-price-rows.json and compares the
+# figures with ours (docs/tools/price-check.mjs). Weekly + on demand; deliberately NOT part of tests.yml — a vendor moving a page must
+# never fail the test suite. This job fails (badge red) when a row drifted or fewer than 70 % of the sourced rows could be compared;
+# the full report is uploaded either way. Nothing is changed automatically: a human edits the JSON and re-runs tests/tools/sync-prices.mjs.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * 1'   # weekly, same slot as tests.yml
+
+concurrency:
+  group: price-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Compare the price spec with the vendors' pages
+        run: node docs/tools/price-check.mjs --json price-check-report.json
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: price-check-report
+          path: price-check-report.json
+          if-no-files-found: ignore
