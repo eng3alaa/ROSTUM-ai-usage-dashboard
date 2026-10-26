@@ -705,6 +705,18 @@ export async function generate() {
     '2026-08-11T08:00:00Z,Copilot app,abcd,ok!!!',
     'not a date,Copilot app,undated,skip me',
   ].join('\n') + '\n');
+  // Plan 9 B3 — Cerebras Cloud Console → Analytics → Usage → "Download Report" CSV. Column names are NOT documented (research 2026-10-15: "sniff headers on
+  //   import"), so this fixture is a plausible shape, not a real export: Date (UTC, per the console), Model, API Key, Requests, Input Tokens, Output Tokens, Total Tokens.
+  //   The file name carries "cerebras" (the importer's name gate). Two rows on the same UTC day merge; 'abc' input is rejected (row kept: in 0); the undated row is skipped.
+  //   Expected: buckets (10-05 llama in 12000 out 3000 msgs 15) · (10-06 qwen in 4000 out 1200 msgs 5) · (10-06 llama in 0 out 100 msgs 1) → in 16000 out 4300 msgs 21 · rows landed 4 · rejected 2
+  w('wave2/cerebras/cerebras-usage-report.csv', [
+    'Date,Model,API Key,Requests,Input Tokens,Output Tokens,Total Tokens',
+    '2026-10-05T00:00:00Z,llama-3.3-70b,key-a,12,10000,2500,12500',
+    '2026-10-05T13:00:00Z,llama-3.3-70b,key-a,3,2000,500,2500',
+    '2026-10-06T00:00:00Z,qwen-3-235b-a22b-instruct-2507,key-a,5,4000,1200,5200',
+    '2026-10-06T00:00:00Z,llama-3.3-70b,key-b,1,abc,100,100',
+    'not a date,llama-3.3-70b,key-a,1,5,5,10',
+  ].join('\n') + '\n');
   // T14 (4b) — Ollama desktop-app db.sqlite (schema subset of ollama/app/store/schema.sql). Needs node:sqlite; when it is unavailable nothing is
   //   written and 87b's ollama-db block reports itself skipped. One chat, 2 user + 2 assistant messages. m2's record is 6000 + 400 chars → it
   //   exceeds one 4096-byte page → overflow page. created_at shapes: ISO 'Z' text (m1/m2), SQLite 'YYYY-MM-DD HH:MM:SS' (m3, UTC), unix-seconds

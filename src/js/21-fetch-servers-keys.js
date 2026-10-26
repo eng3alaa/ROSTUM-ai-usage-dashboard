@@ -1,14 +1,21 @@
 /* ---------- direct fetchers (may be blocked by CORS → caller shows fallback) ---------- */
 /** JSON GET. A non-2xx answer throws Error('HTTP <status>[ — <server message>]') with .status set, so callers can tell 404 (not available) from
- *  everything else (a real error for the card). */
+ *  everything else (a real error for the card). The server message is error.message / error.type (OpenAI-style) or a top-level detail / message string
+ *  (FastAPI-style answers such as DeepInfra's { detail: 'Not authenticated' } — Plan 9 B3). */
 async function fetchJSON(url, headers) {
   const res = await fetch(url, { headers, signal: requestTimeout() });
   if (!res.ok) {
     let detail = '';
-    try { const j = await res.json(); detail = (j.error && (j.error.message || j.error.type)) || ''; } catch { /* no JSON body: no detail */ }
+    try { detail = serverMessage(await res.json()); } catch { /* no JSON body: no detail */ }
     const e = new Error(`HTTP ${res.status}${detail ? ' — ' + detail : ''}`); e.status = res.status; throw e;
   }
   return res.json();
+}
+/** the human-readable message inside an error body, or '' — never an object (a nested error without text stays silent) */
+function serverMessage(j) {
+  if (!j || typeof j !== 'object') return '';
+  const str = (v) => (typeof v === 'string' ? v : '');
+  return (j.error && (str(j.error.message) || str(j.error.type))) || str(j.detail) || str(j.message) || '';
 }
 /** GET an endpoint an account may lack: the JSON, or null on 404 (not available). Any other failure (403, 5xx, network) propagates to the card (A0 #4). */
 async function fetchJSONOrNotFound(url, headers) {

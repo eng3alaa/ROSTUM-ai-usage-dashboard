@@ -2025,6 +2025,20 @@ const App = {
     for (const b of res.billed) bm.set(b.d, b);
     Store.setBilled('csv', [...bm.values()].sort((a, b) => a.d < b.d ? -1 : 1));
   },
+  /** Plan 9 B3 — Cerebras Analytics CSV (sniffed by header + "cerebras" in the name): exact rows land under the cerebras card's srcId 'cerebras-usage-csv'
+   *  (platform Cerebras), merged by (day, model) so re-imports and overlapping reports never double; no billed path (the Cost tab has no export — dollars are
+   *  priced from the list). Like the DeepSeek export, the import is a sync of the cerebras card (lastSync moves, a keyed label is kept) and is not counted as an
+   *  Imports-card import. A report with no dated rows touches nothing and says so. */
+  _landCerebrasCsv(res, fileName, notes) {
+    const tail = res.meta.rejected ? ` — ${res.meta.rejected} value(s) rejected (non-numeric, negative or undated)` : '';
+    if (!res.rows.length) { notes.push(`${fileName}: Cerebras usage CSV — no rows (nothing imported)${tail}`); return; }
+    const keyOf = (r) => r.d + '\u0001' + r.model;
+    const merged = new Map((((Store.sources['cerebras-usage-csv'] || {}).rows) || []).map(r => [keyOf(r), r]));
+    for (const r of res.rows) merged.set(keyOf(r), r);
+    Store.setSource('cerebras-usage-csv', [...merged.values()], { buckets: merged.size, rows: res.meta.rows, rejected: res.meta.rejected, cachedColumn: res.meta.cachedColumn });
+    Store.setConnector('cerebras', { label: (Store.connectors.cerebras || {}).label || 'usage CSV (no key)', lastSync: Date.now() });
+    notes.push(`${fileName}: Cerebras usage CSV — ${fmtInt(res.meta.rows)} rows (exact tokens${res.meta.cachedColumn ? ', cached input as cache reads' : ''}; re-imports merge by day/model; dollars priced from the list — the Cost tab has no export)${tail}`);
+  },
   async handleImportFiles(files) {
     const status = $('import-status');
     clear(status);
@@ -2131,6 +2145,7 @@ const App = {
             imported++;
             continue;
           }
+          if (isCerebrasUsageCSV(headCells, f.name)) { this._landCerebrasCsv(parseCerebrasUsageCSV(csvText), f.name, notes); continue; }   // Plan 9 B3: lands under the cerebras card, not under Imports
           const res = parseGenericCSV(csvText);
           // merge by (day, platform, model): re-imports replace matching rows instead of duplicating
           const keyOf = (r) => r.d + '\u0001' + r.platform + '\u0001' + r.model;

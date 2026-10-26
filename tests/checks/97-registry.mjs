@@ -194,6 +194,40 @@ export async function run({ browser, ok }) {
       b2.oc.kind === 'api-key' && b2.oc.cat === 'api' && b2.oc.quality === 'validate' && b2.oc.keyOptional && b2.oc.fetch && b2.oc.keyLS === 'key:openai-compatible' && b2.oc.srcIds === JSON.stringify(['openai-compatible']) && b2.oc.statusEl && b2.oc.fields === JSON.stringify([['base', false]]) && !!b2.oc.platform && !b2.oc.sessionOnly && b2.oc.docs, JSON.stringify(b2.oc));
     ok('registry (B2): poe is an api-key entry in Chat apps — quality exact, no extra fields, fetch fn + parsePoeCostBreakdown registered, keyLS key:poe, srcIds [poe], statusEl in the DOM, get link poe.com/api/keys + docs; both platforms in PLATFORM_ORDER',
       b2.po.kind === 'api-key' && b2.po.cat === 'chat' && b2.po.quality === 'exact' && b2.po.fetch && b2.po.parser && b2.po.keyLS === 'key:poe' && b2.po.srcIds === JSON.stringify(['poe']) && b2.po.statusEl && b2.po.platform === 'Poe' && b2.po.noFields && b2.po.get && b2.po.docs && b2.inOrder, JSON.stringify(b2));
+
+    // ---- Plan 9 B3: API cards batch 1 — DeepInfra (gated usage), Moonshot / Kimi, Cerebras (+ usage CSV), Nebius, Meta Model API, Novita: fetch:-contract key cards in API vendors ----
+    const b3 = await page.evaluate(() => {
+      const want = { deepinfra: ['DeepInfra', 'exact', 'fetchDeepInfra'], moonshot: ['Moonshot API', 'validate', 'fetchMoonshot'], cerebras: ['Cerebras', 'validate', 'fetchCerebras'],
+        nebius: ['Nebius Token Factory', 'validate', 'fetchNebius'], 'meta-api': ['Meta Model API', 'validate', 'fetchMetaModelApi'], novita: ['Novita AI', 'validate', 'fetchNovita'] };
+      const bad = [];
+      for (const [id, [platform, quality, fetchName]] of Object.entries(want)) {
+        const c = connectorById(id);
+        if (!c) { bad.push(id + ': missing'); continue; }
+        if (c.platform !== platform) bad.push(id + ': platform ' + c.platform);
+        if (c.kind !== 'api-key' || c.category !== 'api' || c.quality !== quality) bad.push(id + ': kind/category/quality');
+        if (c.fetch !== fetchName || typeof globalThis[c.fetch] !== 'function') bad.push(id + ': fetch ' + c.fetch);
+        if (c.keyLS !== 'key:' + id || !c.keyLabel || !c.keyHint) bad.push(id + ': key copy');
+        if (c.statusEl !== id + '-status' || !document.getElementById(c.statusEl) || !document.getElementById('src-' + id)) bad.push(id + ': statusEl / card');
+        if (!Array.isArray(c.srcIds) || c.srcIds[0] !== id) bad.push(id + ': srcIds');
+        if (!c.links || !c.links.get || !c.links.usage || !c.links.docs) bad.push(id + ': links');
+        if (!Array.isArray(c.paths) || !c.paths.length) bad.push(id + ': paths');
+        if (c.fields || c.sessionOnly || c.keyOptional) bad.push(id + ': unexpected fields / sessionOnly / keyOptional');
+        if (!(typeof c.qualityNote === 'string' && c.qualityNote.length >= 80)) bad.push(id + ': qualityNote');
+      }
+      const di = connectorById('deepinfra') || {}, ce = connectorById('cerebras') || {}, nv = connectorById('novita') || {};
+      return { bad,
+        diNote: /^exact \(gated\)/i.test(di.qualityNote || '') && /validate-only/i.test(di.qualityNote || '') && /month/i.test(di.qualityNote || '') && /not verified/i.test(di.qualityNote || ''),
+        ceSrcIds: JSON.stringify(ce.srcIds), ceNote: /Download Report/.test(ce.qualityNote || '') && /"cerebras"/.test(ce.qualityNote || '') && /not verified/i.test(ce.qualityNote || ''),
+        nvNote: /collector/i.test(nv.qualityNote || '') && /403/.test(nv.qualityNote || ''),
+        honest: ['moonshot', 'cerebras', 'nebius', 'meta-api', 'novita'].every(id => /^validate-only/i.test((connectorById(id) || {}).qualityNote || '')),
+        importsNoCerebras: !connectorById('imports').srcIds.includes('cerebras-usage-csv'),
+        fns: typeof globalThis.isCerebrasUsageCSV === 'function' && typeof globalThis.parseCerebrasUsageCSV === 'function' && typeof globalThis.parseDeepInfraUsage === 'function',
+        inOrder: Object.values(want).every(([p]) => PLATFORM_ORDER.includes(p)) };
+    });
+    ok('registry (B3): deepinfra / moonshot / cerebras / nebius / meta-api / novita are api-key entries in API vendors — platform, quality (exact only for DeepInfra), fetch fn registered, keyLS key:<id>, own srcId first, statusEl + card in the DOM, get/usage/docs links, paths, no fields / sessionOnly / keyOptional; all six platforms in PLATFORM_ORDER',
+      b3.bad.length === 0 && b3.inOrder, JSON.stringify(b3));
+    ok('registry (B3): honesty copy — DeepInfra opens "Exact (gated)" and names the validate-only downgrade, monthly granularity and "not verified"; the other five open "Validate-only"; Cerebras srcIds [cerebras, cerebras-usage-csv] (the CSV lands under the card, not under Imports) and its copy names Download Report + the "cerebras" name gate; Novita names the collector proxy and the 403; CSV sniff / parser + parseDeepInfraUsage exist',
+      b3.diNote && b3.honest && b3.ceSrcIds === JSON.stringify(['cerebras', 'cerebras-usage-csv']) && b3.ceNote && b3.nvNote && b3.importsNoCerebras && b3.fns, JSON.stringify(b3));
   } finally {
     await page.close();
   }

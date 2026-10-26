@@ -131,3 +131,59 @@ function parsePoePointsHistory(items) {
   }
   return { rows: agg.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })).sort((a, b) => a.d < b.d ? -1 : 1), meta: { byType, unparsed, queries } };
 }
+/* ---------- DeepInfra /payment/usage (Plan 9 B3): months[].items → rows per booked day · model; total_cost (cents) → billed on the month's 1st ---------- */
+/** item.pricing_type → the token field it fills, or null for non-token billing: only a type that says "token" (or is exactly input / output / prompt /
+ *  completion) counts — 'image_output', 'time', 'audio_seconds' do not; then cache + write/creat → cw, any other cache → cr, input/prompt → in,
+ *  output/completion → out. A bare 'tokens' type cannot tell input from output and is NOT guessed (counted as non-token). */
+function deepInfraTokenField(pricingType) {
+  const t = String(pricingType == null ? '' : pricingType).toLowerCase();
+  if (!/token|^(input|output|prompt|completion)$/.test(t)) return null;
+  if (/cache/.test(t)) return /writ|creat/.test(t) ? 'cw' : 'cr';
+  if (/input|prompt/.test(t)) return 'in';
+  if (/output|completion/.test(t)) return 'out';
+  return null;
+}
+/** a month's period 'YYYY.MM' (DeepInfra's spelling; 'YYYY-MM' tolerated) or its interval.fr (ms) → the month's first UTC day; null when neither reads */
+function deepInfraMonthDay(month) {
+  const m = /^(\d{4})[.-](\d{2})$/.exec(String((month && month.period) || ''));
+  if (m) return `${m[1]}-${m[2]}-01`;
+  const d = month && month.interval ? dayKeyUTC(Number(month.interval.fr)) : null;
+  return d ? d.slice(0, 7) + '-01' : null;
+}
+/** an item's own interval { fr, to } (ms) names a day when it spans at most one UTC day — otherwise the month's first day (monthly granularity) */
+function deepInfraItemDay(item, monthDay) {
+  const iv = item.interval || {};
+  const fr = Number(iv.fr), to = Number(iv.to);
+  if (Number.isFinite(fr) && Number.isFinite(to) && to > fr && to - fr <= 864e5) return dayKeyUTC(fr) || monthDay;
+  return monthDay;
+}
+/** the model object of an item → its id; the spec shows `model {...}` without naming the fields, so the usual spellings are tried */
+const deepInfraModelName = (m) => typeof m === 'string' ? m : String((m && (m.model_name || m.name || m.id || m.full_name)) || 'deepinfra');
+/** { months: [{ period, interval, items: [{ model, units, rate, cost (cents), pricing_type, interval }], total_cost (cents), invoice_id }] } → { rows, billed, meta }.
+ *  Token items → one row per booked day · model (msgs stay 0 — the API reports no request counts; rows are exact, est 0); non-token items (time, images) are
+ *  counted, never booked as tokens; items with unreadable units are skipped and counted. billed = each month's total_cost (DeepInfra's own figure, cents → USD)
+ *  on the month's first day. meta.granularity 'month' marks the rows as month totals booked on the 1st; meta.open counts NOT_FINAL (still-open) months. */
+function parseDeepInfraUsage(payload) {
+  const agg = makeAgg(); const billed = [];
+  const meta = { granularity: 'month', months: 0, items: 0, nonToken: 0, rejected: 0, open: 0 };
+  for (const month of (payload && Array.isArray(payload.months) ? payload.months : [])) {
+    const monthDay = deepInfraMonthDay(month);
+    if (!monthDay) { meta.rejected++; continue; }
+    meta.months++;
+    if (month.invoice_id === 'NOT_FINAL') meta.open++;
+    const cents = Number(month.total_cost);
+    if (Number.isFinite(cents)) billed.push({ d: monthDay, amount: cents / 100 });
+    for (const it of (Array.isArray(month.items) ? month.items : [])) deepInfraAddItem(agg, it, monthDay, meta);
+  }
+  return { rows: agg.rows(), billed: billed.sort((a, b) => a.d < b.d ? -1 : 1), meta };
+}
+function deepInfraAddItem(agg, it, monthDay, meta) {
+  if (!it || typeof it !== 'object') { meta.rejected++; return; }
+  meta.items++;
+  const field = deepInfraTokenField(it.pricing_type);
+  if (!field) { meta.nonToken++; return; }
+  const units = Number(it.units);
+  if (!Number.isFinite(units) || units < 0) { meta.rejected++; return; }
+  agg.add(deepInfraItemDay(it, monthDay), 'DeepInfra', deepInfraModelName(it.model), { [field]: units });
+}
+

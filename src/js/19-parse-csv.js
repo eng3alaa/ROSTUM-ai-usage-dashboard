@@ -248,4 +248,39 @@ function parseCopilotActivityCSV(text, fileName) {
   }
   return { rows: agg.rows(), meta: { rows: n, skipped, apps: [...apps], sid } };
 }
+/* Cerebras Cloud Console → Analytics → Usage / Cached-Usage / Logs → Request Logs → "Download Report" CSV (Plan 9 B3). The column names are NOT documented
+ * (research 2026-10-15: "sniff headers on import"), so this importer is source-based, not verified on a real file: it matches headers tolerantly — a
+ * date/time column, a model column, input/prompt and output/completion token columns; optional cached (cache-hit) and fresh/uncached input columns (the
+ * Cached-Usage report: fresh → in, cached → cr; with only a cached column, in = input − cached); optional requests column (else one request per row — the
+ * Request Logs report is one row per request). Name-gated: the file name must contain "cerebras" (a date,model,input_tokens,output_tokens CSV without it is
+ * the generic importer's), and a platform/provider column means a generic CSV whatever the name. Timestamps are UTC (the console says so) → UTC day.
+ * Exact tokens (est 0), platform 'Cerebras'. `head` = header cells normalized to lowercase_with_underscores. */
+const CEREBRAS_CSV_DATE = /date|time|^day$|period/, CEREBRAS_CSV_CACHED = /cached|cache_hit|cache_read/, CEREBRAS_CSV_FRESH = /fresh|uncached|non_cached|cache_miss/;
+function isCerebrasUsageCSV(head, fileName) {
+  if (!/cerebras/i.test(String(fileName || ''))) return false;
+  const has = (re) => head.some(h => re.test(h));
+  if (has(/^platform$|^provider$|^source$/)) return false;
+  return has(CEREBRAS_CSV_DATE) && has(/^model/) && has(/input|prompt/) && has(/output|completion/);
+}
+function parseCerebrasUsageCSV(text) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) throw new Error('Empty CSV');
+  const head = rows[0].map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+  const find = (re, skip) => head.findIndex(h => re.test(h) && !(skip && skip.test(h)));
+  const iDate = find(CEREBRAS_CSV_DATE), iModel = find(/^model/), iCached = find(CEREBRAS_CSV_CACHED), iFresh = find(CEREBRAS_CSV_FRESH),
+        iIn = find(/input|prompt/, /cached|cache|fresh/), iOut = find(/output|completion/), iReq = find(/request|count|calls/);
+  if (iDate < 0 || iModel < 0 || (iIn < 0 && iFresh < 0) || iOut < 0) throw new Error('Not a Cerebras usage CSV (needs date, model, input and output token columns)');
+  const agg = makeAgg(); let n = 0, rejected = 0;
+  const num = (c, i) => { if (i < 0) return 0; const raw = String(c[i] ?? '').trim(); if (!raw) return 0; const v = Number(raw.replace(/[,\s]/g, '')); if (Number.isFinite(v) && v >= 0) return v; rejected++; return 0; };
+  for (let r = 1; r < rows.length; r++) {
+    const c = rows[r]; const raw = String(c[iDate] || '').trim(); const d = RE_DATEONLY.test(raw) ? raw : dayKeyUTC(raw);
+    if (!d) { rejected++; continue; }
+    const cached = num(c, iCached);
+    const inTok = iFresh >= 0 ? num(c, iFresh) : Math.max(0, num(c, iIn) - cached);
+    agg.add(d, 'Cerebras', String(c[iModel] || '').trim() || 'cerebras', { in: inTok, cr: cached, out: num(c, iOut), msgs: iReq >= 0 ? num(c, iReq) : 1 });
+    n++;
+  }
+  return { rows: agg.rows(), meta: { rows: n, rejected, cachedColumn: iCached >= 0 } };
+}
+
 

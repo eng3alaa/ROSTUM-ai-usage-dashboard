@@ -352,6 +352,65 @@ export async function run({ browser, ok }) {
     ok('App._workerThreshold defaults to 8 MB; at 0 every Imports file (5 loose + 2 ZIP entries incl. the skipped account.json + report sniff + re-import = 9 worker runs) parses in the worker with rows/meta identical to the inline run (0 workers); the re-imported Meta AI thread still replaces only itself',
       wk.defaultThreshold === 8 * 1024 * 1024 && wk.workersVia === 9 && wk.workersInline === 0 && wk.same && JSON.stringify(wk.rows.map(r => r[1] != null && r[1] > 0)) === JSON.stringify([true, true, true, true, true, true])
       && wk.reimport && wk.reimport.msgs === 3 && wk.reimport.threads === 1 && /Grok export — 3 conversations, 4 replies/.test(wk.note) && /Anthropic usage report — 1 rows/.test(wk.note), JSON.stringify({ d: wk.defaultThreshold, via: wk.workersVia, inl: wk.workersInline, same: wk.same, rows: wk.rows, reimport: wk.reimport, note: wk.note }));
+
+    // ---- Plan 9 B3: Cerebras Analytics CSV ("Download Report") — sniffed by header + "cerebras" in the name → exact rows under the cerebras card's srcId ----
+    const cbCsv = read('wave2', 'cerebras', 'cerebras-usage-report.csv');
+    const cb = await page.evaluate(async (cbCsv) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      if (typeof isCerebrasUsageCSV !== 'function' || typeof parseCerebrasUsageCSV !== 'function' || !connectorById('cerebras')) return { missing: true };
+      const c = connectorById('cerebras');
+      const head = (s) => (parseCSV(s.split(/\r?\n/, 1)[0])[0] || []).map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+      const sum = (rows) => rows.reduce((a, r) => ({ in: a.in + r.in, cr: a.cr + r.cr, out: a.out + r.out, msgs: a.msgs + r.msgs }), { in: 0, cr: 0, out: 0, msgs: 0 });
+      const src = () => Store.sources['cerebras-usage-csv'];
+      const note = () => document.getElementById('import-status').textContent;
+      // (1) sniff: the report header with "cerebras" in the name → yes; the same header under another name → no (the generic importer's); a generic CSV (platform column) named cerebras → no; the existing fixtures' headers → no
+      const reportHead = head(cbCsv);
+      const sniff = { yes: isCerebrasUsageCSV(reportHead, 'cerebras-usage-report.csv'), zipPath: isCerebrasUsageCSV(reportHead, 'reports/Cerebras_Usage_2026-10.csv'), unnamed: isCerebrasUsageCSV(reportHead, 'usage.csv'),
+        generic: isCerebrasUsageCSV(['date', 'platform', 'model', 'input_tokens', 'output_tokens'], 'cerebras.csv'), noModel: isCerebrasUsageCSV(['date', 'input_tokens', 'output_tokens'], 'cerebras.csv'),
+        cursor: isCerebrasUsageCSV(['date', 'kind', 'model', 'max_mode', 'input_w_cache_write', 'input_w_o_cache_write', 'cache_read', 'output_tokens', 'total_tokens'], 'usage-events.csv'),
+        deepseek: isCerebrasUsageCSV(['utc_date', 'model', 'api_key_name', 'type', 'amount'], 'amount-2026-08.csv'), copilot: isCerebrasUsageCSV(['date', 'app', 'prompt', 'response'], 'copilot-activity.csv'),
+        othersOnReport: isCursorUsageCSV(reportHead) || isDeepSeekAmountCSV(reportHead, 'cerebras-usage-report.csv') || isDeepSeekCostCSV(reportHead, 'cerebras-usage-report.csv') || isCopilotActivityCSV(reportHead) };
+      // (2) parser, direct: the Usage report fixture + the two Cached-Usage header shapes
+      const p = parseCerebrasUsageCSV(cbCsv);
+      const cachedSplit = parseCerebrasUsageCSV('Date,Model,Cached Input Tokens,Fresh Input Tokens,Output Tokens\n2026-10-07,llama-3.3-70b,3000,1000,200\n');
+      const cachedTotal = parseCerebrasUsageCSV('Date,Model,Input Tokens,Cached Input Tokens,Output Tokens,Requests\n2026-10-07T10:00:00Z,llama-3.3-70b,4000,3000,200,7\n');
+      const direct = { t: sum(p.rows), buckets: p.rows.map(r => [r.d, r.model, r.in, r.cr, r.out, r.msgs, r.est]).sort(), platforms: [...new Set(p.rows.map(r => r.platform))], meta: p.meta,
+        split: cachedSplit.rows.map(r => [r.d, r.in, r.cr, r.out, r.msgs]), splitCached: cachedSplit.meta.cachedColumn, total: cachedTotal.rows.map(r => [r.d, r.in, r.cr, r.out, r.msgs]), totalCached: cachedTotal.meta.cachedColumn };
+      // (3) through Imports: rows land under cerebras-usage-csv (platform Cerebras), the cerebras card connects ("usage CSV (no key)"), the Imports card stays off; a re-drop merges by day/model (nothing doubles)
+      await App.handleImportFiles([new File([cbCsv], 'cerebras-usage-report.csv', { type: 'text/csv' })]);
+      const first = { t: sum(src().rows), buckets: src().rows.length, meta: src().meta, note: note(), status: Store.connectorStatus(c), label: (Store.connectors.cerebras || {}).label || '', imports: Store.connectors.imports === undefined, billed: Store.billedRows('cerebras-usage-csv').length, generic: !Store.sources.csv };
+      await App.handleImportFiles([new File([cbCsv], 'cerebras-usage-report.csv', { type: 'text/csv' })]);
+      const again = { t: sum(src().rows), buckets: src().rows.length };
+      // (4) the same CSV under a name without "cerebras" is the generic importer's (platform from the model → Other), the cerebras source untouched
+      await App.handleImportFiles([new File([cbCsv], 'usage-report.csv', { type: 'text/csv' })]);
+      const unnamed = { generic: !!Store.sources.csv, cerebrasBuckets: src().rows.length, note: note() };
+      // (5) a key-connected card 8 days past its model check reads warn; a CSV import is a sync of this card → ok, keyed label kept
+      Store.setConnector('cerebras', { label: '3 models', lastSync: Date.now() - 8 * 864e5 });
+      const before = Store.connectorStatus(c);
+      await App.handleImportFiles([new File([cbCsv], 'cerebras-usage-report.csv', { type: 'text/csv' })]);
+      const after = { status: Store.connectorStatus(c), label: Store.connectors.cerebras.label, fresh: Date.now() - Store.connectors.cerebras.lastSync < 60e3 };
+      // (6) a report whose every row is undated touches nothing and says so
+      Store.sources = {}; Store.connectors = {};
+      await App.handleImportFiles([new File(['Date,Model,Input Tokens,Output Tokens\nnot a date,llama-3.3-70b,5,5\n'], 'cerebras-empty.csv', { type: 'text/csv' })]);
+      const empty = { src: !!src(), connected: !!Store.connectors.cerebras, note: note() };
+      const badge = document.querySelector('#src-import .badge').textContent, desc = document.querySelector('#src-import .desc').textContent;
+      Store.sources = {}; Store.connectors = {}; Store.billed = {}; Store.persist(); App._render();
+      return { sniff, direct, first, again, unnamed, before, after, empty, badge, desc };
+    }, cbCsv);
+    ok('cerebras CSV (B3): sniff takes the report header only with "cerebras" in the file name (also inside a ZIP path) and refuses the same header unnamed, a generic CSV (platform column), a header without model, and the Cursor / DeepSeek / Copilot headers; the other sniffers do not claim the report',
+      !cb.missing && cb.sniff.yes && cb.sniff.zipPath && !cb.sniff.unnamed && !cb.sniff.generic && !cb.sniff.noModel && !cb.sniff.cursor && !cb.sniff.deepseek && !cb.sniff.copilot && !cb.sniff.othersOnReport, JSON.stringify(cb.sniff || cb));
+    ok('cerebras CSV (B3): parser — Usage report → exact rows per UTC day · model, platform Cerebras (in 16000 / cr 0 / out 4300 / msgs 21 over 3 buckets: two same-day rows merge; "abc" tokens rejected; an undated row skipped → rejected 2; 4 rows landed); Cached-Usage shapes: cached + fresh columns → in 1000 / cr 3000; total input + cached → in 1000 (4000 − 3000) / cr 3000, requests 7',
+      !cb.missing && cb.direct.t.in === 16000 && cb.direct.t.cr === 0 && cb.direct.t.out === 4300 && cb.direct.t.msgs === 21 && cb.direct.platforms.length === 1 && cb.direct.platforms[0] === 'Cerebras'
+      && JSON.stringify(cb.direct.buckets) === JSON.stringify([['2026-10-05', 'llama-3.3-70b', 12000, 0, 3000, 15, 0], ['2026-10-06', 'llama-3.3-70b', 0, 0, 100, 1, 0], ['2026-10-06', 'qwen-3-235b-a22b-instruct-2507', 4000, 0, 1200, 5, 0]])
+      && cb.direct.meta.rows === 4 && cb.direct.meta.rejected === 2 && cb.direct.meta.cachedColumn === false
+      && JSON.stringify(cb.direct.split) === JSON.stringify([['2026-10-07', 1000, 3000, 200, 1]]) && cb.direct.splitCached && JSON.stringify(cb.direct.total) === JSON.stringify([['2026-10-07', 1000, 3000, 200, 7]]) && cb.direct.totalCached, JSON.stringify(cb.direct));
+    ok('cerebras CSV (B3): Imports lands the report under cerebras-usage-csv (3 buckets, no billed), connects the cerebras card as "usage CSV (no key)" while the Imports card stays off and the generic csv source is untouched; a re-drop merges by day/model (same totals); the same file without "cerebras" in its name is a generic import that leaves the cerebras source alone',
+      !cb.missing && cb.first.t.in === 16000 && cb.first.t.out === 4300 && cb.first.t.msgs === 21 && cb.first.buckets === 3 && cb.first.billed === 0 && cb.first.status === 'ok' && cb.first.label === 'usage CSV (no key)' && cb.first.imports && cb.first.generic
+      && /cerebras-usage-report\.csv: Cerebras usage CSV — 4 rows \(exact tokens/.test(cb.first.note) && /2 value\(s\) rejected/.test(cb.first.note) && cb.first.meta.buckets === 3 && cb.first.meta.rejected === 2
+      && cb.again.t.in === 16000 && cb.again.t.msgs === 21 && cb.again.buckets === 3 && cb.unnamed.generic && cb.unnamed.cerebrasBuckets === 3 && /usage-report\.csv: imported/.test(cb.unnamed.note), JSON.stringify({ first: cb.first, again: cb.again, unnamed: cb.unnamed }));
+    ok('cerebras CSV (B3): a CSV import is a sync of the cerebras card (warn after 8 days → ok, keyed label "3 models" kept, lastSync fresh); an all-undated report imports nothing, connects nothing and says so; the Imports card copy names Cerebras',
+      !cb.missing && cb.before === 'warn' && cb.after.status === 'ok' && cb.after.label === '3 models' && cb.after.fresh && !cb.empty.src && !cb.empty.connected && /cerebras-empty\.csv: Cerebras usage CSV — no rows/.test(cb.empty.note)
+      && /Cerebras/.test(cb.badge) && /Cerebras/.test(cb.desc) && /Download Report/.test(cb.desc), JSON.stringify({ before: cb.before, after: cb.after, empty: cb.empty, badge: cb.badge }));
   } finally {
     await page.close();
   }

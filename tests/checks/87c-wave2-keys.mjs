@@ -561,6 +561,160 @@ export async function run({ browser, ok }) {
     ok('poe (B2): key driver stores rows (in 2803 / out 535 / 4 queries, platform Poe) + billed $0.1409 under poe, label with the balance, meta.byType kept, hub group Chat apps, key never in the DOM',
       !poe.missing && poe.driver.status === 'ok' && poe.driver.err === null && /balance 1,234,567 points/.test(poe.driver.label) && /Connected/.test(poe.driver.text) && poe.driver.n === 4 && poe.driver.in === 2803 && poe.driver.out === 535 && poe.driver.msgs === 4
       && poe.driver.platforms.length === 1 && poe.driver.platforms[0] === 'Poe' && poe.driver.billedTotal === 0.1409 && poe.driver.byType && poe.driver.byType.API === 2 && poe.driver.group === 'chat' && !poe.driver.leak, JSON.stringify(poe.driver));
+
+    // ---- Plan 9 B3: DeepInfra — exact (gated): GET /v1/me validates, GET /payment/usage gives month·model items in cents; 401/403 there → validate-only downgrade ----
+    const di = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const c = connectorById('deepinfra');
+      if (typeof fetchDeepInfra !== 'function' || typeof parseDeepInfraUsage !== 'function' || !c || !document.getElementById('deepinfra-key')) return { missing: true };
+      const reg = { kind: c.kind, cat: c.category, quality: c.quality, platform: c.platform, badge: document.querySelector('#src-deepinfra .badge').textContent,
+        note: /^exact \(gated\)/i.test(c.qualityNote) && /401 or 403/.test(c.qualityNote) && /validate-only/i.test(c.qualityNote) && /cents/.test(c.qualityNote) && /first day/i.test(c.qualityNote) };
+      // fixture after the OpenAPI shape: months[].items { model{...}, units, rate, cost (cents), pricing_type, interval {fr,to} ms }, total_cost (cents), invoice_id
+      const m = (y, mo) => Date.UTC(y, mo - 1, 1), sep = { fr: m(2026, 9), to: m(2026, 10) }, oct = { fr: m(2026, 10), to: m(2026, 11) }, oct5 = { fr: Date.UTC(2026, 9, 5), to: Date.UTC(2026, 9, 6) };
+      const usage = { initial_month: '2026.09', months: [
+        { period: '2026.09', interval: sep, total_cost: 1250, invoice_id: 'in_0001', items: [
+          { model: { model_name: 'meta-llama/Llama-3.3-70B-Instruct' }, units: 1000000, rate: 0.000023, cost: 23, pricing_type: 'input_tokens', interval: sep },
+          { model: { model_name: 'meta-llama/Llama-3.3-70B-Instruct' }, units: 200000, rate: 0.00004, cost: 8, pricing_type: 'output_tokens', interval: sep },
+          { model: { model_name: 'black-forest-labs/FLUX-1-schnell' }, units: 300, rate: 0.5, cost: 150, pricing_type: 'image_output', interval: sep },   // non-token billing → no row, dollars via total_cost only
+          { model: { model_name: 'deepseek-ai/DeepSeek-V3' }, units: 'abc', rate: 0.00005, cost: 0, pricing_type: 'input_tokens', interval: sep } ] },        // unreadable units → skipped + counted
+        { period: '2026.10', interval: oct, total_cost: 305, invoice_id: 'NOT_FINAL', items: [
+          { model: { model_name: 'Qwen/Qwen3-235B-A22B' }, units: 50000, rate: 0.00002, cost: 1, pricing_type: 'input_tokens', interval: oct5 },          // a one-day interval → that day
+          { model: { model_name: 'Qwen/Qwen3-235B-A22B' }, units: 10000, rate: 0.00006, cost: 1, pricing_type: 'output_tokens', interval: oct5 },
+          { model: { model_name: 'Qwen/Qwen3-235B-A22B' }, units: 4000, rate: 0.000002, cost: 1, pricing_type: 'cache_read_tokens', interval: oct } ] } ] };
+      const parsed = parseDeepInfraUsage(usage);
+      const realFetch = window.fetch;
+      const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+      let calls = [], usageMode = 'ok', meMode = 'ok';
+      window.fetch = async (url, init) => {
+        const u = new URL(String(url)); const auth = init && init.headers && init.headers.Authorization;
+        calls.push({ path: u.pathname, from: u.searchParams.get('from'), to: u.searchParams.get('to'), auth: auth || null, signal: !!(init && init.signal) });
+        if (u.host !== 'api.deepinfra.com') return json({ error: 'wrong host' }, 404);
+        if (u.pathname === '/v1/me') return meMode === '401' ? json({ detail: 'Invalid token' }, 401) : json({ uid: 'u1', email: 'dev@example.com', display_name: 'Alaa', is_team_account: false });
+        if (u.pathname === '/payment/usage') return usageMode === 'ok' ? json(usage) : usageMode === '403' ? json({ detail: 'Not authenticated' }, 403) : json({ error: { message: 'upstream down' } }, 503);
+        return json({}, 404);
+      };
+      const direct = await fetchDeepInfra('di-test', {}, { days: 90 });
+      const month = (ms) => dayKeyUTC(ms).slice(0, 7);
+      const d1 = { label: direct.label, detail: direct.detail, rows: direct.rows.length, billed: direct.billed, meta: direct.meta, calls: calls.map(x => x.path), params: calls.find(x => x.path === '/payment/usage'),
+        expFrom: month(Date.now() - 90 * 864e5), expTo: month(Date.now()), auth: calls.every(x => x.auth === 'Bearer di-test'), signals: calls.every(x => x.signal) };
+      // gated: 403 on /payment/usage → validate-only, not an error; 503 → surfaced, rows null, billed null (stale); 401 on /v1/me → the card's error
+      usageMode = '403'; const refused = await fetchDeepInfra('di-test', {}, { days: 90 });
+      usageMode = '503'; const failed = await fetchDeepInfra('di-test', {}, { days: 90 });
+      usageMode = 'ok'; meMode = '401'; const rejected = await fetchDeepInfra('di-bad', {}, { days: 90 }).then(() => 'resolved', e => e.message);
+      meMode = 'ok';
+      // key driver: rows + billed + meta.granularity under deepinfra; then the refused key through the driver keeps the card connected as validate-only with no rows
+      document.getElementById('deepinfra-key').value = 'di-test'; const rem = document.getElementById('remember-deepinfra'); if (rem) rem.checked = false;
+      await App.connectKey(c);
+      const st = Store.connectors.deepinfra || {}; const rows = (Store.sources.deepinfra || {}).rows || [];
+      App.renderHub();
+      const hub = document.querySelector('#accounts-hub .acct[data-connector="deepinfra"]');
+      const driver = { status: Store.connectorStatus(c), label: st.label || null, err: st.err || null, text: document.getElementById('deepinfra-status').textContent, n: rows.length,
+        in: rows.reduce((a, r) => a + r.in, 0), out: rows.reduce((a, r) => a + r.out, 0), cr: rows.reduce((a, r) => a + r.cr, 0), est: rows.some(r => r.est), platforms: [...new Set(rows.map(r => r.platform))],
+        granularity: (Store.sources.deepinfra || {}).meta && Store.sources.deepinfra.meta.granularity, billedTotal: Math.round(Store.billedRows('deepinfra').reduce((a, b) => a + b.amount, 0) * 100) / 100, group: hub && hub.closest('.hub-group').dataset.group };
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; usageMode = '403';
+      await App.connectKey(c);
+      const gated = { status: Store.connectorStatus(c), label: (Store.connectors.deepinfra || {}).label || null, err: (Store.connectors.deepinfra || {}).err || null, text: document.getElementById('deepinfra-status').textContent, src: !!Store.sources.deepinfra, billed: Store.billed.deepinfra === undefined };
+      usageMode = 'ok'; meMode = '401'; if (rem) rem.checked = true;
+      await App.connectKey(c);
+      const bad = { status: Store.connectorStatus(c), err: (Store.connectors.deepinfra || {}).err, key: LS.get('key:deepinfra', null), text: document.getElementById('deepinfra-status').textContent };
+      window.fetch = realFetch;
+      if (rem) rem.checked = false; document.getElementById('deepinfra-key').value = ''; LS.del('key:deepinfra');
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist(); App._render();
+      return { reg, parsed: { rows: parsed.rows.map(r => [r.d, r.model, r.in, r.cw, r.cr, r.out, r.msgs, r.est]).sort(), billed: parsed.billed, meta: parsed.meta }, d1, refused, failed, rejected, driver, gated, bad };
+    });
+    ok('deepinfra (B3): registry entry — api-key · API vendors · exact badge · platform DeepInfra · copy opens "Exact (gated)", names the 401/403 downgrade to validate-only, cents and the first-day booking',
+      !di.missing && di.reg.kind === 'api-key' && di.reg.cat === 'api' && di.reg.quality === 'exact' && di.reg.badge === 'exact' && di.reg.platform === 'DeepInfra' && di.reg.note, JSON.stringify(di.reg || di));
+    ok('deepinfra (B3): parseDeepInfraUsage — month items booked on the month\'s 1st (Llama 1,000,000 in / 200,000 out on 2026-09-01; Qwen cache_read 4,000 on 2026-10-01), a one-day interval on its own day (Qwen 50,000 / 10,000 on 2026-10-05), msgs 0, exact; image item counted as non-token (1), "abc" units rejected (1); billed = total_cost cents → 12.50 / 3.05 on the 1st; meta.granularity month, 2 months, 1 open (NOT_FINAL)',
+      !di.missing && JSON.stringify(di.parsed.rows) === JSON.stringify([['2026-09-01', 'meta-llama/Llama-3.3-70B-Instruct', 1000000, 0, 0, 200000, 0, 0], ['2026-10-01', 'Qwen/Qwen3-235B-A22B', 0, 0, 4000, 0, 0, 0], ['2026-10-05', 'Qwen/Qwen3-235B-A22B', 50000, 0, 0, 10000, 0, 0]])
+      && JSON.stringify(di.parsed.billed) === JSON.stringify([{ d: '2026-09-01', amount: 12.5 }, { d: '2026-10-01', amount: 3.05 }])
+      && di.parsed.meta.granularity === 'month' && di.parsed.meta.months === 2 && di.parsed.meta.open === 1 && di.parsed.meta.nonToken === 1 && di.parsed.meta.rejected === 1 && di.parsed.meta.items === 7, JSON.stringify(di.parsed));
+    ok('deepinfra (B3): fetcher — GET /v1/me then GET /payment/usage?from=<month of today−90d>&to=<this month> with Bearer + timeout signal; label names the account and $15.55 over 2 months; detail says monthly granularity; rows 3, billed 2 days, meta.granularity month',
+      !di.missing && JSON.stringify(di.d1.calls) === JSON.stringify(['/v1/me', '/payment/usage']) && di.d1.params.from === di.d1.expFrom && di.d1.params.to === di.d1.expTo && di.d1.auth && di.d1.signals
+      && /^DeepInfra · Alaa · \$15\.55 over 2 months$/.test(di.d1.label) && /monthly granularity/i.test(di.d1.detail) && di.d1.rows === 3 && di.d1.billed.length === 2 && di.d1.meta.granularity === 'month' && di.d1.meta.days === 90, JSON.stringify(di.d1));
+    ok('deepinfra (B3): gate — 403 on /payment/usage → validate-only label, the reason (HTTP 403 — Not authenticated) in the detail, rows null, no billed path, meta.gated refused (not an error); 503 → surfaced in the detail, rows null, billed null; 401 on /v1/me → "HTTP 401" error',
+      !di.missing && /validate-only/.test(di.refused.label) && /HTTP 403/.test(di.refused.detail) && /Not authenticated/.test(di.refused.detail) && /validate-only/.test(di.refused.detail) && di.refused.rows === null && di.refused.billed === undefined && di.refused.meta.gated === 'refused'
+      && /validate-only/.test(di.failed.label) && /HTTP 503/.test(di.failed.detail) && /upstream down/.test(di.failed.detail) && di.failed.rows === null && di.failed.billed === null && di.failed.meta.gated === 'failed'
+      && /HTTP 401/.test(di.rejected), JSON.stringify({ refused: di.refused, failed: di.failed, rejected: di.rejected }));
+    ok('deepinfra (B3): key driver — rows (in 1,050,000 / out 210,000 / cr 4,000, platform DeepInfra, exact) + billed $15.55 + meta.granularity month stored under deepinfra, hub group API vendors, status line says monthly granularity; refused key → still connected (ok) as validate-only with the reason, no rows and no billed envelope; 401 → warn + HTTP 401, key not remembered',
+      !di.missing && di.driver.status === 'ok' && di.driver.err === null && /\$15\.55/.test(di.driver.label) && /Connected/.test(di.driver.text) && /monthly granularity/i.test(di.driver.text) && di.driver.n === 3 && di.driver.in === 1050000 && di.driver.out === 210000 && di.driver.cr === 4000 && !di.driver.est
+      && di.driver.platforms.length === 1 && di.driver.platforms[0] === 'DeepInfra' && di.driver.granularity === 'month' && di.driver.billedTotal === 15.55 && di.driver.group === 'api'
+      && di.gated.status === 'ok' && di.gated.err === null && /validate-only/.test(di.gated.label) && /HTTP 403/.test(di.gated.text) && /Connected/.test(di.gated.text) && !di.gated.src && di.gated.billed
+      && di.bad.status === 'warn' && /HTTP 401/.test(di.bad.err) && di.bad.key === null && /Validation failed/.test(di.bad.text), JSON.stringify({ driver: di.driver, gated: di.gated, bad: di.bad }));
+
+    // ---- Plan 9 B3: Moonshot / Kimi (balance), Cerebras, Nebius (+ legacy host), Meta Model API (validate), Novita (/v3/user balance) through the key driver ----
+    const b3 = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const ids = ['moonshot', 'cerebras', 'nebius', 'meta-api', 'novita'];
+      const missing = ids.filter(id => !connectorById(id) || !document.getElementById(id + '-key') || typeof globalThis[connectorById(id).fetch] !== 'function');
+      if (missing.length) return { missing };
+      const realFetch = window.fetch;
+      const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+      const cases = [
+        { id: 'moonshot', key: 'sk-moon', url: 'https://api.moonshot.ai/v1/users/me/balance', body: { code: 0, data: { available_balance: 49.58894, voucher_balance: 46.58893, cash_balance: 3.00001 }, scode: '0x0', status: true } },
+        { id: 'cerebras', key: 'csk-test', url: 'https://api.cerebras.ai/v1/models', body: { object: 'list', data: [{ id: 'llama3.1-8b', object: 'model', owned_by: 'Meta' }, { id: 'llama-3.3-70b' }, { id: 'qwen-3-235b-a22b-instruct-2507' }] } },
+        { id: 'nebius', key: 'nb-test', url: 'https://api.tokenfactory.nebius.com/v1/models', body: { object: 'list', data: [{ id: 'meta-llama/Llama-3.3-70B-Instruct' }, { id: 'Qwen/Qwen3-235B-A22B' }] } },
+        { id: 'meta-api', key: 'LLM|12345|abc', url: 'https://api.meta.ai/v1/models', body: { data: [{ id: 'Llama-4-Maverick-17B-128E-Instruct-FP8' }, { id: 'Llama-4-Scout-17B-16E-Instruct-FP8' }, { id: 'Llama-3.3-70B-Instruct' }, { id: 'Llama-3.3-8B-Instruct' }] } },
+        { id: 'novita', key: 'nv-test', url: 'https://api.novita.ai/v3/user', body: { credit_balance: 123456 } },
+      ];
+      const out = {};
+      let calls = [];
+      const route = (k) => async (url, init) => {
+        const u = String(url), auth = init && init.headers && (init.headers.Authorization || init.headers.authorization);
+        calls.push({ u, auth: auth || null, signal: !!(init && init.signal) });
+        return u === k.url && auth === 'Bearer ' + k.key ? json(k.body) : json({ error: { message: 'unexpected ' + u } }, u === k.url ? 401 : 404);
+      };
+      for (const k of cases) {
+        const c = connectorById(k.id); calls = []; window.fetch = route(k);
+        document.getElementById(k.id + '-key').value = k.key; const rem = document.getElementById('remember-' + k.id); if (rem) rem.checked = false;
+        await App.connectKey(c);
+        const st = Store.connectors[k.id] || {};
+        out[k.id] = { label: st.label || null, err: st.err || null, status: Store.connectorStatus(c), text: document.getElementById(k.id + '-status').textContent, calls, rows: !!Store.sources[k.id], billed: Store.billedRows(k.id).length, key: LS.get('key:' + k.id, null) };
+      }
+      // honest refusals: Moonshot HTTP 200 with status false; Novita 403 (its "bogus key" answer); Meta 401 { error: { code, type } } → type in the message; Cerebras 401 through the driver with Remember → not remembered
+      window.fetch = async () => json({ code: 401, status: false, scode: '0x0001', message: 'auth failed' });
+      const moonshotRefused = await fetchMoonshot('sk-bad').then(() => 'resolved', e => e.message);
+      window.fetch = async () => json({ message: 'forbidden' }, 403);
+      const novitaRefused = await fetchNovita('nv-bad').then(() => 'resolved', e => e.message);
+      window.fetch = async () => json({ error: { code: 'invalid_api_key', type: 'authentication_error' } }, 401);
+      const metaRefused = await fetchMetaModelApi('bad').then(() => 'resolved', e => e.message);
+      window.fetch = async () => json({ error: { message: 'Wrong API Key' } }, 401);
+      document.getElementById('cerebras-key').value = 'csk-bad'; const remC = document.getElementById('remember-cerebras'); if (remC) remC.checked = true;
+      await App.connectKey(connectorById('cerebras'));
+      const cerebrasBad = { status: Store.connectorStatus(connectorById('cerebras')), err: (Store.connectors.cerebras || {}).err, key: LS.get('key:cerebras', null), text: document.getElementById('cerebras-status').textContent };
+      if (remC) remC.checked = false;
+      // Nebius legacy host: the Token Factory host fails with 503 → api.studio.nebius.com is tried and named; a 401 on the primary host is final (no legacy call); both failing → one message naming both
+      const nebiusModels = { data: [{ id: 'meta-llama/Llama-3.3-70B-Instruct' }] };
+      calls = []; window.fetch = async (url, init) => { const u = String(url); calls.push({ u }); return u.startsWith('https://api.studio.nebius.com/') ? json(nebiusModels) : json({ error: { message: 'maintenance' } }, 503); };
+      const nebiusLegacy = await fetchNebius('nb-test').then(r => ({ ok: true, label: r.label, detail: r.detail, calls: calls.map(x => x.u) }), e => ({ ok: false, err: e.message }));
+      calls = []; window.fetch = async (url) => { calls.push({ u: String(url) }); return json({ error: { message: 'Unauthorized' } }, 401); };
+      const nebius401 = await fetchNebius('nb-bad').then(() => 'resolved', e => ({ err: e.message, calls: calls.length }));
+      window.fetch = async (url) => json({ error: { message: String(url).includes('studio') ? 'legacy down' : 'primary down' } }, 503);
+      const nebiusBoth = await fetchNebius('nb-test').then(() => 'resolved', e => e.message);
+      // Novita without the balance field: still a validated key, said so
+      window.fetch = async () => json({ uid: 'x' });
+      const novitaNoBalance = await fetchNovita('nv-test');
+      window.fetch = realFetch;
+      for (const id of ids) { document.getElementById(id + '-key').value = ''; LS.del('key:' + id); }
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist(); App._render();
+      return { out, moonshotRefused, novitaRefused, metaRefused, cerebrasBad, nebiusLegacy, nebius401, nebiusBoth, novitaNoBalance };
+    });
+    const b3ok = (id) => !b3.missing && b3.out[id].status === 'ok' && b3.out[id].err === null && /Connected/.test(b3.out[id].text) && !b3.out[id].rows && b3.out[id].billed === 0 && b3.out[id].key === null && b3.out[id].calls.length === 1 && b3.out[id].calls[0].signal;
+    ok('B3 validate cards: Moonshot — GET api.moonshot.ai/v1/users/me/balance (Bearer) → label "Moonshot · balance $49.59 available", detail names cash / voucher and says no per-day usage; Cerebras — GET api.cerebras.ai/v1/models → "3 models", detail points at the Analytics CSV Download Report; no rows, no billed, nothing remembered',
+      b3ok('moonshot') && b3.out.moonshot.label === 'Moonshot · balance $49.59 available' && /cash \$3\.00/.test(b3.out.moonshot.text) && /voucher \$46\.59/.test(b3.out.moonshot.text) && /no per-day usage/i.test(b3.out.moonshot.text) && b3.out.moonshot.calls[0].u === 'https://api.moonshot.ai/v1/users/me/balance' && b3.out.moonshot.calls[0].auth === 'Bearer sk-moon'
+      && b3ok('cerebras') && b3.out.cerebras.label === '3 models' && /Download Report/.test(b3.out.cerebras.text) && /Imports/.test(b3.out.cerebras.text) && b3.out.cerebras.calls[0].u === 'https://api.cerebras.ai/v1/models' && b3.out.cerebras.calls[0].auth === 'Bearer csk-test',
+      JSON.stringify({ moonshot: b3.out && b3.out.moonshot, cerebras: b3.out && b3.out.cerebras, missing: b3.missing }));
+    ok('B3 validate cards: Nebius — GET api.tokenfactory.nebius.com/v1/models → "2 models", detail says console-only; Meta Model API — GET api.meta.ai/v1/models → "4 models", detail says dashboard-only; Novita — GET api.novita.ai/v3/user → "Novita · balance $12.35" (credit_balance ÷ 10000), detail names the collector proxy for billing',
+      b3ok('nebius') && b3.out.nebius.label === '2 models' && /console/i.test(b3.out.nebius.text) && b3.out.nebius.calls[0].u === 'https://api.tokenfactory.nebius.com/v1/models' && b3.out.nebius.calls[0].auth === 'Bearer nb-test'
+      && b3ok('meta-api') && b3.out['meta-api'].label === '4 models' && /dashboard/i.test(b3.out['meta-api'].text) && b3.out['meta-api'].calls[0].u === 'https://api.meta.ai/v1/models' && b3.out['meta-api'].calls[0].auth === 'Bearer LLM|12345|abc'
+      && b3ok('novita') && b3.out.novita.label === 'Novita · balance $12.35' && /collector/i.test(b3.out.novita.text) && b3.out.novita.calls[0].u === 'https://api.novita.ai/v3/user' && b3.out.novita.calls[0].auth === 'Bearer nv-test',
+      JSON.stringify({ nebius: b3.out && b3.out.nebius, meta: b3.out && b3.out['meta-api'], novita: b3.out && b3.out.novita, missing: b3.missing }));
+    ok('B3 refusals: Moonshot HTTP 200 with status false → error naming code 401 / scode / message; Novita 403 → "HTTP 403"; Meta 401 → "HTTP 401 — authentication_error"; Cerebras 401 through the driver → warn + "Wrong API Key", key not remembered despite Remember; Novita without credit_balance → "key accepted" label',
+      !b3.missing && /code 401/.test(b3.moonshotRefused) && /0x0001/.test(b3.moonshotRefused) && /auth failed/.test(b3.moonshotRefused) && /HTTP 403/.test(b3.novitaRefused) && /HTTP 401 — authentication_error/.test(b3.metaRefused)
+      && b3.cerebrasBad.status === 'warn' && /HTTP 401/.test(b3.cerebrasBad.err) && /Wrong API Key/.test(b3.cerebrasBad.err) && b3.cerebrasBad.key === null && /Validation failed/.test(b3.cerebrasBad.text)
+      && b3.novitaNoBalance.label === 'Novita · key accepted' && /no credit_balance/.test(b3.novitaNoBalance.detail), JSON.stringify({ m: b3.moonshotRefused, n: b3.novitaRefused, me: b3.metaRefused, c: b3.cerebrasBad, nb: b3.novitaNoBalance }));
+    ok('B3 Nebius hosts: primary 503 → legacy api.studio.nebius.com tried (2 calls) and named in the label ("1 models · legacy host"); primary 401 → final, no legacy call; both failing → one error naming both hosts',
+      !b3.missing && b3.nebiusLegacy.ok && b3.nebiusLegacy.label === '1 models · legacy host' && /api\.studio\.nebius\.com/.test(b3.nebiusLegacy.detail) && JSON.stringify(b3.nebiusLegacy.calls) === JSON.stringify(['https://api.tokenfactory.nebius.com/v1/models', 'https://api.studio.nebius.com/v1/models'])
+      && /HTTP 401/.test(b3.nebius401.err) && b3.nebius401.calls === 1 && /primary down/.test(b3.nebiusBoth) && /legacy down/.test(b3.nebiusBoth) && /api\.studio\.nebius\.com/.test(b3.nebiusBoth), JSON.stringify({ legacy: b3.nebiusLegacy, r401: b3.nebius401, both: b3.nebiusBoth }));
   } finally {
     await page.close();
   }

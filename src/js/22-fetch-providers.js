@@ -723,3 +723,101 @@ async function probeVllmMetrics(base, probes) {
 function mergeBilledDay(id, d, amount) {
   return Store.billedRows(id).filter(b => b && b.d !== d).concat([{ d, amount }]).sort((a, b) => a.d < b.d ? -1 : 1);
 }
+/* ---------- Plan 9 B3: API cards batch 1 — DeepInfra (exact, gated), Moonshot / Kimi (balance), Cerebras · Nebius · Meta Model API (validate), Novita (balance) ---------- */
+const DEEPINFRA_API = 'https://api.deepinfra.com';
+/** DeepInfra key-driver fetcher — quality exact (gated). GET /v1/me validates the key (a 401 is the card's error) and names the account; then GET
+ *  /payment/usage?from=YYYY-MM&to=YYYY-MM — the months that cover opts.days — is the dashboard's own account API (live OpenAPI spec, not the public docs;
+ *  CORS * verified 2026-10-15; whether it accepts a plain API key is unverified): 200 → parseDeepInfraUsage rows + billed (monthly granularity); 401 / 403 →
+ *  the route refuses the key and the card DOWNGRADES itself to validate-only (rows null, no billed path, the reason in the detail — not an error); any other
+ *  failure there is surfaced the same way with billed null (stored dollars marked stale), the key validation standing. */
+async function fetchDeepInfra(key, fields, opts) {
+  const h = { 'Authorization': 'Bearer ' + key };
+  const me = await fetchJSON(DEEPINFRA_API + '/v1/me', h);
+  const who = String((me && (me.display_name || me.email)) || 'key accepted');
+  const days = (opts && opts.days) || 90;
+  let payload;
+  try { payload = await fetchJSON(deepInfraUsageUrl(days), h); }
+  catch (e) { return deepInfraValidateOnly(who, e); }
+  const u = parseDeepInfraUsage(payload);
+  const total = u.billed.reduce((a, b) => a + b.amount, 0);
+  return { label: `DeepInfra · ${who} · ${fmtUSD(total)} over ${u.meta.months} month${u.meta.months === 1 ? '' : 's'}`, detail: deepInfraDetail(u, total), rows: u.rows, billed: u.billed, meta: { ...u.meta, days } };
+}
+/** /payment/usage?from=<month of today − days>&to=<this month> (UTC months) */
+function deepInfraUsageUrl(days) {
+  const month = (ms) => dayKeyUTC(ms).slice(0, 7);
+  const url = new URL(DEEPINFRA_API + '/payment/usage');
+  url.searchParams.set('from', month(Date.now() - days * 864e5)); url.searchParams.set('to', month(Date.now()));
+  return url;
+}
+/** the usage route failed after /v1/me accepted the key: refused (401 / 403 → the gate, no billed path) or failed (anything else → billed null = stale). rows null = nothing replaced. */
+function deepInfraValidateOnly(who, e) {
+  const refused = e.status === 401 || e.status === 403;
+  const why = refused ? `the usage route refused this key (${e.message}) — /payment/* seems to need a dashboard session, so this card is validate-only for now`
+    : `the usage route failed (${e.message}) — tokens and billed amounts were not read this time`;
+  const out = { label: `DeepInfra · ${who} · validate-only`, detail: `key accepted by GET /v1/me · ${why}`, rows: null, meta: { gated: refused ? 'refused' : 'failed' } };
+  if (!refused) out.billed = null;
+  return out;
+}
+function deepInfraDetail(u, total) {
+  const m = u.meta, pl = (n) => (n === 1 ? '' : 's');
+  return `${u.rows.length} day·model row${pl(u.rows.length)} over ${m.months} month${pl(m.months)} — monthly granularity: month totals are booked on each month's 1st · ${fmtUSD(total)} billed (total_cost, cents → USD)`
+    + (m.open ? ' · the current month is not invoiced yet' : '') + (m.nonToken ? ` · ${m.nonToken} time / image item${pl(m.nonToken)} (dollars only, no tokens)` : '')
+    + (m.rejected ? ` · ${m.rejected} item${pl(m.rejected)} with unreadable units skipped` : '');
+}
+
+/** Moonshot / Kimi Open Platform — GET /v1/users/me/balance (documented; 401 on a bad key; CORS ACAO null + credentials → callable from file://):
+ *  { code: 0, data: { available_balance, voucher_balance, cash_balance } (USD), scode, status }. Balance only — no usage-history endpoint exists, so rows
+ *  stay null; a 200 whose body says status false / code ≠ 0 is Moonshot's own refusal and is an error. platform.kimi.ai and the China site hold separate keys. */
+async function fetchMoonshot(key) {
+  const j = await fetchJSON('https://api.moonshot.ai/v1/users/me/balance', { 'Authorization': 'Bearer ' + key });
+  if (!j || j.status === false || (j.code != null && Number(j.code) !== 0)) throw new Error(`Moonshot refused the request (code ${j && j.code}${j && j.scode ? ' / ' + j.scode : ''}${j && j.message ? ' — ' + j.message : ''})`);
+  const d = j.data && typeof j.data === 'object' ? j.data : {};
+  const money = (v) => fmtUSD(finAmt(Number(v)));
+  const label = Number.isFinite(Number(d.available_balance)) ? `Moonshot · balance ${money(d.available_balance)} available` : 'Moonshot · key accepted (no balance in the answer)';
+  return { label, rows: null,
+    detail: `available ${money(d.available_balance)} (cash ${money(d.cash_balance)}, voucher ${money(d.voucher_balance)}) · the API exposes no per-day usage — spend by model is console-only (platform.kimi.ai → Usage); the balance falling between syncs is the only spend signal here` };
+}
+/** Cerebras Inference — GET /v1/models (the only key-gated call; 401 on a bad key; CORS * verified). No usage or billing endpoint exists in the docs or the
+ *  OpenAPI spec; exact tokens come from the console's Analytics CSV ("Download Report") dropped on Imports with "cerebras" in the file name. */
+async function fetchCerebras(key) {
+  const j = await fetchJSON('https://api.cerebras.ai/v1/models', { 'Authorization': 'Bearer ' + key });
+  const n = countModels(j);
+  return { label: `${n} models`, rows: null,
+    detail: `key valid · ${n} models · no usage or billing API — for exact tokens open cloud.cerebras.ai → Analytics → Usage / Cached-Usage / Request Logs → Download Report and drop the CSV on Imports (keep "cerebras" in the file name); dollars are priced here from the list (the Cost tab has no export)` };
+}
+const NEBIUS_HOSTS = { primary: 'https://api.tokenfactory.nebius.com', legacy: 'https://api.studio.nebius.com' };
+/** Nebius Token Factory (ex AI Studio, renamed 2025-11) — GET /v1/models on api.tokenfactory.nebius.com (401 on a bad key; CORS * verified); when that host
+ *  fails for anything but a rejected key, the legacy api.studio.nebius.com host is tried and named. No billing / usage / balance path in the OpenAPI spec. */
+async function fetchNebius(key) {
+  const { host, j } = await nebiusModels({ 'Authorization': 'Bearer ' + key });
+  const n = countModels(j);
+  return { label: `${n} models${host === 'legacy' ? ' · legacy host' : ''}`, rows: null,
+    detail: `key valid on ${new URL(NEBIUS_HOSTS[host]).host} · ${n} models · no usage, balance or billing endpoint — usage is console-only (Organisation → Usage, no export)` };
+}
+/** the Token Factory host first; a rejected key (401) is final; any other failure tries the legacy host, and when both fail one error names both */
+async function nebiusModels(h) {
+  let primaryError;
+  try { return { host: 'primary', j: await fetchJSON(NEBIUS_HOSTS.primary + '/v1/models', h) }; }
+  catch (e) { if (e.status === 401) throw e; primaryError = e; }
+  try { return { host: 'legacy', j: await fetchJSON(NEBIUS_HOSTS.legacy + '/v1/models', h) }; }
+  catch (e2) { throw new Error(`${primaryError.message} on ${new URL(NEBIUS_HOSTS.primary).host}; legacy ${new URL(NEBIUS_HOSTS.legacy).host}: ${e2.message}`); }
+}
+/** Meta Model API (ex Llama API; dev.meta.ai) — GET https://api.meta.ai/v1/models (a bogus key → 401 { error: { code: 'invalid_api_key', type: 'authentication_error' } };
+ *  CORS * verified). No usage, billing or credits endpoint; per-response usage + x-ratelimit-* headers exist only for the page's own calls. The legacy
+ *  api.llama.com host still answers but is not called. */
+async function fetchMetaModelApi(key) {
+  const j = await fetchJSON('https://api.meta.ai/v1/models', { 'Authorization': 'Bearer ' + key });
+  const n = countModels(j);
+  return { label: `${n} models`, rows: null,
+    detail: `key valid · ${n} models · no usage or billing endpoint — usage is dashboard-only (dev.meta.ai/platform, no export)` };
+}
+/** Novita AI — GET /v3/user (the older user endpoint: still answers, 403 on a bogus key, CORS * verified) → { credit_balance } in 1/10000 USD. GET /openai/v1/models
+ *  answers 200 even with a bogus key, so it is not used. Billing (balance/detail, monthly/bill) rejects the browser preflight → collector proxy only, never fetched here. */
+async function fetchNovita(key) {
+  const j = await fetchJSON('https://api.novita.ai/v3/user', { 'Authorization': 'Bearer ' + key });
+  const raw = Number(j && j.credit_balance);
+  const balance = Number.isFinite(raw) ? raw / 10000 : null;
+  return { label: balance === null ? 'Novita · key accepted' : `Novita · balance ${fmtUSD(balance)}`, rows: null,
+    detail: `${balance === null ? 'key accepted (no credit_balance in the answer)' : 'credit_balance ' + fmtUSD(balance) + ' (reported ×10000)'} · no per-model usage endpoint · billed USD per month exists only on /openapi/v1/billing/*, which is CORS-blocked from this page (preflight 401) — readable through the local collector as a proxy in a later version, not fetched here · a bogus key answers 403` };
+}
+
