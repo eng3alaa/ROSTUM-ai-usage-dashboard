@@ -322,3 +322,11 @@ Then set `OLLAMA_HOST=127.0.0.1:11435` (or `base_url=http://127.0.0.1:11435/v1` 
 - The six statuses: `match` (both numbers found after an anchor), `drift` (anchor found with figures, but not both of ours — the line says `page says X / Y, we have A / B`), `id-missing` (neither an id nor the label is on the page — retired or renamed?), `page-unreachable` (fetch error or non-2xx, the error is the detail), `unknown` (anchor found but no parseable figure near it, a lone figure that cannot tell input from output, or a page with no figure at all — JS-rendered), `no-source` (the row has `source_url: null`; informational).
 - Coverage = (match + drift) / rows that have a source, overall and per vendor (an override's platform counts as its vendor). It measures how much of the list the checker could actually compare — a low number means JS-rendered pages or ids the page no longer lists, not wrong prices.
 - It never changes data. When a row drifted, a human verifies the page, edits the JSON and re-runs `node tests/tools/sync-prices.mjs` to render the dashboard's PRICES block. `.github/workflows/price-check.yml` runs the check weekly and on demand, uploads the JSON report as an artifact and fails its own job (never the test suite) on drift or low coverage. `tests/tools/price-check.test.mjs` is the Node test (stub pages on 127.0.0.1, no network; runs alone with `node tests/tools/price-check.test.mjs`); `tests/checks/89f-price-check.mjs` relays it into the suite.
+
+---
+
+## 11. License and status
+
+This repository is published for reading, running and auditing. **No open-source license has been chosen yet, so all rights are reserved** by the author: you may use the dashboard and the helper scripts for yourself, but please ask before redistributing or building on the code. A license decision is pending and this section will change when it lands.
+
+Security policy: [`SECURITY.md`](SECURITY.md). Development plans, reviews and the design debates that shaped the roadmap are under `docs/superpowers/`.
