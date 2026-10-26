@@ -40,13 +40,13 @@ export async function run({ browser, ok }) {
     });
     ok('registry: subtitle names a NEW platform without hand-edits', /OpenRouter/.test(wiring.sub), wiring.sub);
 
-    // refreshAll must fire every key-bearing connector's real fetch method, including
-    // the fetchOpenAI (capital AI) casing that name-derivation from the id would miss.
+    // refreshAll must fire every key-bearing connector's registered fetcher (globalThis[c.fetch]), including
+    // the fetchOpenAIAll (capital AI) casing that name-derivation from the id would miss.
     const refresh = await page.evaluate(async () => {
       Store.sources = {}; Store.billed = {}; Store.projects = [];
       let anthropicCalls = 0, openaiCalls = 0;
-      window.fetchAnthropicAll = async () => { anthropicCalls++; return { usage: { rows: [] }, cost: [] }; };
-      window.fetchOpenAIAll = async () => { openaiCalls++; return { usage: { rows: [] }, cost: [] }; };
+      window.fetchAnthropicAll = async () => { anthropicCalls++; return { rows: [], billed: [] }; };
+      window.fetchOpenAIAll = async () => { openaiCalls++; return { rows: [], billed: [] }; };
       LS.set('key:anthropic', 'k');
       LS.set('key:openai', 'k');
       document.getElementById('anthropic-key').value = 'k';
@@ -56,6 +56,22 @@ export async function run({ browser, ok }) {
     });
     ok('registry: refreshAll fires every key-bearing connector (incl. fetchOpenAI casing)',
       refresh.anthropicCalls === 1 && refresh.openaiCalls === 1, JSON.stringify(refresh));
+
+    // Plan 9 A0b (review #27): the five former legacy cards are ordinary fetch:-contract entries — the same registry shape as every other key card;
+    // the fetchMethod dispatch, the five App.fetchX drivers and App._landLegacyRows are gone
+    const a0b = await page.evaluate(() => {
+      const ids = ['anthropic', 'openai', 'gemini', 'copilot', 'openrouter'];
+      const shape = ids.map(id => { const c = connectorById(id) || {}; return { id,
+        fetch: typeof c.fetch === 'string' && typeof globalThis[c.fetch] === 'function', noFetchMethod: !('fetchMethod' in c),
+        keyLS: c.keyLS === 'key:' + id, keyLabel: typeof c.keyLabel === 'string' && c.keyLabel.length > 0,
+        statusEl: c.statusEl === id + '-status' && !!document.getElementById(c.statusEl), srcIds: JSON.stringify(c.srcIds) === JSON.stringify([id]) }; });
+      return { shape, every: shape.every(s => Object.entries(s).every(([k, v]) => k === 'id' || v === true)),
+        gone: ['fetchMethod', '_landLegacyRows', 'fetchAnthropic', 'fetchOpenAI', 'fetchGemini', 'fetchCopilot', 'fetchOpenrouter'].filter(k => typeof App[k] !== 'undefined'),
+        anyFetchMethod: CONNECTORS.filter(c => 'fetchMethod' in c).map(c => c.id) };
+    });
+    ok('registry (A0b #27): anthropic / openai / gemini / copilot / openrouter are fetch:-contract entries (fetch names a global function, keyLS key:<id>, keyLabel, statusEl <id>-status, srcIds [id]); no entry carries fetchMethod',
+      a0b.every && a0b.anyFetchMethod.length === 0, JSON.stringify({ shape: a0b.shape, anyFetchMethod: a0b.anyFetchMethod }));
+    ok('registry (A0b #27): App.fetchMethod, App._landLegacyRows and the five App.fetchX drivers no longer exist', a0b.gone.length === 0, JSON.stringify(a0b.gone));
 
     const compacted = await page.evaluate(() => {
       Store.sources = {}; Store.billed = {}; Store.projects = [];

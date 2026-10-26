@@ -158,15 +158,16 @@ export async function run({ browser, ok }) {
     const dbl = await page.evaluate(async () => {
       Store.sources = {}; Store.connectors = {};
       let n = 0;
-      window.fetchAnthropicAll = async () => { const me = ++n; await new Promise(r => setTimeout(r, me === 1 ? 50 : 400)); return { usage: { rows: [{ d: todayKey(), platform: 'Anthropic API', model: 'm' + me, in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }] }, cost: [] }; };
+      window.fetchAnthropicAll = async () => { const me = ++n; await new Promise(r => setTimeout(r, me === 1 ? 50 : 400)); return { rows: [{ d: todayKey(), platform: 'Anthropic API', model: 'm' + me, in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }], billed: [] }; };
       document.getElementById('anthropic-key').value = 'sk-ant-admin-x';
-      const p1 = App.fetchAnthropic(); const p2 = App.fetchAnthropic();
+      const a = connectorById('anthropic');
+      const p1 = App.connectKey(a); const p2 = App.connectKey(a);
       await new Promise(r => setTimeout(r, 120));   // p1 (stale) has resolved & bailed; p2 still in flight
       const mid = document.getElementById('anthropic-status').textContent;
       await Promise.allSettled([p1, p2]);
       return { mid, final: document.getElementById('anthropic-status').textContent, model: Store.sources.anthropic.rows[0].model };
     });
-    ok('backlog-9: stale bail does not blank a newer in-flight placeholder', /Fetching/.test(dbl.mid) && /Connected/.test(dbl.final) && dbl.model === 'm2', JSON.stringify(dbl));
+    ok('backlog-9: stale bail does not blank a newer in-flight placeholder', /Validating/.test(dbl.mid) && /Connected/.test(dbl.final) && dbl.model === 'm2', JSON.stringify(dbl));
 
     // F1: a keep-data disconnect must not be undone by re-migration on the next load()
     const keepReload = await page.evaluate(() => {

@@ -12,7 +12,7 @@ export async function run({ browser, ok }) {
         throw new Error('unexpected url ' + url);
       };
       document.getElementById('gemini-key').value = 'AIza-test';
-      await App.fetchGemini();
+      await App.connectKey(connectorById('gemini'));
       const st = Store.connectors.gemini;
       return { label: st && st.label, status: Store.connectorStatus(connectorById('gemini')), statusText: document.getElementById('gemini-status').textContent, seen };
     });
@@ -38,7 +38,7 @@ export async function run({ browser, ok }) {
 
     const gemBad = await page.evaluate(async () => {
       window.fetchJSON = async () => { throw new Error('HTTP 400 — API key not valid'); };
-      await App.fetchGemini();
+      await App.connectKey(connectorById('gemini'));
       return { err: Store.connectors.gemini.err, status: Store.connectorStatus(connectorById('gemini')) };
     });
     ok('gemini: invalid key surfaces error + amber', /key not valid/i.test(gemBad.err) && gemBad.status === 'warn', JSON.stringify(gemBad));
@@ -55,7 +55,7 @@ export async function run({ browser, ok }) {
         throw new Error('unexpected ' + u);
       };
       document.getElementById('copilot-key').value = 'github_pat_test';
-      await App.fetchCopilot();
+      await App.connectKey(connectorById('copilot'));
       const rows = Store.sources.copilot.rows;
       return { label: Store.connectors.copilot.label, n: rows.length,
         msgs: rows.reduce((a, r) => a + r.msgs, 0),
@@ -72,7 +72,7 @@ export async function run({ browser, ok }) {
         if (String(url).endsWith('/user')) return { login: 'alaa-dev' };
         throw Object.assign(new Error('HTTP 404 — Not Found'), { status: 404 });   // fetchJSON's contract: the HTTP status rides on the error
       };
-      await App.fetchCopilot();
+      await App.connectKey(connectorById('copilot'));
       return { label: Store.connectors.copilot.label, err: Store.connectors.copilot.err || null,
         statusText: document.getElementById('copilot-status').textContent };
     });
@@ -86,7 +86,7 @@ export async function run({ browser, ok }) {
         if (String(url).endsWith('/user')) return { login: 'alaa-dev' };
         throw Object.assign(new Error('HTTP 403 — Resource not accessible by personal access token'), { status: 403 });
       };
-      await App.fetchCopilot();
+      await App.connectKey(connectorById('copilot'));
       return { err: (Store.connectors.copilot || {}).err || null, status: Store.connectorStatus(connectorById('copilot')), statusText: document.getElementById('copilot-status').textContent, hasSrc: !!Store.sources.copilot };
     });
     ok('copilot (A0 #4): a 403 on the usage endpoint is reported as the card\'s error (warn, "HTTP 403 …"), not read as "no usage data"; nothing lands',
@@ -101,15 +101,15 @@ export async function run({ browser, ok }) {
         if (usage === null) throw Object.assign(new Error('HTTP 404 — Not Found'), { status: 404 });
         return usage;
       };
-      await App.fetchCopilot();
+      await App.connectKey(connectorById('copilot'));
       const first = { rows: Store.sources.copilot.rows.length, billed: Store.billedRows('copilot').length };
       usage = { usageItems: [] };
-      await App.fetchCopilot();
+      await App.connectKey(connectorById('copilot'));
       const empty = { rows: ((Store.sources.copilot || {}).rows || []).length, billed: Store.billedRows('copilot').length, stale: (Store.billed.copilot || {}).stale, text: document.getElementById('copilot-status').textContent };
       usage = { usageItems: items };
-      await App.fetchCopilot();
+      await App.connectKey(connectorById('copilot'));
       usage = null;
-      await App.fetchCopilot();
+      await App.connectKey(connectorById('copilot'));
       const gone = { rows: ((Store.sources.copilot || {}).rows || []).length, billed: Store.billedRows('copilot').length, stale: (Store.billed.copilot || {}).stale, err: Store.connectors.copilot.err || null };
       return { first, empty, gone };
     });
@@ -125,7 +125,7 @@ export async function run({ browser, ok }) {
         usageUrl = u;
         return { usageItems: [{ year: 2026, month: 8, product: 'copilot', sku: 'copilot_premium_request', quantity: 3, netAmount: 0.12 }, { product: 'copilot', sku: 'copilot_premium_request', quantity: 9, netAmount: 0.36 }] };
       };
-      await App.fetchCopilot();
+      await App.connectKey(connectorById('copilot'));
       return { days: Store.sources.copilot.rows.map(r => r.d), msgs: Store.sources.copilot.rows.reduce((a, r) => a + r.msgs, 0), usageUrl };
     });
     ok('copilot (A0 #24): an item with year/month but no date lands on the 1st of that month, an item with neither is skipped (no "undefined-undefined-01" row); the login is URL-encoded in the usage path',
@@ -144,7 +144,7 @@ export async function run({ browser, ok }) {
         throw new Error('unexpected ' + u);
       };
       document.getElementById('openrouter-key').value = 'sk-or-test';
-      await App.fetchOpenrouter();
+      await App.connectKey(connectorById('openrouter'));
       const rows = Store.sources.openrouter.rows;
       return { label: Store.connectors.openrouter.label, n: rows.length,
         in: rows.reduce((a, r) => a + r.in, 0), out: rows.reduce((a, r) => a + r.out, 0),
@@ -163,7 +163,7 @@ export async function run({ browser, ok }) {
         if (u.endsWith('/api/v1/credits')) return { data: { total_credits: 50, total_usage: 12.5 } };
         throw new Error('HTTP 403 — activity requires provisioning key');
       };
-      await App.fetchOpenrouter();
+      await App.connectKey(connectorById('openrouter'));
       return { err: Store.connectors.openrouter.err || null, hasSrc: !!Store.sources.openrouter,
         statusText: document.getElementById('openrouter-status').textContent };
     });
@@ -178,7 +178,7 @@ export async function run({ browser, ok }) {
         if (u.endsWith('/api/v1/credits')) return { data: { total_credits: 50, total_usage: 12.5 } };
         throw Object.assign(new Error('HTTP 404 — Not Found'), { status: 404 });
       };
-      await App.fetchOpenrouter();
+      await App.connectKey(connectorById('openrouter'));
       return { err: Store.connectors.openrouter.err || null, hasSrc: !!Store.sources.openrouter, statusText: document.getElementById('openrouter-status').textContent };
     });
     ok('openrouter (A0 #4): a 404 on activity (endpoint not available for this key type) degrades to credits-only with no error state',
@@ -193,10 +193,10 @@ export async function run({ browser, ok }) {
         if (u.endsWith('/api/v1/credits')) return { data: { total_credits: 50, total_usage: 12.5 } };
         return activity;
       };
-      await App.fetchOpenrouter();
+      await App.connectKey(connectorById('openrouter'));
       const first = { rows: Store.sources.openrouter.rows.length, billed: Store.billedRows('openrouter').length };
       activity = { data: [] };
-      await App.fetchOpenrouter();
+      await App.connectKey(connectorById('openrouter'));
       return { first, rows: ((Store.sources.openrouter || {}).rows || []).length, billed: Store.billedRows('openrouter').length, stale: (Store.billed.openrouter || {}).stale, err: Store.connectors.openrouter.err || null };
     });
     ok('openrouter (A0 #5): an activity answer with zero rows replaces the stored rows (0) and billed ([] fresh, not stale) — never keeps the old rows marked fresh',
@@ -211,7 +211,7 @@ export async function run({ browser, ok }) {
       window.fetchAnthropicAll = async () => { throw new Error('HTTP 401 — invalid x-api-key'); };
       window.fetchOpenAIAll = async () => { throw new Error('HTTP 401 — Incorrect API key'); };
       document.getElementById('anthropic-key').value = 'sk-ant-admin-x'; document.getElementById('openai-key').value = 'sk-admin-x';
-      await App.fetchAnthropic(); await App.fetchOpenAI();
+      await App.connectKey(connectorById('anthropic')); await App.connectKey(connectorById('openai'));
       await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));   // App.render() is rAF-batched
       const after = { anthropic: dot('anthropic'), openai: dot('openai'), errA: Store.connectors.anthropic.err, errO: Store.connectors.openai.err };
       window.fetchAnthropicAll = origA; window.fetchOpenAIAll = origO;
@@ -221,6 +221,52 @@ export async function run({ browser, ok }) {
     });
     ok('legacy cards (A0 #6): a failed Anthropic / OpenAI fetch re-renders the hub — both dots read warn after the error (off before)',
       /\boff\b/.test(legacyErr.before.anthropic) && /\boff\b/.test(legacyErr.before.openai) && /\bwarn\b/.test(legacyErr.after.anthropic) && /\bwarn\b/.test(legacyErr.after.openai), JSON.stringify(legacyErr));
+    // Plan 9 A0b (#27): the former legacy OpenAI card runs through connectKey like every key card — rows + billed land (label "Admin key · last 4"),
+    // a cost failure keeps the rows and marks billed stale (status line says so), [] replaces the rows and clears billed (fresh), a 403 is the card's
+    // error (warn, the key is NOT persisted despite Remember), and the card's days select still sets the window (90 → 30)
+    const oa = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
+      const c = connectorById('openai'), key = document.getElementById('openai-key'), rem = document.getElementById('remember-openai'), days = document.getElementById('openai-days');
+      LS.del('key:openai'); key.value = 'sk-admin-test'; rem.checked = true; days.value = '90';
+      const t = Math.floor(Date.UTC(2026, 7, 10) / 1000);
+      let usage = { data: [{ start_time: t, results: [{ model: 'gpt-5.4', input_tokens: 100, input_cached_tokens: 10, output_tokens: 40, num_model_requests: 3 }] }], has_more: false };
+      let costs = { data: [{ start_time: t, results: [{ amount: { value: '1.25', currency: 'usd' } }] }], has_more: false };
+      const starts = [];
+      window.fetchJSON = async (url) => {
+        const u = new URL(String(url));
+        if (u.pathname.endsWith('/organization/usage/completions')) { starts.push(+u.searchParams.get('start_time')); if (usage instanceof Error) throw usage; return usage; }
+        if (u.pathname.endsWith('/organization/costs')) { if (costs instanceof Error) throw costs; return costs; }
+        throw new Error('unexpected ' + u);
+      };
+      const daysBack = () => Math.round((Date.now() / 1000 - starts[starts.length - 1]) / 86400);
+      const snap = () => ({ rows: ((Store.sources.openai || {}).rows || []).length, billed: Store.billedRows('openai').length, stale: (Store.billed.openai || {}).stale ?? null,
+        err: (Store.connectors.openai || {}).err || null, status: Store.connectorStatus(c), text: document.getElementById('openai-status').textContent, key: LS.get('key:openai', null) });
+      await App.connectKey(c);
+      const first = { ...snap(), in: Store.sources.openai.rows[0].in, cr: Store.sources.openai.rows[0].cr, amount: Store.billedRows('openai')[0].amount, label: Store.connectors.openai.label, days: daysBack() };
+      costs = Object.assign(new Error('HTTP 403 — costs need api.usage.read'), { status: 403 });
+      await App.connectKey(c);
+      const soft = snap();
+      usage = { data: [], has_more: false }; costs = { data: [], has_more: false };
+      await App.connectKey(c);
+      const empty = snap();
+      LS.del('key:openai'); usage = Object.assign(new Error('HTTP 403 — Insufficient permissions'), { status: 403 });
+      await App.connectKey(c);
+      const denied = snap();
+      days.value = '30'; usage = { data: [], has_more: false };
+      await App.connectKey(c);
+      const window30 = daysBack();
+      window.fetchJSON = window.__origFetchJSON; LS.del('key:openai'); key.value = ''; rem.checked = false; days.value = '90';
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist(); App._render();
+      return { first, soft, empty, denied, window30 };
+    });
+    ok('openai (A0b #27): connectKey lands 1 row (in=90 cr=10) + billed 1.25 (fresh, status ok, "1 usage rows + billed costs", label "Admin key · last 4: test", key remembered, 90-day window)',
+      oa.first.rows === 1 && oa.first.in === 90 && oa.first.cr === 10 && oa.first.billed === 1 && oa.first.amount === 1.25 && oa.first.stale === false && oa.first.status === 'ok'
+      && /Connected/.test(oa.first.text) && /1 usage rows \+ billed costs/.test(oa.first.text) && oa.first.label === 'Admin key · last 4: test' && oa.first.key === 'sk-admin-test' && oa.first.days === 90, JSON.stringify(oa.first));
+    ok('openai (A0b #27): a failed costs report keeps the rows and the old billed day but marks it stale, no error, the status line says "cost report unavailable"; a [] usage + [] costs answer replaces the rows (0) and clears billed (fresh)',
+      oa.soft.rows === 1 && oa.soft.billed === 1 && oa.soft.stale === true && oa.soft.err === null && oa.soft.status === 'ok' && /cost report unavailable/.test(oa.soft.text)
+      && oa.empty.rows === 0 && oa.empty.billed === 0 && oa.empty.stale === false && oa.empty.err === null, JSON.stringify({ soft: oa.soft, empty: oa.empty }));
+    ok('openai (A0b #27): a 403 on the usage report is the card\'s error (warn, "HTTP 403" in the entry and on the line), nothing lands, the key is not persisted; the days select drives the window (30)',
+      /HTTP 403/.test(oa.denied.err || '') && oa.denied.status === 'warn' && /HTTP 403/.test(oa.denied.text) && oa.denied.rows === 0 && oa.denied.key === null && oa.window30 === 30, JSON.stringify({ denied: oa.denied, window30: oa.window30 }));
     // A0 #11: Remember persists a key only after the fetch accepted it — a rejected key is never written (refreshAll would replay it after a reload)
     const rememberLate = await page.evaluate(async () => {
       Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.projects = [];
@@ -229,9 +275,9 @@ export async function run({ browser, ok }) {
       const gk = document.getElementById('gemini-key'), grem = document.getElementById('remember-gemini');
       LS.del('key:gemini'); gk.value = 'AIza-bad'; grem.checked = true;
       window.fetchJSON = async () => { throw Object.assign(new Error('HTTP 400 — API key not valid'), { status: 400 }); };
-      await App.fetchGemini(); out.geminiAfterFail = LS.get('key:gemini', null);
+      await App.connectKey(connectorById('gemini')); out.geminiAfterFail = LS.get('key:gemini', null);
       window.fetchJSON = async () => ({ models: [{ name: 'models/gemini-3-pro' }] });
-      gk.value = 'AIza-good'; await App.fetchGemini(); out.geminiAfterOk = LS.get('key:gemini', null);
+      gk.value = 'AIza-good'; await App.connectKey(connectorById('gemini')); out.geminiAfterOk = LS.get('key:gemini', null);
       LS.del('key:gemini'); gk.value = ''; grem.checked = false;
       // (b) the generic key driver (connectKey): same rule
       const c = CONNECTORS.find(x => x.fetch && !x.sessionOnly && x.keyLS);
@@ -310,4 +356,39 @@ export async function run({ browser, ok }) {
   } finally {
     await page.close();
   }
+
+  // Plan 9 A0b (#27): a data blob stored BEFORE the refactor (the five ids: rows under sources, billed envelopes, connector entries) must load unchanged —
+  // the same per-id totals, fresh billed, status ok, green hub dots and "Connected (stored data)" lines
+  const hourAgo = Date.now() - 3600e3;
+  const row = (platform, model, d, x) => ({ d, platform, model, in: x, cw: 0, cr: Math.floor(x / 10), out: Math.floor(x / 2), msgs: 1 + (x % 3) });
+  const env = (d, amount) => ({ rows: [{ d, amount }], at: hourAgo, stale: false });
+  const ent = (label) => ({ label, lastSync: hourAgo, err: null });
+  const blob = { sources: {
+      anthropic: { rows: [row('Anthropic API', 'claude-sonnet-5', '2026-08-10', 1000), row('Anthropic API', 'claude-opus-5', '2026-08-11', 250)], meta: { days: 90, updated: hourAgo } },
+      openai: { rows: [row('OpenAI API', 'gpt-5.4', '2026-08-10', 700)], meta: { days: 90, updated: hourAgo } },
+      copilot: { rows: [{ d: '2026-08-10', platform: 'GitHub Copilot', model: 'copilot_premium_request', in: 0, cw: 0, cr: 0, out: 0, msgs: 14, est: 1 }], meta: { updated: hourAgo } },
+      openrouter: { rows: [row('OpenRouter', 'deepseek/deepseek-v4', '2026-08-11', 90000)], meta: { updated: hourAgo } } },
+    billed: { anthropic: env('2026-08-10', 3.5), openai: env('2026-08-10', 1.25), copilot: env('2026-08-10', 0.56), openrouter: env('2026-08-11', 0.42) },
+    projects: [],
+    connectors: { anthropic: ent('Admin key ·  last 4: test'), openai: ent('Admin key ·  last 4: test'), gemini: ent('2 models available'), copilot: ent('alaa-dev'), openrouter: ent('rostum-key') } };
+  const ids = ['anthropic', 'openai', 'gemini', 'copilot', 'openrouter'];
+  const sumOf = (rows, k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
+  const want = Object.fromEntries(ids.map(id => { const rows = (blob.sources[id] || {}).rows || []; return [id, { in: sumOf(rows, 'in'), out: sumOf(rows, 'out'), msgs: sumOf(rows, 'msgs'), billed: sumOf(((blob.billed[id] || {}).rows || []), 'amount') }]; }));
+  const { page: p2 } = await openDashboard(browser, { seedData: blob });
+  let stored;
+  try {
+    stored = await p2.evaluate((ids) => {
+      const sum = (rows, k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
+      const dot = (id) => (document.querySelector('#accounts-hub .acct[data-connector="' + id + '"] .dot') || {}).className || '';
+      return Object.fromEntries(ids.map(id => { const rows = ((Store.sources[id] || {}).rows || []); return [id, { in: sum(rows, 'in'), out: sum(rows, 'out'), msgs: sum(rows, 'msgs'),
+        billed: sum(Store.billedRows(id), 'amount'), stale: (Store.billed[id] || {}).stale ?? null, status: Store.connectorStatus(connectorById(id)), dot: dot(id),
+        text: document.getElementById(id + '-status').textContent, label: (Store.connectors[id] || {}).label || null }]; }));
+    }, ids);
+  } finally {
+    await p2.close();
+  }
+  ok('stored data (A0b #27): a pre-refactor blob for the five cards renders the same totals (in / out / msgs / billed per id), billed fresh, status ok, green hub dots, "Connected (stored data)" lines, labels kept',
+    !!stored && ids.every(id => stored[id].in === want[id].in && stored[id].out === want[id].out && stored[id].msgs === want[id].msgs && Math.abs(stored[id].billed - want[id].billed) < 1e-9
+      && stored[id].status === 'ok' && /\bok\b/.test(stored[id].dot) && /Connected/.test(stored[id].text) && stored[id].label === blob.connectors[id].label)
+    && ['anthropic', 'openai', 'copilot', 'openrouter'].every(id => stored[id].stale === false) && stored.gemini.stale === null, JSON.stringify({ stored, want }));
 }

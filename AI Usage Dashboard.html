@@ -648,7 +648,7 @@ progress { width: 160px; height: 8px; }
       <div class="desc">Pulls real usage + spend for your Anthropic API organization. Needs an <b>Admin API key</b> (<code>sk-ant-admin…</code>) from console.anthropic.com → Settings → API keys.</div>
       <div class="row">
         <input type="password" id="anthropic-key" placeholder="sk-ant-admin-…" autocomplete="off">
-        <button class="btn primary" id="fetch-anthropic">Fetch</button>
+        <button class="btn primary" id="anthropic-validate">Fetch</button>
       </div>
       <div class="row">
         <label class="inline"><input type="checkbox" id="remember-anthropic"> Remember key on this computer</label>
@@ -669,7 +669,7 @@ progress { width: 160px; height: 8px; }
       <div class="desc">Pulls usage + real costs for your OpenAI organization. Needs an <b>Admin key</b> (<code>sk-admin…</code>) from platform.openai.com → Settings → Organization → Admin keys.</div>
       <div class="row">
         <input type="password" id="openai-key" placeholder="sk-admin-…" autocomplete="off">
-        <button class="btn primary" id="fetch-openai">Fetch</button>
+        <button class="btn primary" id="openai-validate">Fetch</button>
       </div>
       <div class="row">
         <label class="inline"><input type="checkbox" id="remember-openai"> Remember key on this computer</label>
@@ -690,7 +690,7 @@ progress { width: 160px; height: 8px; }
       <div class="desc">Validates your Google AI Studio key and lists available models. Google's API has no usage-history endpoint — import a Cloud Billing export CSV (Imports card) for historical usage. Get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.</div>
       <div class="row">
         <input type="password" id="gemini-key" placeholder="AIza…" autocomplete="off">
-        <button class="btn primary" id="fetch-gemini">Validate &amp; connect</button>
+        <button class="btn primary" id="gemini-validate">Validate &amp; connect</button>
       </div>
       <div class="row">
         <label class="inline"><input type="checkbox" id="remember-gemini"> Remember key on this computer</label>
@@ -703,7 +703,7 @@ progress { width: 160px; height: 8px; }
       <div class="desc">Validates a fine-grained token (needs 'Plan: read'). Pulls Copilot premium-request usage where GitHub exposes it for your account; otherwise shows the connection only. Create one at <a href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noopener">github.com/settings/personal-access-tokens</a>.</div>
       <div class="row">
         <input type="password" id="copilot-key" placeholder="github_pat_…" autocomplete="off">
-        <button class="btn primary" id="fetch-copilot">Validate &amp; connect</button>
+        <button class="btn primary" id="copilot-validate">Validate &amp; connect</button>
       </div>
       <div class="row">
         <label class="inline"><input type="checkbox" id="remember-copilot"> Remember key on this computer</label>
@@ -716,7 +716,7 @@ progress { width: 160px; height: 8px; }
       <div class="desc">One key covers every model you route through OpenRouter (DeepSeek, Grok, Mistral…). Pulls your key label, credit balance, and daily per-model activity. Get a key at <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai/settings/keys</a>.</div>
       <div class="row">
         <input type="password" id="openrouter-key" placeholder="sk-or-…" autocomplete="off">
-        <button class="btn primary" id="fetch-openrouter">Validate &amp; connect</button>
+        <button class="btn primary" id="openrouter-validate">Validate &amp; connect</button>
       </div>
       <div class="row">
         <label class="inline"><input type="checkbox" id="remember-openrouter"> Remember key on this computer</label>
@@ -1712,15 +1712,30 @@ const CONNECTORS = [
     statusEl: 'local-status',    brand: '#d97748', mark: 'CC', srcIds: ['local', 'local-import'],
     patterns: [/\.jsonl$/i], exclude: /\/(todos|statsig)\//, parser: 'parseClaudeLogs' },
   { id: 'anthropic',  platform: 'Anthropic API',       name: 'Anthropic API',         category: 'api', kind: 'admin-key',
-    statusEl: 'anthropic-status', brand: '#d4a27f', mark: 'An', srcIds: ['anthropic'], keyLS: 'key:anthropic', fetchMethod: 'fetchAnthropic' },
+    statusEl: 'anthropic-status', brand: '#d4a27f', mark: 'An', srcIds: ['anthropic'], keyLS: 'key:anthropic', fetch: 'fetchAnthropicAll',
+    keyLabel: 'Admin key', keyHint: 'sk-ant-admin-… from console.anthropic.com → Settings → API keys',
+    quality: 'exact',
+    qualityNote: 'Exact tokens and billed dollars from the Anthropic Admin API: usage_report/messages (daily buckets per model — uncached input, cache writes, cache reads, output, requests) and cost_report (rated USD per day; amounts arrive in cents), paginated over the range you pick (30 / 90 / 365 days). Needs an Admin API key (sk-ant-admin…) from console.anthropic.com → Settings → API keys — a regular API key is refused. If the browser blocks the request, the PowerShell fallback on the card fetches the same report to a JSON file you drop on Imports. The key is kept in this browser only if you tick Remember.' },
   { id: 'openai',     platform: 'OpenAI API',          name: 'OpenAI API',            category: 'api', kind: 'admin-key',
-    statusEl: 'openai-status',   brand: '#10a37f', mark: 'Oa', srcIds: ['openai'], keyLS: 'key:openai', fetchMethod: 'fetchOpenAI' },
+    statusEl: 'openai-status',   brand: '#10a37f', mark: 'Oa', srcIds: ['openai'], keyLS: 'key:openai', fetch: 'fetchOpenAIAll',
+    keyLabel: 'Admin key', keyHint: 'sk-admin-… from platform.openai.com → Settings → Organization → Admin keys',
+    quality: 'exact',
+    qualityNote: 'Exact tokens and billed dollars from the OpenAI Admin API: /v1/organization/usage/completions (daily buckets per model — input, cached input, output tokens, request count) and /v1/organization/costs (rated USD per day), paginated over the range you pick (30 / 90 / 365 days). Needs an Admin key (sk-admin…) from platform.openai.com → Settings → Organization → Admin keys — a project key is refused. If the browser blocks the request, the PowerShell fallback on the card fetches the same report to a JSON file you drop on Imports. The key is kept in this browser only if you tick Remember.' },
   { id: 'gemini',     platform: 'Gemini',              name: 'Gemini (Google AI)',    category: 'api', kind: 'api-key',
-    statusEl: 'gemini-status',   brand: '#4285f4', mark: 'Ge', srcIds: ['gemini'], keyLS: 'key:gemini', fetchMethod: 'fetchGemini' },
-  { id: 'copilot',    platform: 'GitHub Copilot',      name: 'GitHub Copilot',        category: 'coding', kind: 'token',
-    statusEl: 'copilot-status',  brand: '#8957e5', mark: 'Cp', srcIds: ['copilot'], keyLS: 'key:copilot', fetchMethod: 'fetchCopilot' },
+    statusEl: 'gemini-status',   brand: '#4285f4', mark: 'Ge', srcIds: ['gemini'], keyLS: 'key:gemini', fetch: 'fetchGeminiModels',
+    keyLabel: 'Google AI Studio API key', keyHint: 'AIza… from aistudio.google.com/apikey',
+    quality: 'validate',
+    qualityNote: 'Validate-only: Google\'s Generative Language API has no usage-history endpoint, so this card checks the key against GET /v1beta/models (the key travels in the x-goog-api-key header, never in the URL) and counts the models it can reach. Usage history comes from a Cloud Billing export CSV dropped on Imports. The key is kept in this browser only if you tick Remember.' },
+  { id: 'copilot',    platform: 'GitHub Copilot',      name: 'GitHub Copilot',        category: 'coding', kind: 'api-key',
+    statusEl: 'copilot-status',  brand: '#8957e5', mark: 'Cp', srcIds: ['copilot'], keyLS: 'key:copilot', fetch: 'fetchCopilotAll',
+    keyLabel: 'GitHub token', keyHint: 'github_pat_… (fine-grained, Plan: read)',
+    quality: 'estimated',
+    qualityNote: 'Estimated, best-effort: a fine-grained GitHub token (Plan: read) validates against /user; where GitHub exposes the enhanced billing usage report for your account (/users/{login}/settings/billing/usage) the Copilot items land as premium-request counts per day (messages, est. — GitHub publishes no token counts) with the net amount billed per day; a 404 means the report is not available for this account and the card shows the connection only. The token is kept in this browser only if you tick Remember.' },
   { id: 'openrouter', platform: 'OpenRouter',          name: 'OpenRouter',            category: 'api', kind: 'api-key',
-    statusEl: 'openrouter-status', brand: '#6467f2', mark: 'Or', srcIds: ['openrouter'], keyLS: 'key:openrouter', fetchMethod: 'fetchOpenrouter' },
+    statusEl: 'openrouter-status', brand: '#6467f2', mark: 'Or', srcIds: ['openrouter'], keyLS: 'key:openrouter', fetch: 'fetchOpenRouterAll',
+    keyLabel: 'OpenRouter API key', keyHint: 'sk-or-… from openrouter.ai/settings/keys',
+    quality: 'exact',
+    qualityNote: 'Exact tokens and spend from OpenRouter: /api/v1/key validates and names the key, /api/v1/credits shows the balance left, /api/v1/activity lands daily per-model prompt / completion tokens, request counts and USD spent for every model you route through OpenRouter (DeepSeek, Grok, Mistral…); activity is not available for every key type (404 → credits-only, no error). The key is kept in this browser only if you tick Remember.' },
   // ---- Wave 1 folder-log connectors (generic driver; one parser each) ----
   { id: 'codex', platform: 'OpenAI Codex CLI', name: 'OpenAI Codex CLI', category: 'coding', kind: 'folder-log',
     statusEl: 'codex-status', brand: '#10a37f', mark: 'Cx', srcIds: ['codex'],
@@ -3851,6 +3866,14 @@ async function fetchGroq(key) {
   return { label: `${n} models`, detail: `${n} models available to this key · no usage or spend API — usage and billing are in the Groq console (see the links)` };
 }
 
+/** Gemini (Google AI Studio) — validate-only key-driver fetcher: GET /v1beta/models with the key in the x-goog-api-key header, never ?key= (URLs land
+ *  in history / logs — A0 #20). Google's API has no usage-history endpoint — the Cloud Billing CSV through Imports is the history path. */
+async function fetchGeminiModels(key) {
+  const j = await fetchJSON('https://generativelanguage.googleapis.com/v1beta/models', { 'x-goog-api-key': key });
+  const n = (j.models || []).length;
+  return { label: n + ' models available', detail: `${n} models · usage history comes from billing CSV imports` };
+}
+
 /* ---------- Wave 2 validate-only vendors — key-driver fetchers: async (key, fields, opts) → { label, detail } (no rows: nothing to read) ---------- */
 /** Model-list length in any of the shapes these vendors return: bare array (Together), {data:[…]} (OpenAI-style: Mistral, xAI, Perplexity), {models:[…]} (Cohere v2). */
 const countModels = (j) => Array.isArray(j) ? j.length : Array.isArray(j && j.data) ? j.data.length : Array.isArray(j && j.models) ? j.models.length : 0;
@@ -4390,13 +4413,14 @@ async function fetchBedrock(key, fields, opts = {}) {
     rows, billed, meta: { days, region, models: models.length } };
 }
 
-/** GitHub Copilot — PAT. /user validates; the billing usage endpoint feeds rows + billed. rows / billed are null when GitHub has no usage endpoint
- *  for this account (404) and [] when it answered with no Copilot items (a truthful empty); any other failure is the card's error (A0 #4, #5). */
+/** GitHub Copilot — PAT; key-driver fetcher (App.connectKey). /user validates (the login is the label); the billing usage endpoint feeds rows + billed.
+ *  rows / billed are null when GitHub has no usage endpoint for this account (404 — stored rows untouched, a stored billed envelope goes stale) and []
+ *  when it answered with no Copilot items (a truthful empty); any other failure is the card's error (A0 #4, #5). */
 async function fetchCopilotAll(token) {
   const h = { 'Authorization': 'Bearer ' + token, 'X-GitHub-Api-Version': '2022-11-28', 'Accept': 'application/vnd.github+json' };
   const user = await fetchJSON('https://api.github.com/user', h);
   const usage = await fetchJSONOrNotFound('https://api.github.com/users/' + encodeURIComponent(user.login) + '/settings/billing/usage?year=' + new Date().getUTCFullYear(), h);
-  if (usage === null) return { login: user.login, rows: null, billed: null };
+  if (usage === null) return { label: user.login, detail: 'validated — GitHub exposes no usage data for this account', rows: null, billed: null };
   const agg2 = makeAgg(); const billed = new Map();
   for (const it of usage.usageItems || usage.usage_items || []) {
     if (!String(it.product || '').toLowerCase().includes('copilot')) continue;
@@ -4404,7 +4428,9 @@ async function fetchCopilotAll(token) {
     agg2.add(d, 'GitHub Copilot', it.sku || 'copilot', { msgs: finTok(it.quantity), est: 1 });
     billed.set(d, (billed.get(d) || 0) + finAmt(it.netAmount ?? it.net_amount ?? 0));
   }
-  return { login: user.login, rows: agg2.rows(), billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })) };
+  const rows = agg2.rows();
+  return { label: user.login, rows, billed: [...billed.entries()].map(([d, amount]) => ({ d, amount })),
+    detail: rows.length ? `${rows.length} usage rows (premium requests) + billed costs` : 'validated — no Copilot usage in the billing data' };
 }
 /** YYYY-MM-DD of a GitHub billing usage item: its date, else the 1st of its year/month; null when it carries neither (never 'undefined-undefined-01', A0 #24). */
 function copilotItemDay(it) {
@@ -4414,25 +4440,37 @@ function copilotItemDay(it) {
   return null;
 }
 
-/** OpenRouter — API key. /key validates; /credits and /activity may be missing for a key type (404 → null); rows / billed are [] when activity
- *  answered with no days (a truthful empty). Any other failure is the card's error (A0 #4, #5). */
+/** OpenRouter — API key; key-driver fetcher (App.connectKey). /key validates (its label is the card label); /credits and /activity may be missing for
+ *  a key type (404 → null: stored rows untouched, a stored billed envelope goes stale); rows / billed are [] when activity answered with no days
+ *  (a truthful empty). Any other failure is the card's error (A0 #4, #5). The credits left ride in the detail. */
 async function fetchOpenRouterAll(key) {
   const h = { 'Authorization': 'Bearer ' + key };
   const info = await fetchJSON('https://openrouter.ai/api/v1/key', h);
   const credits = await fetchJSONOrNotFound('https://openrouter.ai/api/v1/credits', h);
   const act = await fetchJSONOrNotFound('https://openrouter.ai/api/v1/activity', h);
-  const out = { label: (info.data && info.data.label) || 'OpenRouter key', credits: (credits && credits.data) || null, rows: null, billed: null };
-  if (act === null) return out;
+  const label = (info.data && info.data.label) || 'OpenRouter key';
+  const creditsNote = credits && credits.data ? ` · ${fmtUSD((credits.data.total_credits || 0) - (credits.data.total_usage || 0))} credits left` : '';
+  if (act === null) return { label, detail: `validated${creditsNote} — daily activity not available for this key type`, rows: null, billed: null };
   const agg2 = makeAgg(); const bm = new Map();
   for (const a of act.data || []) {
     const d = String(a.date || '').slice(0, 10);
     agg2.add(d, 'OpenRouter', a.model || 'openrouter', { in: finTok(a.prompt_tokens), out: finTok(a.completion_tokens), msgs: finTok(a.requests) });
     bm.set(d, (bm.get(d) || 0) + finAmt(a.usage || 0));
   }
-  return { ...out, rows: agg2.rows(), billed: [...bm.entries()].map(([d, amount]) => ({ d, amount })) };
+  const rows = agg2.rows();
+  return { label, detail: `${rows.length} daily activity rows${creditsNote}`, rows, billed: [...bm.entries()].map(([d, amount]) => ({ d, amount })) };
 }
 
-async function fetchAnthropicAll(key, days) {
+/** Status-line detail the Anthropic and OpenAI Admin fetchers share: the usage row count, "+ billed costs" when the cost report returned days,
+ *  "cost report unavailable" when it failed (billed null → connectKey marks the stored envelope stale). */
+function adminUsageDetail(rows, billed) {
+  return `${rows.length} usage rows${billed === null ? ' · cost report unavailable' : billed.length ? ' + billed costs' : ''}`;
+}
+/** Anthropic Admin key — key-driver fetcher (App.connectKey): usage_report/messages in daily buckets grouped by model + cost_report, each paginated
+ *  via has_more/next_page over opts.days (the card's days select). A cost_report failure degrades to billed: null — the usage rows still land and
+ *  the status line says "cost report unavailable". Any usage failure is the card's error. */
+async function fetchAnthropicAll(key, fields, opts) {
+  const days = (opts && opts.days) || 90;
   const start = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10) + 'T00:00:00Z';
   const headers = {
     'x-api-key': key,
@@ -4470,7 +4508,8 @@ async function fetchAnthropicAll(key, days) {
     }
     cost = parseAnthropicCost(cmerged);
   } catch (e) { console.warn('anthropic cost report failed', e); }
-  return { usage: parseAnthropicUsage(merged), cost };
+  const rows = parseAnthropicUsage(merged).rows;
+  return { rows, billed: cost, detail: adminUsageDetail(rows, cost), meta: { days } };
 }
 
 /* ---------- Claude Enterprise Analytics API (Enterprise orgs; Analytics key, scope read:analytics) ---------- */
@@ -4517,7 +4556,11 @@ async function fetchClaudeEnterprise(key, fields, opts) {
     meta: { days, since, windows: windows.length } };
 }
 
-async function fetchOpenAIAll(key, days) {
+/** OpenAI Admin key — key-driver fetcher (App.connectKey): /v1/organization/usage/completions in daily buckets grouped by model + /v1/organization/costs,
+ *  each paginated via has_more/next_page over opts.days (the card's days select). A costs failure degrades to billed: null — the usage rows still land
+ *  and the status line says "cost report unavailable". Any usage failure is the card's error. */
+async function fetchOpenAIAll(key, fields, opts) {
+  const days = (opts && opts.days) || 90;
   const start = Math.floor(Date.now() / 1000) - days * 86400;
   const headers = { 'Authorization': 'Bearer ' + key };
   const merged = { data: [] };
@@ -4551,7 +4594,8 @@ async function fetchOpenAIAll(key, days) {
     }
     cost = parseOpenAICost(cmerged);
   } catch (e) { console.warn('openai costs failed', e); }
-  return { usage: parseOpenAIUsage(merged), cost };
+  const rows = parseOpenAIUsage(merged).rows;
+  return { rows, billed: cost, detail: adminUsageDetail(rows, cost), meta: { days } };
 }
 
 /* ---------- PowerShell fallback commands ---------- */
@@ -5684,9 +5728,7 @@ const App = {
       if (inp && !inp.value.trim()) { const saved = LS.get(c.keyLS, null); if (saved) inp.value = saved; }
     }
     if (c && c.kind === 'collector') return this.connectCollector(c);   // v7 (the keyLS block above surfaced the card when no token exists anywhere and pre-filled a remembered one)
-    if (c && c.fetch) return this.connectKey(c);   // Wave-2 key driver (the keyLS block above already opened the modal when no key exists anywhere and pre-filled a remembered key)
-    const fn = c && c.fetchMethod && this[c.fetchMethod];
-    if (typeof fn === 'function') return fn.call(this);
+    if (c && c.fetch) return this.connectKey(c);   // key driver — every key card (the keyLS block above already opened the modal when no key exists anywhere and pre-filled a remembered key)
   },
   disconnectConnector(id) {
     const c = connectorById(id);
@@ -6463,13 +6505,19 @@ const App = {
   },
 
   /* =================== generic key driver (api-key / admin-key / cloud-token entries with `fetch`) =================== */
-  /** One code path for every key-bearing Wave-2 card: reads '<id>-key' (+ extra `fields` '<id>-f-<field>'), honors the Remember opt-in
-   *  (never for sessionOnly), calls globalThis[c.fetch](key, fields, { days: 90 }) → { label, detail, rows?, billed?, meta? } and stores
+  /** How far back a key card fetches: its '<id>-days' select when the card has one (the Anthropic / OpenAI Admin cards), else 90 days. */
+  _daysToFetch(c) {
+    const sel = $(c.id + '-days');
+    const n = sel ? parseInt(sel.value, 10) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : 90;
+  },
+  /** One code path for every key-bearing card: reads '<id>-key' (+ extra `fields` '<id>-f-<field>'), honors the Remember opt-in
+   *  (never for sessionOnly), calls globalThis[c.fetch](key, fields, { days }) (_daysToFetch) → { label, detail, rows?, billed?, meta? } and stores
    *  rows → Store.setSource(c.id), billed → Store.setBilled(c.id) (undefined = fetcher has no billed path, envelope untouched · null = billed fetch
    *  failed → stale envelope · array = fresh, [] = truthful empty — a fetcher WITH a billed path returns [] when it is not configured now), then the
    *  connector entry; extra field values persist (LS 'field:<id>:<field>') only after the fetcher accepted them. Own gen slot
    *  this._gen[c.id]: a superseded call (newer connect, disconnect, clear-data) commits nothing and clears only its own placeholder —
-   *  the fetchGemini rule (status.dataset.gen). */
+   *  the gen-slot rule (status.dataset.gen). */
   async connectKey(c) {
     const status = $(c.id + '-status');
     const gen = this._gen[c.id] = (this._gen[c.id] || 0) + 1;
@@ -6484,7 +6532,7 @@ const App = {
     try {
       const fn = globalThis[c.fetch];
       if (typeof fn !== 'function') throw new Error('No fetcher registered: ' + c.fetch);
-      const res = (await fn(key, fields, { days: 90 })) || {};
+      const res = (await fn(key, fields, { days: this._daysToFetch(c) })) || {};
       if (gen !== this._gen[c.id]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
       if (remember) LS.set(c.keyLS, key);   // a rejected key is never remembered — refreshAll would replay it after a reload (A0 #11)
       if (Array.isArray(res.rows)) Store.setSource(c.id, res.rows, res.meta || {});
@@ -6503,8 +6551,10 @@ const App = {
       if (gen !== this._gen[c.id]) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
       Store.setConnector(c.id, { err: (e.message || String(e)).slice(0, 80) });
       status.textContent = ''; status.dataset.gen = '';
+      const fallback = document.querySelector('#src-' + c.id + ' details.fallback');   // the Anthropic / OpenAI Admin cards carry a PowerShell fallback — a failed fetch opens it
+      if (fallback) fallback.open = true;
       status.appendChild(el('span', { class: 'err', text: 'Validation failed: ' }));
-      status.appendChild(document.createTextNode(e.message || String(e)));
+      status.appendChild(document.createTextNode((e.message || String(e)) + (fallback ? ' — if this is a CORS/network block, use the PowerShell fallback below.' : '')));
       this.render();
     }
   },
@@ -6520,7 +6570,7 @@ const App = {
    *  never written into the DOM or a URL. Honest errors: unreachable → "Not running at <base> — start it with: …" and NO entry (connectServer's
    *  unreachable rule — a stale entry is deleted); 401 → "Token rejected — copy the token the collector printed" (attention); a found tool
    *  with zero matching files is listed as "found, nothing to read" and gets no entry. Own gen slot this._gen[c.id]: a superseded call
-   *  (disconnect, clear-data, a newer connect) commits nothing and clears only its own placeholder (the fetchGemini rule). Stops a running watch for its
+   *  (disconnect, clear-data, a newer connect) commits nothing and clears only its own placeholder (the gen-slot rule). Stops a running watch for its
    *  duration and starts it again on success (automatic mode, T3) — a failed connect leaves no watch. */
   async connectCollector(c) {
     const status = $(c.id + '-status');
@@ -6922,153 +6972,7 @@ const App = {
   },
 
   _gen: { local: 0, anthropic: 0, openai: 0, gemini: 0, copilot: 0, openrouter: 0 },
-  /** A0 #5 — the fetch contract for the legacy Copilot / OpenRouter cards: rows [] is a truthful empty (replaces the stored rows, billed [] clears
-   *  the dollars); rows null means the endpoint is not available for this account (stored rows untouched, a stored billed envelope goes stale). */
-  _landLegacyRows(id, res) {
-    if (res.rows) { Store.setSource(id, res.rows, {}); Store.setBilled(id, res.billed); }
-    else Store.setBilled(id, null);
-  },
   _workerThreshold: 8 * 1024 * 1024,   // bytes — an Imports file above this parses in parseInWorker (JSON via 'sniff' in _readJsonFor, Copilot activity CSV via 'copilot-csv'); checks set 0 to force the worker path
-
-  async fetchAnthropic() {
-    const gen = ++this._gen.anthropic;
-    const key = $('anthropic-key').value.trim();
-    const status = $('anthropic-status');
-    if (!key) { status.textContent = 'Paste an Admin API key first (starts with sk-ant-admin).'; return; }
-    const days = parseInt($('anthropic-days').value, 10);
-    status.textContent = 'Fetching usage…'; status.dataset.gen = String(gen);
-    try {
-      const { usage, cost } = await fetchAnthropicAll(key, days);
-      if (gen !== this._gen.anthropic) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded by a newer fetch — only clear the placeholder if it's still ours
-      if ($('remember-anthropic').checked) LS.set('key:anthropic', key);   // only a key Anthropic accepted is remembered (A0 #11)
-      Store.setSource('anthropic', usage.rows, { days });
-      Store.setBilled('anthropic', cost);
-      Store.setConnector('anthropic', { label: 'Admin key ·  last 4: ' + key.slice(-4), lastSync: Date.now(), err: null });
-      status.textContent = ''; status.dataset.gen = '';
-      status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
-      status.appendChild(document.createTextNode(`${usage.rows.length} usage rows${cost && cost.length ? ' + billed costs' : ''} · updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`));
-      this.render();
-    } catch (e) {
-      if (gen !== this._gen.anthropic) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded by a newer fetch — only clear the placeholder if it's still ours
-      Store.setConnector('anthropic', { err: (e.message || String(e)).slice(0, 80) });
-      status.textContent = ''; status.dataset.gen = '';
-      status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
-      status.appendChild(document.createTextNode((e.message || String(e)) + ' — if this is a CORS/network block, use the PowerShell fallback below.'));
-      document.querySelector('#src-anthropic details.fallback').open = true;
-      this.render();   // the hub dot follows the error (A0 #6)
-    }
-  },
-
-  async fetchOpenAI() {
-    const gen = ++this._gen.openai;
-    const key = $('openai-key').value.trim();
-    const status = $('openai-status');
-    if (!key) { status.textContent = 'Paste an Admin key first (starts with sk-admin).'; return; }
-    const days = parseInt($('openai-days').value, 10);
-    status.textContent = 'Fetching usage…'; status.dataset.gen = String(gen);
-    try {
-      const { usage, cost } = await fetchOpenAIAll(key, days);
-      if (gen !== this._gen.openai) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded by a newer fetch — only clear the placeholder if it's still ours
-      if ($('remember-openai').checked) LS.set('key:openai', key);   // only a key OpenAI accepted is remembered (A0 #11)
-      Store.setSource('openai', usage.rows, { days });
-      Store.setBilled('openai', cost);
-      Store.setConnector('openai', { label: 'Admin key ·  last 4: ' + key.slice(-4), lastSync: Date.now(), err: null });
-      status.textContent = ''; status.dataset.gen = '';
-      status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
-      status.appendChild(document.createTextNode(`${usage.rows.length} usage rows${cost && cost.length ? ' + billed costs' : ''} · updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`));
-      this.render();
-    } catch (e) {
-      if (gen !== this._gen.openai) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded by a newer fetch — only clear the placeholder if it's still ours
-      Store.setConnector('openai', { err: (e.message || String(e)).slice(0, 80) });
-      status.textContent = ''; status.dataset.gen = '';
-      status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
-      status.appendChild(document.createTextNode((e.message || String(e)) + ' — if this is a CORS/network block, use the PowerShell fallback below.'));
-      document.querySelector('#src-openai details.fallback').open = true;
-      this.render();   // the hub dot follows the error (A0 #6)
-    }
-  },
-
-  async fetchGemini() {
-    const gen = ++this._gen.gemini;
-    const key = $('gemini-key').value.trim();
-    const status = $('gemini-status');
-    if (!key) { status.textContent = 'Paste a Google AI Studio API key first (starts with AIza).'; return; }
-    status.textContent = 'Validating…'; status.dataset.gen = String(gen);
-    try {
-      const j = await fetchJSON('https://generativelanguage.googleapis.com/v1beta/models', { 'x-goog-api-key': key });   // header, never ?key= (URLs land in history / logs — A0 #20)
-      if (gen !== this._gen.gemini) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
-      if ($('remember-gemini') && $('remember-gemini').checked) LS.set('key:gemini', key);   // only a key Google accepted is remembered (A0 #11)
-      const n = (j.models || []).length;
-      Store.setConnector('gemini', { label: n + ' models available', lastSync: Date.now(), err: null });
-      status.textContent = ''; status.dataset.gen = '';
-      status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
-      status.appendChild(document.createTextNode(`${n} models · usage history comes from billing CSV imports`));
-      this.render();
-    } catch (e) {
-      if (gen !== this._gen.gemini) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
-      Store.setConnector('gemini', { err: (e.message || String(e)).slice(0, 80) });
-      status.textContent = ''; status.dataset.gen = '';
-      status.appendChild(el('span', { class: 'err', text: 'Validation failed: ' }));
-      status.appendChild(document.createTextNode(e.message || String(e)));
-      this.render();
-    }
-  },
-
-  async fetchCopilot() {
-    const gen = ++this._gen.copilot;
-    const key = $('copilot-key').value.trim();
-    const status = $('copilot-status');
-    if (!key) { status.textContent = 'Paste a fine-grained GitHub token first (github_pat_…).'; return; }
-    status.textContent = 'Validating…'; status.dataset.gen = String(gen);
-    try {
-      const res = await fetchCopilotAll(key);
-      if (gen !== this._gen.copilot) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
-      if ($('remember-copilot') && $('remember-copilot').checked) LS.set('key:copilot', key);   // only a token GitHub accepted is remembered (A0 #11)
-      Store.setConnector('copilot', { label: res.login, lastSync: Date.now(), err: null });
-      this._landLegacyRows('copilot', res);
-      status.textContent = ''; status.dataset.gen = '';
-      status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
-      status.appendChild(document.createTextNode(!res.rows ? 'validated — GitHub exposes no usage data for this account'
-        : res.rows.length ? `${res.rows.length} usage rows (premium requests) + billed costs` : 'validated — no Copilot usage in the billing data'));
-      this.render();
-    } catch (e) {
-      if (gen !== this._gen.copilot) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
-      Store.setConnector('copilot', { err: (e.message || String(e)).slice(0, 80) });
-      status.textContent = ''; status.dataset.gen = '';
-      status.appendChild(el('span', { class: 'err', text: 'Validation failed: ' }));
-      status.appendChild(document.createTextNode(e.message || String(e)));
-      this.render();
-    }
-  },
-
-  async fetchOpenrouter() {
-    const gen = ++this._gen.openrouter;
-    const key = $('openrouter-key').value.trim();
-    const status = $('openrouter-status');
-    if (!key) { status.textContent = 'Paste an OpenRouter API key first (sk-or-…).'; return; }
-    status.textContent = 'Fetching…'; status.dataset.gen = String(gen);
-    try {
-      const res = await fetchOpenRouterAll(key);
-      if (gen !== this._gen.openrouter) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
-      if ($('remember-openrouter') && $('remember-openrouter').checked) LS.set('key:openrouter', key);   // only a key OpenRouter accepted is remembered (A0 #11)
-      Store.setConnector('openrouter', { label: res.label, lastSync: Date.now(), err: null });
-      this._landLegacyRows('openrouter', res);
-      const creditsNote = res.credits ? ` · ${fmtUSD((res.credits.total_credits || 0) - (res.credits.total_usage || 0))} credits left` : '';
-      status.textContent = ''; status.dataset.gen = '';
-      status.appendChild(el('span', { class: 'ok', text: '● Connected. ' }));
-      status.appendChild(document.createTextNode(!res.rows
-        ? `validated${creditsNote} — daily activity not available for this key type`
-        : `${res.rows.length} daily activity rows${creditsNote}`));
-      this.render();
-    } catch (e) {
-      if (gen !== this._gen.openrouter) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
-      Store.setConnector('openrouter', { err: (e.message || String(e)).slice(0, 80) });
-      status.textContent = ''; status.dataset.gen = '';
-      status.appendChild(el('span', { class: 'err', text: 'Fetch failed: ' }));
-      status.appendChild(document.createTextNode(e.message || String(e)));
-      this.render();
-    }
-  },
 
   /** One JSON document's text → { obj, pre } for _importJson. Small files (≤ App._workerThreshold) parse here. Big ones go to parseInWorker('sniff'):
    *  the worker parses, sniffs and — for a chat export — parses the export too, so only { kind, res } crosses back and the main thread never parses
@@ -7387,6 +7291,15 @@ const App = {
   },
 
   /* =================== wiring =================== */
+  /** A key card with static markup (Anthropic, OpenAI, Gemini, Copilot, OpenRouter): its '<id>-validate' button runs the generic key driver, a remembered
+   *  key is restored into '<id>-key' (the .value property — never the attribute) with Remember ticked, and Remember follows the generated cards' rule
+   *  (ensureSourceCard): untick → forget the key; tick with a key in the box → keep it. */
+  _wireStaticKeyCard(c) {
+    $(c.id + '-validate').addEventListener('click', () => this.connectKey(c));
+    const keyEl = $(c.id + '-key'), rem = $('remember-' + c.id), saved = LS.get(c.keyLS, null);
+    if (saved) { keyEl.value = saved; rem.checked = true; }
+    rem.addEventListener('change', () => { if (!rem.checked) LS.del(c.keyLS); else if (keyEl.value.trim()) LS.set(c.keyLS, keyEl.value.trim()); });
+  },
   updatePSCommands() {
     $('anthropic-cmd').textContent = anthropicPSCommand(null, parseInt($('anthropic-days').value, 10));
     $('openai-cmd').textContent = openaiPSCommand(null, parseInt($('openai-days').value, 10));
@@ -7412,14 +7325,6 @@ const App = {
       if (!c.fetch) continue;
       const inp = $(c.id + '-key');
       if (inp && inp.value.trim() && (c.sessionOnly || LS.get(c.keyLS, null))) jobs.push(this.connectKey(c));
-    }
-    for (const c of CONNECTORS) {
-      if (!c.keyLS) continue;
-      const el2 = document.getElementById(c.id + '-key');
-      if (LS.get(c.keyLS, null) && el2 && el2.value) {
-        const fn = c.fetchMethod && this[c.fetchMethod];
-        if (typeof fn === 'function') jobs.push(fn.call(this));
-      }
     }
     await Promise.allSettled(jobs);
     this.render();
@@ -7514,26 +7419,9 @@ const App = {
     $('fallback-link').addEventListener('click', (e) => { e.preventDefault(); $('folder-fallback').click(); });
     $('folder-fallback').addEventListener('change', (e) => this.scanLocalFiles([...e.target.files].map(f => ({ path: f.webkitRelativePath || f.name, file: f }))));   // one landing path with the collector (v7): App.scanLocalFiles
 
-    // API sources
-    $('fetch-anthropic').addEventListener('click', () => this.fetchAnthropic());
-    $('fetch-openai').addEventListener('click', () => this.fetchOpenAI());
-    const ak = LS.get('key:anthropic', null); if (ak) { $('anthropic-key').value = ak; $('remember-anthropic').checked = true; }
-    const ok = LS.get('key:openai', null); if (ok) { $('openai-key').value = ok; $('remember-openai').checked = true; }
-    $('remember-anthropic').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:anthropic'); else if ($('anthropic-key').value) LS.set('key:anthropic', $('anthropic-key').value.trim()); });
-    $('remember-openai').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:openai'); else if ($('openai-key').value) LS.set('key:openai', $('openai-key').value.trim()); });
+    // key cards with static markup (Anthropic, OpenAI, Gemini, Copilot, OpenRouter) — the generated cards wired their controls in ensureSourceCard above
+    for (const c of CONNECTORS) if (c.fetch && !$('src-' + c.id).classList.contains('generic')) this._wireStaticKeyCard(c);
     for (const id of ['anthropic-days', 'openai-days']) $(id).addEventListener('input', () => this.updatePSCommands());
-
-    $('fetch-gemini').addEventListener('click', () => this.fetchGemini());
-    const gk = LS.get('key:gemini', null); if (gk) { $('gemini-key').value = gk; $('remember-gemini').checked = true; }
-    $('remember-gemini').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:gemini'); else if ($('gemini-key').value) LS.set('key:gemini', $('gemini-key').value.trim()); });
-
-    $('fetch-copilot').addEventListener('click', () => this.fetchCopilot());
-    const cpk = LS.get('key:copilot', null); if (cpk) { $('copilot-key').value = cpk; $('remember-copilot').checked = true; }
-    $('remember-copilot').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:copilot'); else if ($('copilot-key').value) LS.set('key:copilot', $('copilot-key').value.trim()); });
-
-    $('fetch-openrouter').addEventListener('click', () => this.fetchOpenrouter());
-    const ork = LS.get('key:openrouter', null); if (ork) { $('openrouter-key').value = ork; $('remember-openrouter').checked = true; }
-    $('remember-openrouter').addEventListener('change', (e) => { if (!e.target.checked) LS.del('key:openrouter'); else if ($('openrouter-key').value) LS.set('key:openrouter', $('openrouter-key').value.trim()); });
     this.updatePSCommands();
 
     // imports

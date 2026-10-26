@@ -17,13 +17,13 @@ export async function run({ browser, ok }) {
 
     const staleFlow = await page.evaluate(async () => {
       // fetch succeeds for usage but cost fetch FAILS → old billed must be kept but marked stale
-      window.fetchAnthropicAll = async () => ({ usage: { rows: [{ d: '2026-08-11', platform: 'Anthropic API', model: 'claude-sonnet-5', in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }] }, cost: null });
+      window.fetchAnthropicAll = async () => ({ rows: [{ d: '2026-08-11', platform: 'Anthropic API', model: 'claude-sonnet-5', in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }], billed: null });
       document.getElementById('anthropic-key').value = 'sk-ant-admin-test';
-      await App.fetchAnthropic();
+      await App.connectKey(connectorById('anthropic'));
       const env1 = Store.billed.anthropic;
       // now cost fetch returns a genuinely EMPTY window → billed becomes empty rows, not stale
-      window.fetchAnthropicAll = async () => ({ usage: { rows: [] }, cost: [] });
-      await App.fetchAnthropic();
+      window.fetchAnthropicAll = async () => ({ rows: [], billed: [] });
+      await App.connectKey(connectorById('anthropic'));
       const env2 = Store.billed.anthropic;
       return { stale1: env1.stale, rows1: env1.rows.length, stale2: env2.stale, rows2: env2.rows.length };
     });

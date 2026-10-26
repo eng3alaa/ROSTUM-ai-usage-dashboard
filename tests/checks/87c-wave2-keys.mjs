@@ -377,7 +377,7 @@ export async function run({ browser, ok }) {
         in: rows.reduce((a, r) => a + r.in, 0), msgs: rows.reduce((a, r) => a + r.msgs, 0), platforms: [...new Set(rows.map(r => r.platform))], billedTotal: Store.billedRows('claude-enterprise').reduce((a, b) => a + b.amount, 0) };
       // 4) the existing Anthropic Admin card still yields 'Anthropic API' rows, and its cost_report '4200' (cents) lands as $42
       document.getElementById('anthropic-key').value = 'sk-ant-admin-test';
-      await App.fetchAnthropic();
+      await App.connectKey(connectorById('anthropic'));
       const arows = (Store.sources.anthropic || {}).rows || [];
       const admin = { platforms: [...new Set(arows.map(r => r.platform))], in: arows.reduce((a, r) => a + r.in, 0), billed: Store.billedRows('anthropic').map(b => b.amount), text: document.getElementById('anthropic-status').textContent };
       window.fetch = realFetch;
