@@ -54,3 +54,4 @@ Lambda Inference (discontinued); Anyscale; chat products with no path (listed as
 - **A2** additionally shows, per model row, which rate wins for the current platform (a `PRICE_OVERRIDES` entry can make an apparent price edit ineffective); the user-override merge itself is A0 item 32.
 - **B1** compares Cowork's reported `total_cost_usd` only against the estimate of the SAME Cowork session set and dates, de-duplicates repeated audit results for one session, and discloses sessions without an audit record; Cowork dollars are never attributed to the whole `local` estimate and stay separate from "actual billed".
 - Wave B cards keep the honesty labels; no card is added faster than its parser test.
+- **Status 2026-10-27:** A1 = 6d0c9a2 · A0a = 9387300 / 807e8a5 / 34e9c1c (bugs 1–11, 13–16, 24; trust 17–23, 25; item 32; item 12 deferred to Plan 10) · A0b = 8aa5dcd (five legacy cards on the fetch: contract, −4,986 bytes; suite 522/522) · SPLIT in flight.
