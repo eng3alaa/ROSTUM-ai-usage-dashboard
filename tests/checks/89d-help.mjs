@@ -52,7 +52,8 @@ export async function run({ browser, ok }) {
       JSON.stringify(opened.heads) === JSON.stringify(HEADS), JSON.stringify(opened.heads));
     ok('help (Plan 8): Start here carries the collector command in <code id="help-cmd"> with a "Copy" button and names Validate & connect, the Admin key path and the chat-app exports',
       opened.cmd === 'node docs/tools/ai-usage-collector.mjs' && opened.copyBtn === 'Copy' && /Validate & connect/.test(opened.text) && /Admin key/.test(opened.text) && /ChatGPT/.test(opened.text) && /Takeout/.test(opened.text) && /Imports/.test(opened.text),
-      JSON.stringify({ cmd: opened.cmd, copyBtn: opened.copyBtn }));    // Plan 9 B7: the collector also finds Cowork and the Plan 9 coding tools — Start here says so, by name
+      JSON.stringify({ cmd: opened.cmd, copyBtn: opened.copyBtn }));
+    // Plan 9 B7: the collector also finds Cowork and the Plan 9 coding tools — Start here says so, by name
     ok('help (Plan 9 B7): Start here says the collector also finds Cowork (the Claude desktop app\'s agent sessions) and names the Plan 9 coding tools it discovers — OpenCode, Goose, Devin CLI, Kilo Code, Amp, Zed',
       typeof opened.startHere === 'string' && /Cowork/.test(opened.startHere) && ['OpenCode', 'Goose', 'Devin', 'Kilo Code', 'Amp', 'Zed'].every(t => opened.startHere.includes(t)), JSON.stringify(opened.startHere));
     // Plan 9 B7: "Where the numbers come from" opens with one line per honesty class — exact / estimated / validate-only / link-only / experimental, each a <li> led by a <b>

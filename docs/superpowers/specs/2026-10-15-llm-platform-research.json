@@ -1928,5 +1928,14 @@
       "old": "Chat conversations never touch disk in the standard app; Cowork sessions do (metadata in local_*.json, tokens in ~/.claude/projects JSONL). Only new opportunity: label Cowork sessions distinctly and, for Enterprise users, the Analytics API. Sources: https://platform.claude.com/docs/en/manage-claude/analytics-api ; https://claude.com/docs/third-party/claude-desktop/data-storage ; https://brycewatson.com/blog/09-cowork-session-schema/ ; https://github.com/a-data3/cowork-context-meter",
       "new": "Chat conversations never touch disk in the standard app; Cowork sessions do — but under the APPDATA root (local-agent-mode-sessions/.../.claude/projects/...), NOT under ~/.claude/projects (CORRECTION 2026-10-15, confirmed on disk: 264 transcripts + 220 audit.jsonl). Opportunities: add the Cowork root to the scanner/collector, label Cowork sessions distinctly, and, for Enterprise users, the Analytics API. Sources: https://platform.claude.com/docs/en/manage-claude/analytics-api ; https://claude.com/docs/third-party/claude-desktop/data-storage ; https://brycewatson.com/blog/13-cowork-conversation-transcripts ; https://github.com/a-data3/cowork-context-meter"
     }
+  ],
+  "corrections_to_october": [
+    {
+      "name": "Claude Desktop 'Cowork' sessions (Windows/macOS)",
+      "field": "methods[kind=local-logs-folder].endpointOrPath",
+      "found": "2026-10-27, Plan 9 B1, on the owner's machine (99c245e)",
+      "old": "Roots: standard app %APPDATA%\\Claude (3P/BYO-provider edition %LOCALAPPDATA%\\Claude-3p); macOS ~/Library/Application Support/Claude/local-agent-mode-sessions/",
+      "new": "The Microsoft Store build of Claude Desktop (since 2026-10) keeps its data under %LOCALAPPDATA%\\Claude-Data\\<package>\\ — Cowork sessions live at %LOCALAPPDATA%\\Claude-Data\\<package>\\local-agent-mode-sessions (the old %APPDATA%\\Claude folder keeps a '.user-data-left.<package>' marker); older Store builds used %LOCALAPPDATA%\\Packages\\Claude_<id>\\LocalCache\\Roaming\\Claude\\local-agent-mode-sessions. Full root set shipped: Windows %APPDATA%\\Claude, %LOCALAPPDATA%\\Claude-Data\\<package>, %LOCALAPPDATA%\\Packages\\Claude_*\\LocalCache\\Roaming\\Claude, %LOCALAPPDATA%\\Claude-3p; macOS ~/Library/Application Support/{Claude,Claude-3p}; Linux ~/.config/{Claude,Claude-3p} — each existing one is its own collector root (docs/tools/ai-usage-collector.mjs coworkRoots) and the Claude Code card lists them. audit.jsonl result lines are per turn (not per session): summed per session, deduped by uuid."
+    }
   ]
 }

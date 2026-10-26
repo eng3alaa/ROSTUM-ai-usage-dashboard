@@ -54,6 +54,25 @@ Kind: api-key 12, collector-only 1, export-file 5, folder-log 9, link-only 16
 
 Priority: P1 15, P2 9, P3 19
 
+## Status (2026-10-27, Plan 9 B7)
+
+Every row above shipped on branch `worktree-v9-all-models` with the id, category, kind and quality in the table, except the rows below. Card copy is the source of truth (`src/js/05-connectors.js`); `tests/checks/97-registry.mjs` pins the 38 Plan 9 ids and their kind-specific invariants (11 api-key, 16 link-only, 7 folder-log, 4 export-file). Commits: B1 99c245e (+ 403761f), B2 ee3e872, B3 ef956d6, B4 008fbf9, B5 313b446, B6 c5331e5, B7 3426049.
+
+| id | table said | shipped as | why |
+|---|---|---|---|
+| replit | export-file / none (Enterprise Usage CSV, dollars only) | **link-only** (`replit`, Coding tools) | the CSV is documented for Enterprise only, carries dollars per checkpoint and no tokens or models, and its availability on individual plans is unconfirmed — nothing an importer could land honestly; the card says so and links Settings → Usage |
+| v0 | collector-only / validate (api.v0.dev usage summary through the collector) | **link-only** (`v0`, Coding tools) | the collector proxy for vendor endpoints was not built in Plan 9 (design 7); the reason on the card names the CORS block and the collector-proxy path as a later version |
+| copilot-vscode | folder-log / exact (own row) | folder-log / exact under the shared platform **GitHub Copilot** (with the PAT card and Copilot CLI) | one flat-rate product, three data paths — rows roll up under one platform; the card id stays `copilot-vscode`, and the Imports sniff routes a dropped OTel JSONL to it |
+| zed | folder-log via "sql.js + zstd in page/collector" | folder-log via the page's own `readSqliteTable` (no sql.js) and `DecompressionStream('zstd')` when the browser has it, else the collector's `GET /api/file?…&decode=zstd` (Node ≥ 22.15) | design 8; a folder pick without zstd support counts the file as unreadable, never as zero |
+| local (new root) | Cowork root `%APPDATA%\Claude` / `Claude-3p` / macOS | shipped, plus roots the table did not have: `%LOCALAPPDATA%\Claude-Data\<package>\local-agent-mode-sessions` (Microsoft Store build since 2026-10, found on the owner's machine in B1) and `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude` (older Store builds); Linux `~/.config/Claude` | `audit.jsonl` result lines are per turn → summed per session, deduped by uuid, shown as "Anthropic's own figure for Cowork" beside the same-session estimate, never billed |
+| lambda | link-only / discontinued | **no card** | sunset 2025-09-25, no page to link — recorded as intentionally excluded (design 7) |
+| deepinfra | exact (gated) | as the table, gated at runtime | a 401 / 403 on `/payment/usage` downgrades the card to validate-only in the status line; the payload shape is source-based until a live key confirms it |
+| cerebras, alibaba-modelstudio | validate + CSV import | as the table; the CSVs land **under the card** (srcIds `cerebras-usage-csv`, `alibaba-bill-csv`), not under Imports | Cerebras is name-gated ("cerebras" in the file name); both importers match headers tolerantly and say "not verified on a real file" |
+| zai, minimax | validate + EXPERIMENTAL quota | as the table | the quota answer lives in the status line and `meta.experimental` only — never rows, billed amounts or totals |
+| amazonq, mistral (existing) | copy updated per research | as the table | amazonq names the IDE's `chat-history-<hash>.json` (text only); mistral records the 2026-10-15 Admin API re-check |
+
+Not installed on the research machine, so still source-based (fixtures follow published parsers): OpenCode (DB present but empty), Goose, Devin CLI, Kilo Code, Amp, Zed, Cody, the Cerebras and Alibaba CSV schemas, DeepInfra's usage payload, Poe's `usage_type` / `cost_usd` semantics.
+
 ## Unresolved
 
 - DeepInfra: /payment/* acceptance of a plain API key (runtime-gated; needs a live key).
