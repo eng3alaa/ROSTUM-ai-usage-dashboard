@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ROSTUM - AI Usage &amp; Cost Monitor</title>
+<style>
+<!-- BUILD:STYLES -->
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="alerts" aria-live="polite"></div>
+  <div id="report-meta" class="report-meta" hidden></div>
+
+  <!-- ================= Header ================= -->
+  <header class="topbar">
+    <div class="title-block">
+      <h1>ROSTUM <span class="brand-sub">AI Usage &amp; Cost Monitor</span></h1>
+      <div class="subtitle" id="last-updated">No data yet — connect an account above.</div>
+    </div>
+    <div class="top-actions">
+      <label class="inline" style="font-size:12px;color:var(--ink-2);display:inline-flex;gap:5px;align-items:center">
+        <input type="checkbox" id="auto-refresh"> Auto re-scan
+        <select id="auto-refresh-mins" aria-label="Auto re-scan interval">
+          <option value="5">5 min</option><option value="15" selected>15 min</option><option value="60">60 min</option>
+        </select>
+      </label>
+      <button class="btn small" id="export-csv" title="Download the filtered data as CSV">Export CSV</button>
+      <button class="btn small" id="print-report" title="Print / save as PDF">Print report</button>
+      <button class="btn small" id="theme-toggle" aria-label="Toggle color theme">◐ Theme</button>
+      <button class="btn small" id="help-btn" aria-haspopup="dialog" aria-controls="help-modal" title="How the dashboard works">? Help</button>
+      <button class="btn small primary" id="refresh-all">↻ Refresh</button>
+    </div>
+  </header>
+
+  <!-- ================= Filter row ================= -->
+  <div class="filterbar" role="group" aria-label="Filters">
+    <div class="seg" id="range-presets" role="group" aria-label="Date range">
+      <button data-range="7">7 days</button>
+      <button data-range="30" aria-pressed="true">30 days</button>
+      <button data-range="90">90 days</button>
+      <button data-range="mtd">Month to date</button>
+      <button data-range="all">All</button>
+      <button data-range="custom">Custom</button>
+    </div>
+    <span class="custom-range" id="custom-range">
+      <input type="date" id="date-from" aria-label="From date">
+      <span style="color:var(--muted)">–</span>
+      <input type="date" id="date-to" aria-label="To date">
+    </span>
+    <div class="chips" id="platform-chips" role="group" aria-label="Platforms"></div>
+    <span class="spacer"></span>
+    <div class="seg" id="metric-toggle" role="group" aria-label="Metric">
+      <button data-metric="cost" aria-pressed="true">Cost</button>
+      <button data-metric="tokens">Tokens</button>
+    </div>
+    <div class="seg" id="group-toggle" role="group" aria-label="Group daily chart by">
+      <button data-group="platform" aria-pressed="true">By platform</button>
+      <button data-group="model">By model</button>
+    </div>
+  </div>
+
+  <!-- ================= Accounts hub ================= -->
+  <div id="hub-bar"><input type="search" id="hub-search" placeholder="Search accounts…" aria-label="Search accounts" autocomplete="off" hidden><span id="hub-chips"></span><label class="inline" title="The legacy per-source cards below the charts — the accounts hub above hosts the same cards in its Manage dialog"><input type="checkbox" id="show-legacy-sources"> Show legacy source cards</label></div>
+  <div id="accounts-hub" aria-label="AI accounts"></div>
+  <dialog id="connector-modal">
+    <div class="modal-head">
+      <span class="mark" id="modal-mark"></span>
+      <h2 id="modal-title"></h2>
+      <button class="btn small modal-close">Close</button>
+    </div>
+    <div id="modal-body"></div>
+  </dialog>
+  <!-- Plan 8: Help — static markup (no user data); same .modal-head shell as the connector modal; opened by #help-btn or the ? key -->
+  <dialog id="help-modal" aria-labelledby="help-title">
+    <div class="modal-head">
+      <h2 id="help-title">Help</h2>
+      <button class="btn small modal-close">Close</button>
+    </div>
+    <div class="help-body">
+      <h3>Start here</h3>
+      <ol>
+        <li><b>Fastest:</b> run the local collector, then click <b>Validate &amp; connect</b> on the <b>Local collector (automatic)</b> card (first card in Coding tools). Every coding tool and local runner it finds on this machine connects by itself.
+          <div class="help-cmd"><code id="help-cmd">node docs/tools/ai-usage-collector.mjs</code><button class="btn small" id="help-copy" type="button" title="Copy the command">Copy</button></div></li>
+        <li><b>Exact and billed:</b> paste an Anthropic or OpenAI <b>Admin key</b> on its card under API vendors: exact usage plus what you were actually billed.</li>
+        <li><b>Chat apps:</b> drop your ChatGPT, Claude.ai, Grok or Gemini Takeout export on <b>Imports</b> (or use the chat app's own card: Import file…).</li>
+      </ol>
+      <h3>What the badges mean</h3>
+      <dl class="help-legend">
+        <dt><span class="badge q-exact">exact</span></dt><dd>Token counts come from the tool or vendor itself.</dd>
+        <dt><span class="badge q-estimated">estimated</span></dt><dd>Tokens are estimated from text (about 4 characters per token) because the source keeps no counts; the rows carry an <code>est.</code> mark everywhere they appear.</dd>
+        <dt><span class="badge q-validate">validate-only</span></dt><dd>The card verifies your key, but the vendor offers no usage history to a local page. Spend lives on the vendor's usage page, linked from the card.</dd>
+        <dt><span class="badge q-none">no data</span></dt><dd>No data path from a local page at all; the card says why and links to the vendor's usage page.</dd>
+      </dl>
+      <p><span class="dot ok"></span> connected · <span class="dot warn"></span> needs attention (an error, or the last sync is more than 7 days old) · <span class="dot off"></span> not connected</p>
+      <h3>Where the numbers come from</h3>
+      <ul>
+        <li><b>API-equivalent cost</b> = tokens × the list price for that model (the editable price list). It is what the same usage would cost on the vendor's API: a comparison, not an invoice.</li>
+        <li><b>Actual billed</b> comes only from vendors that report money; the two figures are always shown separately.</li>
+        <li>Rows from estimated sources are marked <code>est.</code> and never mix silently with exact ones.</li>
+        <li>Local runners are $0, and so are coding-tool requests that name a local backend (Continue + Ollama, Codex OSS models and the like).</li>
+        <li>A model the price list does not know is priced at the fallback row and named in a notice above the KPIs: never guessed silently.</li>
+      </ul>
+      <h3>If something looks wrong</h3>
+      <dl class="help-fix">
+        <dt>Local collector card says "Not running at http://127.0.0.1:11436"</dt><dd>Start it: <code>node docs/tools/ai-usage-collector.mjs</code>. With <code>--port</code>, put the printed URL in the card's Collector URL field.</dd>
+        <dt>Local collector card says "Token rejected"</dt><dd>Paste the token the collector printed; it is also in <code>~/.ai-usage/collector.token</code>.</dd>
+        <dt>Ollama card says "likely CORS"</dt><dd>Set <code>OLLAMA_ORIGINS="*"</code> (or your page origin), restart Ollama, validate again.</dd>
+        <dt>Azure / Vertex says "token expired"</dt><dd>Tokens last about an hour: mint a new one with the printed CLI command and paste it again.</dd>
+        <dt>The folder picker does nothing</dt><dd>Use Chrome or Edge, the card's "classic folder chooser" link, or skip pickers altogether with the local collector.</dd>
+        <dt>Numbers changed after an update</dt><dd>Parsers improve between versions; the first re-scan after an update re-reads the files once.</dd>
+      </dl>
+      <h3>Keyboard</h3>
+      <ul>
+        <li><kbd>Esc</kbd> closes any dialog.</li>
+        <li><kbd>Enter</kbd> on a hub card drills down to that platform.</li>
+        <li><b>✕</b> on a card hides it; the "N hidden — show" chip restores them.</li>
+        <li><b>▾</b> on a section header collapses that section.</li>
+        <li><kbd>?</kbd> opens and closes this help (not while typing in a field).</li>
+      </ul>
+      <h3>More</h3>
+      <p><a href="docs/user-guide.html" target="_blank" rel="noopener">Full user guide</a> · <a href="README.md" target="_blank" rel="noopener">README</a></p>
+      <p class="note">These open from the repository folder or from the collector-served page.</p>
+    </div>
+  </dialog>
+
+  <!-- ================= KPI row ================= -->
+  <div class="kpis" id="kpis">
+    <div class="tile hero">
+      <div class="label">API-equivalent cost <span class="badge" title="What this usage would cost at pay-as-you-go API list prices">est.</span></div>
+      <div class="value" id="kpi-cost">$0</div>
+      <div class="delta" id="kpi-cost-delta"></div>
+      <div class="spark" id="spark-cost"></div>
+    </div>
+    <div class="tile">
+      <div class="label">Total tokens</div>
+      <div class="value" id="kpi-tokens">0</div>
+      <div class="delta" id="kpi-tokens-delta"></div>
+      <div class="spark" id="spark-tokens"></div>
+    </div>
+    <div class="tile">
+      <div class="label">Output tokens</div>
+      <div class="value" id="kpi-output">0</div>
+      <div class="delta" id="kpi-output-delta"></div>
+      <div class="spark" id="spark-output"></div>
+    </div>
+    <div class="tile">
+      <div class="label">Messages / requests</div>
+      <div class="value" id="kpi-msgs">0</div>
+      <div class="delta" id="kpi-msgs-delta"></div>
+      <div class="spark" id="spark-msgs"></div>
+    </div>
+    <div class="tile">
+      <div class="label">Actual billed (from APIs)</div>
+      <div class="value" id="kpi-billed">—</div>
+      <div class="delta" id="kpi-billed-note">Connect Anthropic/OpenAI admin keys</div>
+    </div>
+  </div>
+
+  <!-- ================= Insights row ================= -->
+  <div class="row-head" id="insights-head"><h2>Insights</h2><span id="insights-chips"></span></div>
+  <div id="insights" aria-label="Insights">
+    <div class="insight" data-insight="projection"><div class="label">Month-end projection <span class="badge" title="MTD + average of the last 7 full days × days left">projection</span></div><div class="value" id="ins-projection-value">—</div><div class="note" id="ins-projection-note"></div></div>
+    <div class="insight span2" data-insight="heatmap"><div class="label">Activity — last 13 weeks</div><div id="ins-heatmap"></div></div>
+    <div class="insight" data-insight="wow"><div class="label">Week to date vs same days last week</div><div id="ins-wow"></div></div>
+    <div class="insight" data-insight="cache"><div class="label">Cache savings</div><div class="value" id="ins-cache-value">—</div><div class="note" id="ins-cache-note"></div></div>
+    <div class="insight" data-insight="hours"><div class="label">Busiest hours <span class="badge" title="Per-hour detail is kept for 90 days; older rows are compacted to day totals, so this histogram reflects only the last 90 days of the selected range">last 90 days</span></div><div id="ins-hours"></div></div>
+    <div class="insight span2" data-insight="efficiency"><div class="label">Model efficiency <span class="badge">≥20 msgs</span></div><div id="ins-efficiency"></div></div>
+    <div class="insight" data-insight="movers"><div class="label">Top project movers <span class="badge" title="vs the previous equal-length period">Δ</span></div><div id="ins-movers"></div></div>
+  </div>
+
+  <!-- ================= Narrative summary ================= -->
+  <div class="card" id="card-narrative"><div class="card-head"><div><h2>This period in AI</h2><div class="sub" id="narrative-range"></div></div></div><div id="narrative" class="narrative"></div></div>
+
+  <!-- ================= Charts ================= -->
+  <div class="grid">
+    <div class="card wide" id="card-daily">
+      <div class="card-head">
+        <h2 id="daily-title">Daily usage</h2>
+        <span class="hint" id="daily-hint"></span>
+        <div class="toggle seg" role="group" aria-label="Chart or table view">
+          <button data-view="chart" aria-pressed="true">Chart</button>
+          <button data-view="table" aria-pressed="false">Table</button>
+        </div>
+      </div>
+      <figure id="daily-body">
+        <div class="chartbox" id="daily-chart" aria-describedby="daily-title"></div>
+        <div class="tbl-wrap" id="daily-table" hidden></div>
+        <div class="legend" id="daily-legend"></div>
+        <figcaption>Daily usage stacked by series. Use the table view for exact values.</figcaption>
+      </figure>
+    </div>
+
+    <div class="card" id="card-models">
+      <div class="card-head">
+        <h2 id="models-title">By model</h2>
+        <span class="hint">top 10</span>
+        <div class="toggle seg" role="group" aria-label="Chart or table view">
+          <button data-view="chart" aria-pressed="true">Chart</button>
+          <button data-view="table" aria-pressed="false">Table</button>
+        </div>
+      </div>
+      <figure id="models-body">
+        <div class="chartbox" id="models-chart" aria-describedby="models-title"></div>
+        <div class="tbl-wrap" id="models-table" hidden></div>
+        <figcaption>Totals per model for the selected range.</figcaption>
+      </figure>
+    </div>
+
+    <div class="card" id="card-share">
+      <div class="card-head">
+        <h2 id="share-title">Platform share</h2>
+        <span class="hint" id="share-hint"></span>
+        <div class="toggle seg" role="group" aria-label="Chart or table view">
+          <button data-view="chart" aria-pressed="true">Chart</button>
+          <button data-view="table" aria-pressed="false">Table</button>
+        </div>
+      </div>
+      <figure id="share-body">
+        <div class="chartbox" id="share-chart" aria-describedby="share-title"></div>
+        <div class="tbl-wrap" id="share-table" hidden></div>
+        <div class="legend" id="share-legend"></div>
+        <figcaption>Share of the selected metric by platform.</figcaption>
+      </figure>
+    </div>
+
+    <div class="card wide" id="card-breakdown">
+      <div class="card-head">
+        <h2>Model breakdown</h2>
+        <span class="hint">tokens by type, and API-equivalent cost</span>
+      </div>
+      <div class="tbl-wrap" id="breakdown-table"></div>
+    </div>
+
+    <div class="card wide" id="card-projects">
+      <div class="card-head">
+        <h2>Projects</h2>
+        <span class="hint" id="projects-hint">from Claude Code, Codex, Gemini CLI, Copilot CLI and Junie logs</span>
+      </div>
+      <div class="tbl-wrap" id="projects-table"></div>
+    </div>
+  </div>
+
+  <!-- ================= Sources ================= -->
+  <div class="section-title" id="sources-title">
+    <h2>Data sources</h2>
+    <span class="hint">everything is parsed and stored in your browser only — nothing is uploaded anywhere</span>
+  </div>
+  <div class="sources" id="sources">
+
+    <div class="card src" id="src-local">
+      <div class="card-head"><h2>Claude Code / Desktop (local logs)</h2><span class="badge">exact</span></div>
+      <div class="desc">Reads the session logs Claude Code and the desktop app keep in the <b>.claude</b> folder in your user folder (e.g. <code>C:\Users\you\.claude</code>). Exact token counts per model, project and day. Or run the local collector (first card in Coding tools) and skip the folder picker entirely.</div>
+      <div class="row">
+        <button class="btn primary" id="pick-claude-folder">Choose .claude folder…</button>
+        <button class="btn" id="rescan-local" hidden>Re-scan</button>
+        <progress id="scan-progress" max="100" value="0" hidden></progress>
+      </div>
+      <div class="status" id="local-status">Not connected. Tip: in the folder picker, type <code>%USERPROFILE%\.claude</code> in the address bar.</div>
+      <input type="file" id="folder-fallback" webkitdirectory multiple hidden>
+      <div class="note">If the folder picker doesn't open, <a id="fallback-link" href="#">use the classic folder chooser</a> instead.</div>
+    </div>
+
+    <div class="card src" id="src-anthropic">
+      <div class="card-head"><h2>Anthropic API</h2><span class="badge">billed usage</span></div>
+      <div class="desc">Pulls real usage + spend for your Anthropic API organization. Needs an <b>Admin API key</b> (<code>sk-ant-admin…</code>) from console.anthropic.com → Settings → API keys.</div>
+      <div class="row">
+        <input type="password" id="anthropic-key" placeholder="sk-ant-admin-…" autocomplete="off">
+        <button class="btn primary" id="anthropic-validate">Fetch</button>
+      </div>
+      <div class="row">
+        <label class="inline"><input type="checkbox" id="remember-anthropic"> Remember key on this computer</label>
+        <select id="anthropic-days" aria-label="How far back to fetch">
+          <option value="30">last 30 days</option><option value="90" selected>last 90 days</option><option value="365">last 365 days</option>
+        </select>
+      </div>
+      <div class="status" id="anthropic-status">Not connected.</div>
+      <details class="fallback">
+        <summary>Browser blocked the request? Fetch it with PowerShell instead</summary>
+        <pre class="cmd" id="anthropic-cmd"></pre>
+        <div class="note">Run in PowerShell, then drop the saved <code>anthropic-usage.json</code> onto the import box below.</div>
+      </details>
+    </div>
+
+    <div class="card src" id="src-openai">
+      <div class="card-head"><h2>OpenAI API</h2><span class="badge">billed usage</span></div>
+      <div class="desc">Pulls usage + real costs for your OpenAI organization. Needs an <b>Admin key</b> (<code>sk-admin…</code>) from platform.openai.com → Settings → Organization → Admin keys.</div>
+      <div class="row">
+        <input type="password" id="openai-key" placeholder="sk-admin-…" autocomplete="off">
+        <button class="btn primary" id="openai-validate">Fetch</button>
+      </div>
+      <div class="row">
+        <label class="inline"><input type="checkbox" id="remember-openai"> Remember key on this computer</label>
+        <select id="openai-days" aria-label="How far back to fetch">
+          <option value="30">last 30 days</option><option value="90" selected>last 90 days</option><option value="365">last 365 days</option>
+        </select>
+      </div>
+      <div class="status" id="openai-status">Not connected.</div>
+      <details class="fallback">
+        <summary>Browser blocked the request? Fetch it with PowerShell instead</summary>
+        <pre class="cmd" id="openai-cmd"></pre>
+        <div class="note">Run in PowerShell, then drop the saved <code>openai-usage.json</code> onto the import box below.</div>
+      </details>
+    </div>
+
+    <div class="card src" id="src-gemini" hidden>
+      <div class="card-head"><h2>Gemini (Google AI)</h2><span class="badge">key validation</span></div>
+      <div class="desc">Validates your Google AI Studio key and lists available models. Google's API has no usage-history endpoint — import a Cloud Billing export CSV (Imports card) for historical usage. Get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.</div>
+      <div class="row">
+        <input type="password" id="gemini-key" placeholder="AIza…" autocomplete="off">
+        <button class="btn primary" id="gemini-validate">Validate &amp; connect</button>
+      </div>
+      <div class="row">
+        <label class="inline"><input type="checkbox" id="remember-gemini"> Remember key on this computer</label>
+      </div>
+      <div class="status" id="gemini-status">Not connected.</div>
+    </div>
+
+    <div class="card src" id="src-copilot" hidden>
+      <div class="card-head"><h2>GitHub Copilot</h2><span class="badge">best-effort usage</span></div>
+      <div class="desc">Validates a fine-grained token (needs 'Plan: read'). Pulls Copilot premium-request usage where GitHub exposes it for your account; otherwise shows the connection only. Create one at <a href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noopener">github.com/settings/personal-access-tokens</a>.</div>
+      <div class="row">
+        <input type="password" id="copilot-key" placeholder="github_pat_…" autocomplete="off">
+        <button class="btn primary" id="copilot-validate">Validate &amp; connect</button>
+      </div>
+      <div class="row">
+        <label class="inline"><input type="checkbox" id="remember-copilot"> Remember key on this computer</label>
+      </div>
+      <div class="status" id="copilot-status">Not connected.</div>
+    </div>
+
+    <div class="card src" id="src-openrouter" hidden>
+      <div class="card-head"><h2>OpenRouter</h2><span class="badge">credits + activity</span></div>
+      <div class="desc">One key covers every model you route through OpenRouter (DeepSeek, Grok, Mistral…). Pulls your key label, credit balance, and daily per-model activity. Get a key at <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai/settings/keys</a>.</div>
+      <div class="row">
+        <input type="password" id="openrouter-key" placeholder="sk-or-…" autocomplete="off">
+        <button class="btn primary" id="openrouter-validate">Validate &amp; connect</button>
+      </div>
+      <div class="row">
+        <label class="inline"><input type="checkbox" id="remember-openrouter"> Remember key on this computer</label>
+      </div>
+      <div class="status" id="openrouter-status">Not connected.</div>
+    </div>
+
+    <div class="card src" id="src-import">
+      <div class="card-head"><h2>Imports</h2><span class="badge">ChatGPT · Claude.ai · Gemini Takeout · Grok · MS Copilot · Perplexity · Meta AI · DeepSeek · Cursor CSV · CSV · ZIP</span></div>
+      <div class="desc">
+        Drop exported files here:
+        <b>ChatGPT</b> data export (<code>conversations.json</code>; tokens estimated from text) · <b>Claude.ai</b> data export (<code>conversations.json</code>; estimated) ·
+        <b>Gemini</b> Google Takeout (<code>My Activity/Gemini Apps/MyActivity.json</code> — pick JSON format in Takeout; estimated from text, one record per prompt) ·
+        <b>Cursor</b> usage-events CSV (cursor.com/dashboard → Usage → Export CSV; exact tokens, cost only if the column is present; a re-import replaces the days the export covers, so drop each range as you export it) ·
+        <b>DeepSeek API</b> monthly usage ZIP (platform.deepseek.com/usage → Export monthly data; amount-*.csv + cost-*.csv, exact tokens + billed amounts; months merge by day/model, so drop each month as it comes) ·
+        <b>Grok</b> export (grok.com → Settings → Data → Export Data; one JSON; estimated) · <b>Microsoft Copilot</b> activity CSV (account.microsoft.com/privacy → Copilot activity history → Export; estimated) ·
+        <b>Perplexity</b> data export (Settings → Account → Request data export; ZIP or its JSON threads; estimated) · <b>Meta AI</b> Download-your-information threads (message_*.json with Meta AI; estimated) ·
+        <b>DeepSeek chat</b> export (chat.deepseek.com → Settings → Data → Export data; drop the ZIP or keep "deepseek" in the JSON name; estimated) ·
+        API responses saved by the PowerShell commands · or a generic <b>CSV</b>
+        (<code>date, platform, model, input_tokens, output_tokens[, cache_read_tokens, cache_write_tokens, cost_usd]</code>) — handy for the Gemini API, which has no usage endpoint.
+        Consumer chat apps expose no usage API a local page can call — their usage comes from your data export.
+      </div>
+      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Import files">
+        Drop files here, or click to choose
+        <input type="file" id="import-files" multiple hidden accept=".json,.csv,.jsonl,.zip">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="inline">Chat exports priced as if run on
+          <select id="assumed-claude-model" aria-label="Assumed model for claude.ai exports">
+            <option value="claude-sonnet-5">Claude: Sonnet 5</option>
+            <option value="claude-fable-5" selected>Claude: Fable 5</option>
+            <option value="claude-opus-5">Claude: Opus 5</option>
+            <option value="claude-haiku-4-5">Claude: Haiku 4.5</option>
+          </select>
+        </label>
+      </div>
+      <div class="status" id="import-status"></div>
+      <div class="note">Chat exports don't include token counts — the page estimates them from text length and re-sends of conversation history, the way the API would bill it (no caching assumed). Those rows are marked <i>est.</i></div>
+      <div class="row" style="margin-top:6px">
+        <button class="btn small" id="clear-data">Clear stored data…</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Budgets ================= -->
+  <div class="card" id="card-budgets">
+    <div class="card-head"><div><h2>Budgets</h2><div class="sub">Monthly USD limits on API-equivalent cost at list prices (not provider invoices) — alerts at 80%, 100%, and projected overrun. Stored locally.</div></div></div>
+    <div id="budget-editor"></div>
+  </div>
+
+  <!-- ================= Pricing ================= -->
+  <div class="section-title" id="pricing-title">
+    <h2>API price list</h2>
+    <span class="hint">USD per million tokens — list prices as of Aug 2026, editable; first matching pattern wins. Patterns also match a normalized Claude id (dots→hyphens, family-first for 4+, trailing date and the Bedrock anthropic.…-v1:0 / Vertex …@date wrappers stripped), so vendor spellings like claude-opus-4.1 / claude-4.1-opus / claude-opus-4-1-20250805 / anthropic.claude-opus-4-1-20250805-v1:0 all hit the same row.</span>
+    <span class="spacer" style="flex:1"></span>
+    <button class="btn small" id="add-price">+ Add model</button>
+    <button class="btn small" id="reset-prices">Reset to defaults</button>
+  </div>
+  <div class="card" id="card-pricing" style="overflow-x:auto">
+    <table class="data" id="pricing-table">
+      <thead>
+        <tr><th>Model (match pattern)</th><th>Label</th><th>Input</th><th>Output</th><th>Cache write</th><th>Cache read</th><th></th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div class="note">Cache write is billed at the 5-minute-TTL rate where a provider distinguishes TTLs. Anthropic cache reads ≈ 10% of input price; OpenAI cached input ≈ 10%, cache writes free. Edit any cell — totals recalculate instantly.</div>
+  </div>
+
+  <div class="footer">
+    Private by design: this page runs entirely on your computer. Keys and data stay in this browser (localStorage) and are never sent anywhere except directly to the provider APIs you connect. ·
+    API-equivalent cost = tokens × the price list above; it is an estimate of what the same usage would cost at pay-as-you-go API rates.
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip" role="status" aria-hidden="true"></div>
+<script>
+<!-- BUILD:SCRIPTS -->
+</script>
+</body>
+</html>

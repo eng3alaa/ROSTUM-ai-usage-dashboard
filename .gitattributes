@@ -1,0 +1,5 @@
+# The dashboard is CRLF by convention (Plan conventions: Node-script edits for the CRLF HTML). tools/build.mjs concatenates the src/ parts
+# byte-for-byte and asserts CRLF, so the parts and the built file must check out with CRLF on every machine, whatever core.autocrlf says.
+# Blobs stay LF-normalised in the repository like every other text file here.
+"AI Usage Dashboard.html" text eol=crlf
+src/** text eol=crlf
