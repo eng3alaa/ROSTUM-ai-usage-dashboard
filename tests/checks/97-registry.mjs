@@ -228,6 +228,62 @@ export async function run({ browser, ok }) {
       b3.bad.length === 0 && b3.inOrder, JSON.stringify(b3));
     ok('registry (B3): honesty copy — DeepInfra opens "Exact (gated)" and names the validate-only downgrade, monthly granularity and "not verified"; the other five open "Validate-only"; Cerebras srcIds [cerebras, cerebras-usage-csv] (the CSV lands under the card, not under Imports) and its copy names Download Report + the "cerebras" name gate; Novita names the collector proxy and the 403; CSV sniff / parser + parseDeepInfraUsage exist',
       b3.diNote && b3.honest && b3.ceSrcIds === JSON.stringify(['cerebras', 'cerebras-usage-csv']) && b3.ceNote && b3.nvNote && b3.importsNoCerebras && b3.fns, JSON.stringify(b3));
+    // ---- Plan 9 B4: Alibaba Model Studio / Z.ai / MiniMax (api-key, API vendors), the 16 link-only cards, the amazonq / mistral copy corrections, Lambda excluded ----
+    const b4 = await page.evaluate(() => {
+      const want = { 'alibaba-modelstudio': ['Alibaba Model Studio', 'fetchAlibabaModelStudio', ['alibaba-modelstudio', 'alibaba-bill-csv'], [['base', false]]], zai: ['Z.ai API', 'fetchZai', ['zai'], []], minimax: ['MiniMax', 'fetchMiniMax', ['minimax'], [['groupId', false], ['planKey', true]]] };
+      const bad = [];
+      for (const [id, [platform, fetchName, srcIds, fields]] of Object.entries(want)) {
+        const c = connectorById(id);
+        if (!c) { bad.push(id + ': missing'); continue; }
+        if (c.platform !== platform || c.kind !== 'api-key' || c.category !== 'api' || c.quality !== 'validate') bad.push(id + ': platform/kind/category/quality');
+        if (c.fetch !== fetchName || typeof globalThis[c.fetch] !== 'function') bad.push(id + ': fetch ' + c.fetch);
+        if (c.keyLS !== 'key:' + id || !c.keyLabel || !c.keyHint || c.sessionOnly || c.keyOptional) bad.push(id + ': key copy');
+        if (c.statusEl !== id + '-status' || !document.getElementById(c.statusEl) || !document.getElementById('src-' + id)) bad.push(id + ': statusEl / card');
+        if (JSON.stringify(c.srcIds) !== JSON.stringify(srcIds)) bad.push(id + ': srcIds ' + JSON.stringify(c.srcIds));
+        if (JSON.stringify((c.fields || []).map(f => [f.id, !!(f.secret || f.type === 'password')])) !== JSON.stringify(fields)) bad.push(id + ': fields ' + JSON.stringify(c.fields));
+        if (!c.links || !c.links.get || !c.links.usage || !c.links.docs || !Array.isArray(c.paths) || !c.paths.length) bad.push(id + ': links / paths');
+        if (!/^validate-only/i.test(c.qualityNote || '')) bad.push(id + ': copy must open Validate-only');
+      }
+      const note = (id) => (connectorById(id) || {}).qualityNote || '';
+      const LINK_ONLY = { api: ['sambanova', 'nvidia-nim', 'baseten'], coding: ['v0', 'tabnine', 'augment', 'gemini-code-assist', 'lovable', 'bolt', 'replit'], chat: ['qwen-chat', 'kimi-chat', 'zai-chat', 'youcom', 'notebooklm', 'm365-copilot'] };
+      const loBad = [];
+      for (const [cat, ids] of Object.entries(LINK_ONLY)) for (const id of ids) {
+        const c = connectorById(id);
+        if (!c) { loBad.push(id + ': missing'); continue; }
+        if (c.kind !== 'link-only' || c.category !== cat || c.quality !== 'none') loBad.push(id + ': kind/category/quality');
+        if (!(typeof c.reason === 'string' && c.reason.length > 40 && /^no /i.test(c.reason))) loBad.push(id + ': reason');
+        if (c.fetch || c.parser || c.validate || c.poll || c.keyLS || (c.srcIds || []).length) loBad.push(id + ': must not fetch / own rows');
+        if (!c.links || !c.links.usage || !(c.links.get || c.links.docs)) loBad.push(id + ': links');
+        if (!/^no data/i.test(c.qualityNote || '') || c.qualityNote.length < 80) loBad.push(id + ': copy');
+        if (!c.platform || !document.getElementById(id + '-status') || !document.getElementById('src-' + id)) loBad.push(id + ': platform / status element / card');
+      }
+      const v0 = connectorById('v0') || {}, aq = connectorById('amazonq') || {};
+      // hub: every card renders (≈80 entries) and the search box still filters by name
+      App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load(); App._hubQuery = ''; App._render();
+      const rendered = document.querySelectorAll('#accounts-hub .acct').length;
+      App._hubQuery = 'z.ai'; App._render();
+      const zaiCards = [...document.querySelectorAll('#accounts-hub .acct')].map(c => c.dataset.connector).sort();
+      App._hubQuery = ''; document.getElementById('hub-search').value = ''; App._render();
+      return { bad, loBad, linkOnlyTotal: CONNECTORS.filter(c => c.kind === 'link-only').length, n: CONNECTORS.length, rendered, zaiCards,
+        experimental: /experimental/i.test(note('zai')) && /never in rows/i.test(note('zai')) && /experimental/i.test(note('minimax')) && /never in rows/i.test(note('minimax')),
+        alibaba: /Export Bill CSV/.test(note('alibaba-modelstudio')) && /3rd field/.test(note('alibaba-modelstudio')) && /not verified/i.test(note('alibaba-modelstudio')) && /aliyuncs\.com/.test(note('alibaba-modelstudio')),
+        importsNoAlibaba: !connectorById('imports').srcIds.includes('alibaba-bill-csv'), fns: typeof globalThis.isAlibabaBillCSV === 'function' && typeof globalThis.parseAlibabaBillCSV === 'function',
+        v0Collector: /collector/i.test(v0.reason || '') && /Access-Control|CORS/i.test(v0.reason || ''),
+        amazonq: /chat-history-<hash>\.json/.test(note('amazonq')) && /no model, no tokens, no cost/i.test(note('amazonq')) && /text only/i.test(aq.reason || '') && (aq.paths || []).some(p => /\.aws\\amazonq\\history/.test(p)),
+        mistral: /Re-checked 2026-10-15/.test(note('mistral')) && /Enterprise-only/.test(note('mistral')) && /lechat/.test(note('mistral')) && /CORS-blocked/.test(note('mistral')),
+        noLambda: !CONNECTORS.some(c => /lambda/i.test(c.id) || /lambda/i.test(c.platform || '') || /lambda/i.test(c.name || '')),
+        inOrder: ['Alibaba Model Studio', 'Z.ai API', 'MiniMax', 'v0', 'Microsoft 365 Copilot', 'SambaNova Cloud', 'Qwen Chat'].every(p => PLATFORM_ORDER.includes(p)) };
+    });
+    ok('registry (B4): alibaba-modelstudio / zai / minimax are api-key entries in API vendors — quality validate, fetch fn registered, keyLS key:<id>, statusEl + card in the DOM, get/usage/docs links, paths, not sessionOnly / keyOptional; Alibaba srcIds [alibaba-modelstudio, alibaba-bill-csv] with one plain "base" field; Z.ai no fields; MiniMax fields groupId (plain) + planKey (secret); copy opens "Validate-only"; platforms in PLATFORM_ORDER',
+      b4.bad.length === 0 && b4.inOrder, JSON.stringify({ bad: b4.bad, inOrder: b4.inOrder }));
+    ok('registry (B4): honesty copy — Z.ai and MiniMax name the EXPERIMENTAL quota and say it is never in rows / billed / totals; Alibaba names Export Bill CSV, the 3rd-field model rule, "not verified" and the *.aliyuncs.com host rule; alibaba-bill-csv lands under the card, not under Imports; the bill sniff / parser exist',
+      b4.experimental && b4.alibaba && b4.importsNoAlibaba && b4.fns, JSON.stringify(b4));
+    ok('registry (B4): the 16 link-only cards — sambanova / nvidia-nim / baseten (API vendors), v0 / tabnine / augment / gemini-code-assist / lovable / bolt / replit (Coding tools), qwen-chat / kimi-chat / zai-chat / youcom / notebooklm / m365-copilot (Chat apps) — kind link-only, quality none, a "No …" reason, no fetch / parser / keyLS / srcIds, a vendor usage link + get or docs, "No data" copy ≥ 80 chars, a live status element and card; 19 link-only entries in all; v0\'s reason names the CORS block and the collector proxy',
+      b4.loBad.length === 0 && b4.linkOnlyTotal === 19 && b4.v0Collector, JSON.stringify({ loBad: b4.loBad, total: b4.linkOnlyTotal, v0: b4.v0Collector }));
+    ok('registry (B4): corrected copy — amazonq names the IDE\'s %USERPROFILE%\\.aws\\amazonq\\history\\chat-history-<hash>.json (no model, no tokens, no cost; "text only" in the reason) and lists the path; mistral records the 2026-10-15 re-check (Admin API still Enterprise-only, Le Chat analytics endpoints, CORS-blocked); no Lambda card exists (sunset 2025-09-25, recorded as excluded)',
+      b4.amazonq && b4.mistral && b4.noLambda, JSON.stringify({ amazonq: b4.amazonq, mistral: b4.mistral, noLambda: b4.noLambda }));
+    ok('hub (B4): every registry card still renders at 74 entries (rendered = CONNECTORS.length ≥ 70; ≈85 after B5/B6) and a name search for "z.ai" narrows the hub to the two Z.ai cards',
+      b4.rendered === b4.n && b4.n >= 70 && JSON.stringify(b4.zaiCards) === JSON.stringify(['zai', 'zai-chat']), JSON.stringify({ rendered: b4.rendered, n: b4.n, zaiCards: b4.zaiCards }));
   } finally {
     await page.close();
   }

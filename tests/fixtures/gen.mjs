@@ -717,6 +717,24 @@ export async function generate() {
     '2026-10-06T00:00:00Z,llama-3.3-70b,key-b,1,abc,100,100',
     'not a date,llama-3.3-70b,key-a,1,5,5,10',
   ].join('\n') + '\n');
+  // Plan 9 B4 — Alibaba Cloud Model Studio bill CSV (console → Expenses and Costs → Bill Details → Billing Month → Product Name: Model Studio → Export Bill CSV).
+  //   The column schema is not published in English (research 2026-10-15), so this is a plausible bill-details shape, not a real export; the Instance ID rule it
+  //   exercises is the documented one: billingType;workspaceId;model;tokenType;channel (model = 3rd field). Lines: qwen-max input + output and qwen-plus input on
+  //   10-05 (Token unit); qwen-max cached_input_token on 10-06 (→ cr); a deployment line (dollars only); an 'abc' usage (rejected, its amount kept); an undated
+  //   qwen-turbo line booked on the Billing Cycle's 1st; an Object Storage line (other product → skipped).
+  //   Expected: rows 10-05 qwen-max in 100000 out 20000 · 10-05 qwen-plus in 50000 · 10-06 qwen-max cr 30000 · 10-01 qwen-turbo in 7000 → in 157000 out 20000 cr 30000,
+  //   4 buckets, msgs 0; billed 10-01 0.01 · 10-05 0.42 · 10-06 1.13 → 1.56 (Pretax Amount, USD); meta rows 7 · nonToken 1 · otherProducts 1 · rejected 1 · cycleDays 1 · channels [api, app, console]
+  w('wave2/alibaba/model-studio-bill-2026-10.csv', [
+    'Billing Cycle,Billing Time,Account ID,Product Code,Product Name,Product Detail,Instance ID,Billing Item,Billing Method,Usage,Usage Unit,Pretax Gross Amount,Discount,Pretax Amount,Payment Currency,Region',
+    '2026-10,2026-10-05 10:00:00,1234567890,bailian,Alibaba Cloud Model Studio,Model Studio,text_token;llm-ws1;qwen-max;input_token;app,Large Model Text Consumption,PayAsYouGo,100000,Token,0.20,0.04,0.16,USD,ap-southeast-1',
+    '2026-10,2026-10-05 10:00:00,1234567890,bailian,Alibaba Cloud Model Studio,Model Studio,text_token;llm-ws1;qwen-max;output_token;app,Large Model Text Consumption,PayAsYouGo,20000,Token,0.24,0.00,0.24,USD,ap-southeast-1',
+    '2026-10,2026-10-05 18:30:00,1234567890,bailian,Alibaba Cloud Model Studio,Model Studio,text_token;llm-ws1;qwen-plus;input_token;api,Large Model Text Consumption,PayAsYouGo,50000,Token,0.02,0.00,0.02,USD,ap-southeast-1',
+    '2026-10,2026-10-06 09:00:00,1234567890,bailian,Alibaba Cloud Model Studio,Model Studio,text_token;llm-ws1;qwen-max;cached_input_token;app,Large Model Text Consumption,PayAsYouGo,30000,Token,0.03,0.00,0.03,USD,ap-southeast-1',
+    '2026-10,2026-10-06 09:00:00,1234567890,bailian,Alibaba Cloud Model Studio,Model Studio,model_deploy;llm-ws1;qwen-max;deployment;console,Model Deployment,PayAsYouGo,1,Hour,1.00,0.00,1.00,USD,ap-southeast-1',
+    '2026-10,2026-10-06 12:00:00,1234567890,bailian,Alibaba Cloud Model Studio,Model Studio,text_token;llm-ws1;qwen-max;output_token;app,Large Model Text Consumption,PayAsYouGo,abc,Token,0.10,0.00,0.10,USD,ap-southeast-1',
+    '2026-10,,1234567890,bailian,Alibaba Cloud Model Studio,Model Studio,text_token;llm-ws1;qwen-turbo;input_token;app,Large Model Text Consumption,PayAsYouGo,7000,Token,0.01,0.00,0.01,USD,ap-southeast-1',
+    '2026-10,2026-10-06 00:00:00,1234567890,oss,Object Storage Service,OSS,oss-bucket-1,Storage,PayAsYouGo,5,GB,0.50,0.00,0.50,USD,ap-southeast-1',
+  ].join('\n') + '\n');
   // T14 (4b) — Ollama desktop-app db.sqlite (schema subset of ollama/app/store/schema.sql). Needs node:sqlite; when it is unavailable nothing is
   //   written and 87b's ollama-db block reports itself skipped. One chat, 2 user + 2 assistant messages. m2's record is 6000 + 400 chars → it
   //   exceeds one 4096-byte page → overflow page. created_at shapes: ISO 'Z' text (m1/m2), SQLite 'YYYY-MM-DD HH:MM:SS' (m3, UTC), unix-seconds

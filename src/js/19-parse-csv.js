@@ -281,6 +281,92 @@ function parseCerebrasUsageCSV(text) {
     n++;
   }
   return { rows: agg.rows(), meta: { rows: n, rejected, cachedColumn: iCached >= 0 } };
+}/* Alibaba Cloud Model Studio bill CSV (Plan 9 B4) — console → Expenses and Costs → Bill Details → Billing Month → Product Name: Model Studio → Export Bill CSV.
+ * The English docs do not publish the column schema (research 2026-10-15; the JP / ID pages give the Instance ID rule), so this importer is source-based, not
+ * verified on a real export: it matches headers tolerantly and parses the semicolon-delimited Instance ID whose order is billingType;workspaceId;model;tokenType;
+ * channel — the MODEL is the 3rd field (the llm-… 2nd field is the workspace id), the token type the 4th (input → in, output → out, cache types → cr / cw;
+ * anything else is a dollars-only line), the channel the 5th (kept in meta). Usage × the Usage Unit (thousand / million are scaled) is exact tokens; the amount
+ * column (Pretax Amount, else Payment Amount, else the first amount that is not gross / discount / coupon) is the billed cost per bill day. Day = Billing Time /
+ * Usage Start / Service Period as printed (the bill's own day), else the Billing Cycle month's 1st (counted in meta.cycleDays). Lines of other products (a bill
+ * exported without the product filter) are skipped and counted. Platform 'Alibaba Model Studio', est 0, msgs 0 (bills carry no request counts). */
+const ALIBABA_BILL_DATE = /billing_time|usage_start|start_time|service_period|billing_date|^date$|^time$/, ALIBABA_BILL_CYCLE = /billing_cycle|billing_month|^cycle$/;
+const ALIBABA_BILL_AMOUNT = /amount|^cost$|^fee$/, ALIBABA_BILL_NOT_BILLED = /gross|discount|coupon|voucher|round|outstanding/;
+const ALIBABA_PRODUCT = /model.?studio|bailian|dashscope/i;
+/** `head` = header cells normalized to lowercase_with_underscores: an Instance ID, a Usage and an amount column, and no platform / token columns (those are generic CSVs) */
+function isAlibabaBillCSV(head) {
+  const has = (re) => head.some(h => re.test(h));
+  return has(/^instance_id$/) && has(/^usage$|^usage_quantity$|^quantity$/) && has(ALIBABA_BILL_AMOUNT) && !has(/^platform$|^provider$|^source$|token/);
 }
+/** header row → column indexes (−1 when absent); throws when the Instance ID, Usage or amount column is missing */
+function alibabaBillColumns(headerRow) {
+  const head = headerRow.map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+  const find = (re, skip) => head.findIndex(h => re.test(h) && !(skip && skip.test(h)));
+  const col = { id: find(/^instance_id$/), usage: find(/^usage$|^usage_quantity$|^quantity$/), unit: find(/usage_unit|^unit$/), date: find(ALIBABA_BILL_DATE), cycle: find(ALIBABA_BILL_CYCLE),
+    product: find(/^product_name$|^product_code$|^product$/), currency: find(/currency/), amount: find(/^pretax_amount$/) };
+  if (col.amount < 0) col.amount = find(/^payment_amount$/);
+  if (col.amount < 0) col.amount = find(ALIBABA_BILL_AMOUNT, ALIBABA_BILL_NOT_BILLED);
+  if (col.id < 0 || col.usage < 0 || col.amount < 0) throw new Error('Not a Model Studio bill CSV (needs Instance ID, Usage and an amount column)');
+  col.amountName = head[col.amount];
+  return col;
+}
+/** the Usage Unit → multiplier: tokens as-is; thousand / K → ×1,000; million / M → ×1,000,000 */
+function alibabaUnitScale(unit) {
+  const u = String(unit || '').trim().toLowerCase();
+  if (/^(k|thousand|1,?000)\b|千/.test(u)) return 1000;
+  if (/^(m|million|1,?000,?000)\b|百万/.test(u)) return 1e6;
+  return 1;
+}
+/** the 4th Instance ID field → the token bucket, or null for a dollars-only line (deployment, image, …) */
+function alibabaTokenBucket(tokenType) {
+  const t = String(tokenType || '').toLowerCase();
+  if (/cache/.test(t)) return /creat|write|stor/.test(t) ? 'cw' : 'cr';
+  if (/input|prompt/.test(t)) return 'in';
+  if (/output|completion/.test(t)) return 'out';
+  return null;
+}
+/** the bill's own day: the date column as printed (YYYY-MM-DD… or an ISO stamp), else the Billing Cycle month's 1st (meta.cycleDays++), else '' */
+function alibabaBillDay(c, col, meta) {
+  const raw = col.date >= 0 ? String(c[col.date] || '').trim() : '';
+  if (RE_DATEONLY.test(raw.slice(0, 10))) return raw.slice(0, 10);
+  const iso = raw ? dayKeyUTC(raw) : null;
+  if (iso) return iso;
+  const cycle = col.cycle >= 0 ? String(c[col.cycle] || '').trim() : '';
+  if (/^\d{4}-\d{2}$/.test(cycle)) { meta.cycleDays++; return cycle + '-01'; }
+  return '';
+}
+/** Usage × unit scale; a non-numeric or negative usage is rejected (counted) and books 0 tokens — the line's amount still counts */
+function alibabaUsage(c, col, meta) {
+  const raw = String(c[col.usage] ?? '').trim().replace(/[,\s]/g, '');
+  const v = Number(raw);
+  if (!raw || !Number.isFinite(v) || v < 0) { meta.rejected++; return 0; }
+  return Math.round(v * alibabaUnitScale(col.unit >= 0 ? c[col.unit] : ''));
+}
+/** one bill line: product filter → day → amount into the day's billed total → tokens from the Instance ID + Usage */
+function alibabaBillLine(c, col, acc) {
+  const { agg, billed, channels, meta } = acc;
+  if (col.product >= 0 && !ALIBABA_PRODUCT.test(String(c[col.product] || ''))) { meta.otherProducts++; return; }
+  const d = alibabaBillDay(c, col, meta);
+  if (!d) { meta.rejected++; return; }
+  const [, , model = '', tokenType = '', channel = ''] = String(c[col.id] || '').split(';').map(s => s.trim());
+  if (tokenType) meta.tokenTypes[tokenType] = (meta.tokenTypes[tokenType] || 0) + 1;
+  if (channel) channels.add(channel);
+  if (col.currency >= 0 && !meta.currency) meta.currency = String(c[col.currency] || '').trim();
+  const amount = Number(String(c[col.amount] ?? '').replace(/[,\s]/g, ''));
+  if (Number.isFinite(amount)) billed.set(d, (billed.get(d) || 0) + amount);
+  meta.rows++;
+  const bucket = alibabaTokenBucket(tokenType);
+  if (!bucket) { meta.nonToken++; return; }
+  agg.add(d, 'Alibaba Model Studio', model || 'unknown', { [bucket]: alibabaUsage(c, col, meta), msgs: 0 });
+}
+function parseAlibabaBillCSV(text) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) throw new Error('Empty CSV');
+  const col = alibabaBillColumns(rows[0]);
+  const acc = { agg: makeAgg(), billed: new Map(), channels: new Set(), meta: { rows: 0, rejected: 0, nonToken: 0, otherProducts: 0, cycleDays: 0, tokenTypes: {}, amountColumn: col.amountName, currency: '' } };
+  for (let r = 1; r < rows.length; r++) alibabaBillLine(rows[r], col, acc);
+  const billed = [...acc.billed.entries()].map(([d, amount]) => ({ d, amount: finAmt(amount) })).sort((a, b) => a.d < b.d ? -1 : 1);
+  return { rows: acc.agg.rows(), billed, meta: { ...acc.meta, channels: [...acc.channels].sort() } };
+}
+
 
 

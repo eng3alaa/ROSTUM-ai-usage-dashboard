@@ -348,14 +348,15 @@
     </div>
 
     <div class="card src" id="src-import">
-      <div class="card-head"><h2>Imports</h2><span class="badge">ChatGPT · Claude.ai · Gemini Takeout · Grok · MS Copilot · Perplexity · Meta AI · DeepSeek · Cursor CSV · Cerebras CSV · CSV · ZIP</span></div>
+      <div class="card-head"><h2>Imports</h2><span class="badge">ChatGPT · Claude.ai · Gemini Takeout · Grok · MS Copilot · Perplexity · Meta AI · DeepSeek · Cursor CSV · Cerebras CSV · Alibaba bill CSV · CSV · ZIP</span></div>
       <div class="desc">
         Drop exported files here:
         <b>ChatGPT</b> data export (<code>conversations.json</code>; tokens estimated from text) · <b>Claude.ai</b> data export (<code>conversations.json</code>; estimated) ·
         <b>Gemini</b> Google Takeout (<code>My Activity/Gemini Apps/MyActivity.json</code> — pick JSON format in Takeout; estimated from text, one record per prompt) ·
         <b>Cursor</b> usage-events CSV (cursor.com/dashboard → Usage → Export CSV; exact tokens, cost only if the column is present; a re-import replaces the days the export covers, so drop each range as you export it) ·
         <b>DeepSeek API</b> monthly usage ZIP (platform.deepseek.com/usage → Export monthly data; amount-*.csv + cost-*.csv, exact tokens + billed amounts; months merge by day/model, so drop each month as it comes) ·
-        <b>Cerebras</b> Analytics CSV (cloud.cerebras.ai → Analytics → Usage / Cached-Usage / Request Logs → Download Report; keep "cerebras" in the file name; exact tokens, priced from the list; re-imports merge by day/model) ·
+        <b>Cerebras</b> Analytics CSV (cloud.cerebras.ai → Analytics → Usage / Cached-Usage / Request Logs → Download Report; keep "cerebras" in the file name; exact tokens, priced from the list; re-imports merge by day/model) ·        <b>Alibaba Cloud Model Studio</b> bill CSV (console → Expenses and Costs → Bill Details → Billing Month → Product Name: Model Studio → Export Bill CSV; the Instance ID names the model (3rd field) and token type; exact tokens + billed amounts per bill day land under that card; re-imports merge by day/model) ·
+
         <b>Grok</b> export (grok.com → Settings → Data → Export Data; one JSON; estimated) · <b>Microsoft Copilot</b> activity CSV (account.microsoft.com/privacy → Copilot activity history → Export; estimated) ·
         <b>Perplexity</b> data export (Settings → Account → Request data export; ZIP or its JSON threads; estimated) · <b>Meta AI</b> Download-your-information threads (message_*.json with Meta AI; estimated) ·
         <b>DeepSeek chat</b> export (chat.deepseek.com → Settings → Data → Export data; drop the ZIP or keep "deepseek" in the JSON name; estimated) ·

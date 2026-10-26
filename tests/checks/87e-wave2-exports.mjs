@@ -411,6 +411,68 @@ export async function run({ browser, ok }) {
     ok('cerebras CSV (B3): a CSV import is a sync of the cerebras card (warn after 8 days → ok, keyed label "3 models" kept, lastSync fresh); an all-undated report imports nothing, connects nothing and says so; the Imports card copy names Cerebras',
       !cb.missing && cb.before === 'warn' && cb.after.status === 'ok' && cb.after.label === '3 models' && cb.after.fresh && !cb.empty.src && !cb.empty.connected && /cerebras-empty\.csv: Cerebras usage CSV — no rows/.test(cb.empty.note)
       && /Cerebras/.test(cb.badge) && /Cerebras/.test(cb.desc) && /Download Report/.test(cb.desc), JSON.stringify({ before: cb.before, after: cb.after, empty: cb.empty, badge: cb.badge }));
+    // ---- Plan 9 B4: Alibaba Cloud Model Studio bill CSV — sniffed by header (Instance ID + Usage + an amount column) → exact tokens + billed cost per day under the alibaba-modelstudio card's srcId ----
+    const alCsv = read('wave2', 'alibaba', 'model-studio-bill-2026-10.csv');
+    const al = await page.evaluate(async (alCsv) => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      if (typeof isAlibabaBillCSV !== 'function' || typeof parseAlibabaBillCSV !== 'function' || !connectorById('alibaba-modelstudio')) return { missing: true };
+      const c = connectorById('alibaba-modelstudio');
+      const head = (s) => (parseCSV(s.split(/\r?\n/, 1)[0])[0] || []).map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+      const sum = (rows) => rows.reduce((a, r) => ({ in: a.in + r.in, cw: a.cw + r.cw, cr: a.cr + r.cr, out: a.out + r.out, msgs: a.msgs + r.msgs, est: a.est + (r.est || 0) }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0, est: 0 });
+      const src = () => Store.sources['alibaba-bill-csv'];
+      const billedOf = () => Store.billedRows('alibaba-bill-csv').map(b => [b.d, Math.round(b.amount * 100) / 100]);
+      const note = () => document.getElementById('import-status').textContent;
+      // (1) sniff: the bill header → yes under any name; the Cerebras / Cursor / DeepSeek / Copilot / generic headers → no; the other sniffers do not claim the bill
+      const billHead = head(alCsv);
+      const sniff = { yes: isAlibabaBillCSV(billHead), cerebras: isAlibabaBillCSV(['date', 'model', 'api_key', 'requests', 'input_tokens', 'output_tokens', 'total_tokens']), generic: isAlibabaBillCSV(['date', 'platform', 'model', 'input_tokens', 'output_tokens']),
+        cursor: isAlibabaBillCSV(['date', 'kind', 'model', 'max_mode', 'input_w_cache_write', 'input_w_o_cache_write', 'cache_read', 'output_tokens', 'total_tokens']), deepseek: isAlibabaBillCSV(['utc_date', 'model', 'api_key_name', 'type', 'amount']), copilot: isAlibabaBillCSV(['date', 'app', 'prompt', 'response']),
+        noUsage: isAlibabaBillCSV(['billing_cycle', 'instance_id', 'pretax_amount']),
+        othersOnBill: isCursorUsageCSV(billHead) || isDeepSeekAmountCSV(billHead, 'model-studio-bill-2026-10.csv') || isDeepSeekCostCSV(billHead, 'model-studio-bill-2026-10.csv') || isCopilotActivityCSV(billHead) || isCerebrasUsageCSV(billHead, 'cerebras-bill.csv') };
+      // (2) parser, direct: the fixture + unit scaling (thousand / million) + an undated line without a Billing Cycle column
+      const p = parseAlibabaBillCSV(alCsv);
+      const direct = { t: sum(p.rows), buckets: p.rows.map(r => [r.d, r.model, r.in, r.cw, r.cr, r.out, r.msgs]).sort(), platforms: [...new Set(p.rows.map(r => r.platform))], billed: p.billed.map(b => [b.d, Math.round(b.amount * 100) / 100]), meta: p.meta };
+      const unitHead = 'Billing Time,Instance ID,Usage,Usage Unit,Pretax Amount\n';
+      const units = parseAlibabaBillCSV(unitHead + '2026-10-07,text_token;ws;qwen-max;input_token;app,1.5,Thousand Tokens,0.01\n2026-10-07,text_token;ws;qwen-max;output_token;app,2,Million tokens,0.02\n2026-10-07,text_token;ws;qwen-plus;cache_creation_token;app,500,Token,0.00\n');
+      const undated = parseAlibabaBillCSV(unitHead + 'not a date,text_token;ws;qwen-max;input_token;app,5,Token,0.01\n');
+      const direct2 = { units: units.rows.map(r => [r.d, r.model, r.in, r.cw, r.cr, r.out]).sort(), undated: { rows: undated.rows.length, billed: undated.billed.length, rejected: undated.meta.rejected } };
+      // (3) through Imports: rows + billed land under alibaba-bill-csv (platform Alibaba Model Studio), the card connects as "bill CSV (no key)", the Imports card stays off, the generic csv source is untouched; a re-drop changes nothing
+      await App.handleImportFiles([new File([alCsv], 'model-studio-bill-2026-10.csv', { type: 'text/csv' })]);
+      const first = { t: sum(src().rows), buckets: src().rows.length, platforms: [...new Set(src().rows.map(r => r.platform))], billed: billedOf(), meta: src().meta, note: note(), status: Store.connectorStatus(c), label: (Store.connectors['alibaba-modelstudio'] || {}).label || '', imports: Store.connectors.imports === undefined, generic: !Store.sources.csv };
+      await App.handleImportFiles([new File([alCsv], 'model-studio-bill-2026-10.csv', { type: 'text/csv' })]);
+      const again = { t: sum(src().rows), buckets: src().rows.length, billed: billedOf() };
+      // (4) a re-exported bill for one day replaces that day's row and amount (10-05 qwen-max → in 1000, $9.99) and leaves the other days alone
+      await App.handleImportFiles([new File([unitHead + '2026-10-05 10:00:00,text_token;llm-ws1;qwen-max;input_token;app,1000,Token,9.99\n'], 'bill-redo.csv', { type: 'text/csv' })]);
+      const redo = { qwenMax1005: src().rows.filter(r => r.d === '2026-10-05' && r.model === 'qwen-max').map(r => [r.in, r.out]), buckets: src().rows.length, billed: billedOf() };
+      // (5) a key-connected card 8 days past its model check reads warn; a bill import is a sync of this card → ok, keyed label kept
+      Store.setConnector('alibaba-modelstudio', { label: 'dashscope-intl.aliyuncs.com · 3 models', lastSync: Date.now() - 8 * 864e5 });
+      const before = Store.connectorStatus(c);
+      await App.handleImportFiles([new File([alCsv], 'model-studio-bill-2026-10.csv', { type: 'text/csv' })]);
+      const after = { status: Store.connectorStatus(c), label: Store.connectors['alibaba-modelstudio'].label, fresh: Date.now() - Store.connectors['alibaba-modelstudio'].lastSync < 60e3 };
+      // (6) a bill whose every line is undated (no Billing Cycle either) touches nothing and says so
+      Store.sources = {}; Store.billed = {}; Store.connectors = {};
+      await App.handleImportFiles([new File([unitHead + 'not a date,text_token;ws;qwen-max;input_token;app,5,Token,0.01\n'], 'bill-empty.csv', { type: 'text/csv' })]);
+      const empty = { src: !!src(), billed: Store.billedRows('alibaba-bill-csv').length, connected: !!Store.connectors['alibaba-modelstudio'], note: note() };
+      const badge = document.querySelector('#src-import .badge').textContent, desc = document.querySelector('#src-import .desc').textContent;
+      Store.sources = {}; Store.connectors = {}; Store.billed = {}; Store.persist(); App._render();
+      return { sniff, direct, direct2, first, again, redo, before, after, empty, badge, desc };
+    }, alCsv);
+    ok('alibaba bill CSV (B4): sniff takes the bill header (Instance ID + Usage + an amount column) regardless of the file name and refuses the Cerebras, generic (platform), Cursor, DeepSeek and Copilot headers and a bill header without Usage; the other sniffers (incl. Cerebras with "cerebras" in the name) do not claim the bill',
+      !al.missing && al.sniff.yes && !al.sniff.cerebras && !al.sniff.generic && !al.sniff.cursor && !al.sniff.deepseek && !al.sniff.copilot && !al.sniff.noUsage && !al.sniff.othersOnBill, JSON.stringify(al.sniff || al));
+    ok('alibaba bill CSV (B4): parser — Instance ID billingType;workspaceId;model;tokenType;channel → model = 3rd field, token type = 4th: in 157000 / out 20000 / cr 30000 / msgs 0, exact (est 0), platform Alibaba Model Studio, 4 day·model buckets (the undated qwen-turbo line on the Billing Cycle\'s 1st); billed per bill day from Pretax Amount 10-01 0.01 · 10-05 0.42 · 10-06 1.13; meta rows 7, nonToken 1 (deployment), otherProducts 1 (OSS), rejected 1 ("abc"), cycleDays 1, channels [api, app, console], currency USD',
+      !al.missing && al.direct.t.in === 157000 && al.direct.t.out === 20000 && al.direct.t.cr === 30000 && al.direct.t.cw === 0 && al.direct.t.msgs === 0 && al.direct.t.est === 0 && al.direct.platforms.length === 1 && al.direct.platforms[0] === 'Alibaba Model Studio'
+      && JSON.stringify(al.direct.buckets) === JSON.stringify([['2026-10-01', 'qwen-turbo', 7000, 0, 0, 0, 0], ['2026-10-05', 'qwen-max', 100000, 0, 0, 20000, 0], ['2026-10-05', 'qwen-plus', 50000, 0, 0, 0, 0], ['2026-10-06', 'qwen-max', 0, 0, 30000, 0, 0]])
+      && JSON.stringify(al.direct.billed) === JSON.stringify([['2026-10-01', 0.01], ['2026-10-05', 0.42], ['2026-10-06', 1.13]])
+      && al.direct.meta.rows === 7 && al.direct.meta.nonToken === 1 && al.direct.meta.otherProducts === 1 && al.direct.meta.rejected === 1 && al.direct.meta.cycleDays === 1 && JSON.stringify(al.direct.meta.channels) === JSON.stringify(['api', 'app', 'console']) && al.direct.meta.currency === 'USD' && al.direct.meta.amountColumn === 'pretax_amount', JSON.stringify(al.direct));
+    ok('alibaba bill CSV (B4): the Usage Unit column scales tokens (1.5 Thousand Tokens → 1500 in; 2 Million tokens → 2,000,000 out; cache_creation_token → cw 500); an undated line without a Billing Cycle is rejected and books nothing',
+      !al.missing && JSON.stringify(al.direct2.units) === JSON.stringify([['2026-10-07', 'qwen-max', 1500, 0, 0, 2000000], ['2026-10-07', 'qwen-plus', 0, 500, 0, 0]]) && al.direct2.undated.rows === 0 && al.direct2.undated.billed === 0 && al.direct2.undated.rejected === 1, JSON.stringify(al.direct2));
+    ok('alibaba bill CSV (B4): Imports lands the bill under alibaba-bill-csv (4 buckets, platform Alibaba Model Studio, 3 billed days = $1.56), connects the alibaba-modelstudio card as "bill CSV (no key)" while the Imports card stays off and the generic csv source is untouched; the note names the lines, rows and billed total; a re-drop changes nothing; a one-day re-export replaces that day\'s row and amount only',
+      !al.missing && al.first.t.in === 157000 && al.first.t.out === 20000 && al.first.t.cr === 30000 && al.first.buckets === 4 && al.first.platforms.length === 1 && al.first.platforms[0] === 'Alibaba Model Studio' && JSON.stringify(al.first.billed) === JSON.stringify([['2026-10-01', 0.01], ['2026-10-05', 0.42], ['2026-10-06', 1.13]])
+      && al.first.status === 'ok' && al.first.label === 'bill CSV (no key)' && al.first.imports && al.first.generic && /model-studio-bill-2026-10\.csv: Model Studio bill CSV — 7 lines → 4 day·model rows/.test(al.first.note) && /\$1\.56 billed over 3 days/.test(al.first.note) && /1 dollars-only line/.test(al.first.note) && /1 line\(s\) of other products skipped/.test(al.first.note) && al.first.meta.buckets === 4 && al.first.meta.rows === 7
+      && al.again.t.in === 157000 && al.again.buckets === 4 && JSON.stringify(al.again.billed) === JSON.stringify(al.first.billed)
+      && JSON.stringify(al.redo.qwenMax1005) === JSON.stringify([[1000, 0]]) && al.redo.buckets === 4 && JSON.stringify(al.redo.billed) === JSON.stringify([['2026-10-01', 0.01], ['2026-10-05', 9.99], ['2026-10-06', 1.13]]), JSON.stringify({ first: al.first, again: al.again, redo: al.redo }));
+    ok('alibaba bill CSV (B4): a bill import is a sync of the alibaba-modelstudio card (warn after 8 days → ok, keyed label kept, lastSync fresh); an all-undated bill imports nothing, connects nothing and says so; the Imports card copy names the Model Studio bill CSV',
+      !al.missing && al.before === 'warn' && al.after.status === 'ok' && al.after.label === 'dashscope-intl.aliyuncs.com · 3 models' && al.after.fresh && !al.empty.src && al.empty.billed === 0 && !al.empty.connected && /bill-empty\.csv: Model Studio bill CSV — no usable lines/.test(al.empty.note)
+      && /Alibaba bill CSV/.test(al.badge) && /Model Studio/.test(al.desc) && /Export Bill CSV/.test(al.desc), JSON.stringify({ before: al.before, after: al.after, empty: al.empty, badge: al.badge }));
   } finally {
     await page.close();
   }

@@ -2039,6 +2039,33 @@ const App = {
     Store.setConnector('cerebras', { label: (Store.connectors.cerebras || {}).label || 'usage CSV (no key)', lastSync: Date.now() });
     notes.push(`${fileName}: Cerebras usage CSV — ${fmtInt(res.meta.rows)} rows (exact tokens${res.meta.cachedColumn ? ', cached input as cache reads' : ''}; re-imports merge by day/model; dollars priced from the list — the Cost tab has no export)${tail}`);
   },
+  /** Plan 9 B4 — Alibaba Cloud Model Studio bill CSV (sniffed by header: Instance ID + Usage + an amount column): exact token rows land under the
+   *  alibaba-modelstudio card's srcId 'alibaba-bill-csv' (platform Alibaba Model Studio) merged by (day, model); the bill's amounts land as billed dollars per day
+   *  under the same srcId, a same-day re-import replacing that day (a bill is re-exported whole, never appended). Like the Cerebras import it is a sync of the
+   *  card (lastSync moves, a keyed label is kept) and not an Imports-card import; a bill with no usable line touches nothing and says so. */
+  _landAlibabaBillCsv(res, fileName, notes) {
+    const m = res.meta, tail = this._alibabaBillTail(m);
+    if (!res.rows.length && !res.billed.length) { notes.push(`${fileName}: Model Studio bill CSV — no usable lines (nothing imported)${tail}`); return; }
+    const keyOf = (r) => r.d + '\u0001' + r.model;
+    const merged = new Map((((Store.sources['alibaba-bill-csv'] || {}).rows) || []).map(r => [keyOf(r), r]));
+    for (const r of res.rows) merged.set(keyOf(r), r);
+    if (merged.size) Store.setSource('alibaba-bill-csv', [...merged.values()], { buckets: merged.size, ...m });
+    const bm = new Map(Store.billedRows('alibaba-bill-csv').map(b => [b.d, b]));
+    for (const b of res.billed) bm.set(b.d, b);
+    Store.setBilled('alibaba-bill-csv', [...bm.values()].sort((a, b) => a.d < b.d ? -1 : 1));
+    Store.setConnector('alibaba-modelstudio', { label: (Store.connectors['alibaba-modelstudio'] || {}).label || 'bill CSV (no key)', lastSync: Date.now() });
+    const pl = (n) => (n === 1 ? '' : 's'), total = res.billed.reduce((a, b) => a + b.amount, 0);
+    notes.push(`${fileName}: Model Studio bill CSV — ${fmtInt(m.rows)} lines → ${res.rows.length} day·model row${pl(res.rows.length)} (exact tokens from the Instance ID) + ${fmtUSD(total)} billed over ${res.billed.length} day${pl(res.billed.length)} (${m.amountColumn}${m.currency ? ', ' + m.currency : ''}); re-imports merge by day/model and replace a day's amount${tail}`);
+  },
+  /** the bill importer's housekeeping counts, as one trailing clause (or '') */
+  _alibabaBillTail(m) {
+    const parts = [];
+    if (m.rejected) parts.push(`${m.rejected} value(s) rejected (non-numeric, negative or undated)`);
+    if (m.nonToken) parts.push(`${m.nonToken} dollars-only line(s) (no token type in the Instance ID)`);
+    if (m.otherProducts) parts.push(`${m.otherProducts} line(s) of other products skipped`);
+    if (m.cycleDays) parts.push(`${m.cycleDays} undated line(s) booked on the billing month's 1st`);
+    return parts.length ? ' — ' + parts.join('; ') : '';
+  },
   async handleImportFiles(files) {
     const status = $('import-status');
     clear(status);
@@ -2145,6 +2172,7 @@ const App = {
             imported++;
             continue;
           }
+          if (isAlibabaBillCSV(headCells)) { this._landAlibabaBillCsv(parseAlibabaBillCSV(csvText), f.name, notes); continue; }   // Plan 9 B4: lands under the alibaba-modelstudio card (tokens + billed), not under Imports
           if (isCerebrasUsageCSV(headCells, f.name)) { this._landCerebrasCsv(parseCerebrasUsageCSV(csvText), f.name, notes); continue; }   // Plan 9 B3: lands under the cerebras card, not under Imports
           const res = parseGenericCSV(csvText);
           // merge by (day, platform, model): re-imports replace matching rows instead of duplicating

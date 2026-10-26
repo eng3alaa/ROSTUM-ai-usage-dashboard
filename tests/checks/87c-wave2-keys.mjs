@@ -715,6 +715,109 @@ export async function run({ browser, ok }) {
     ok('B3 Nebius hosts: primary 503 → legacy api.studio.nebius.com tried (2 calls) and named in the label ("1 models · legacy host"); primary 401 → final, no legacy call; both failing → one error naming both hosts',
       !b3.missing && b3.nebiusLegacy.ok && b3.nebiusLegacy.label === '1 models · legacy host' && /api\.studio\.nebius\.com/.test(b3.nebiusLegacy.detail) && JSON.stringify(b3.nebiusLegacy.calls) === JSON.stringify(['https://api.tokenfactory.nebius.com/v1/models', 'https://api.studio.nebius.com/v1/models'])
       && /HTTP 401/.test(b3.nebius401.err) && b3.nebius401.calls === 1 && /primary down/.test(b3.nebiusBoth) && /legacy down/.test(b3.nebiusBoth) && /api\.studio\.nebius\.com/.test(b3.nebiusBoth), JSON.stringify({ legacy: b3.nebiusLegacy, r401: b3.nebius401, both: b3.nebiusBoth }));
+    // ---- Plan 9 B4: Alibaba Model Studio (validate on a region-bound base URL), Z.ai and MiniMax (validate + EXPERIMENTAL quota in the status line only — never rows / billed) ----
+    const b4 = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const ids = ['alibaba-modelstudio', 'zai', 'minimax'];
+      const missing = ids.filter(id => !connectorById(id) || !document.getElementById(id + '-key') || typeof globalThis[connectorById(id).fetch] !== 'function');
+      for (const f of ['alibaba-modelstudio-f-base', 'minimax-f-groupId', 'minimax-f-planKey']) if (!document.getElementById(f)) missing.push(f);
+      if (missing.length) return { missing };
+      const realFetch = window.fetch;
+      const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+      let calls = [];
+      const log = (url, init) => { const h = (init && init.headers) || {}; calls.push({ u: String(url), auth: h.Authorization || h.authorization || null, signal: !!(init && init.signal) }); };
+      const models = (n) => ({ object: 'list', data: Array.from({ length: n }, (_, i) => ({ id: 'm' + i })) });
+      const pick = (r) => ({ label: r.label, detail: r.detail, rows: r.rows, hasBilled: 'billed' in r, exp: r.meta && r.meta.experimental, base: r.meta && r.meta.base, calls: calls.slice() });
+      // Alibaba: blank base → the international host; an explicit US base with a trailing /compatible-mode/v1/; a non-Alibaba host refused before any request; 401
+      window.fetch = async (url, init) => { log(url, init); return String(url) === 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models' ? json(models(3)) : json({ error: { message: 'wrong url' } }, 404); };
+      const alDefault = await fetchAlibabaModelStudio('sk-ali', { base: '' }).then(pick, e => ({ err: e.message }));
+      calls = []; window.fetch = async (url, init) => { log(url, init); return String(url) === 'https://dashscope-us.aliyuncs.com/compatible-mode/v1/models' ? json(models(2)) : json({}, 404); };
+      const alUs = await fetchAlibabaModelStudio('sk-us', { base: 'https://dashscope-us.aliyuncs.com/compatible-mode/v1/' }).then(pick, e => ({ err: e.message }));
+      calls = [];
+      const alForeign = await fetchAlibabaModelStudio('sk-x', { base: 'https://api.example.com/v1' }).then(() => 'resolved', e => ({ err: e.message, calls: calls.length }));
+      window.fetch = async () => json({ error: { message: 'Incorrect API key provided.', type: 'invalid_request_error' } }, 401);
+      const al401 = await fetchAlibabaModelStudio('sk-bad', {}).then(() => 'resolved', e => e.message);
+      // Alibaba through the key driver: a workspace-dedicated host, the base persists as a plain field, nothing stored, hub group API vendors
+      calls = []; window.fetch = async (url, init) => { log(url, init); return String(url) === 'https://ws1.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/models' ? json(models(5)) : json({}, 404); };
+      document.getElementById('alibaba-modelstudio-key').value = 'sk-ali'; document.getElementById('alibaba-modelstudio-f-base').value = 'https://ws1.ap-southeast-1.maas.aliyuncs.com'; const remA = document.getElementById('remember-alibaba-modelstudio'); if (remA) remA.checked = false;
+      await App.connectKey(connectorById('alibaba-modelstudio'));
+      const hubA = document.querySelector('#accounts-hub .acct[data-connector="alibaba-modelstudio"]');
+      const alDriver = { status: Store.connectorStatus(connectorById('alibaba-modelstudio')), label: (Store.connectors['alibaba-modelstudio'] || {}).label, text: document.getElementById('alibaba-modelstudio-status').textContent, base: LS.get('field:alibaba-modelstudio:base', null), key: LS.get('key:alibaba-modelstudio', null),
+        src: !!Store.sources['alibaba-modelstudio'], billed: Store.billedRows('alibaba-modelstudio').length + Store.billedRows('alibaba-bill-csv').length, group: hubA && hubA.closest('.hub-group').dataset.group, calls: calls.slice() };
+      document.getElementById('alibaba-modelstudio-key').value = ''; document.getElementById('alibaba-modelstudio-f-base').value = ''; LS.del('field:alibaba-modelstudio:base'); LS.del('key:alibaba-modelstudio');
+      // Z.ai: models + experimental quota → the quota in the detail only; quota refused (200 with code 401) or failed (500) → the card still validates and says so; models 401 / 200-with-code-401 → refusal
+      const zaiModels = { object: 'list', data: [{ id: 'glm-5' }, { id: 'glm-4.7' }] };
+      const quota = { code: 0, msg: 'success', success: true, data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, percentage: 42, nextResetTime: Date.now() + 36e5 }, { type: 'TIME_LIMIT', unit: 6, percentage: 10 }] } };
+      const zaiRoute = (quotaAnswer) => async (url, init) => { log(url, init); const u = String(url); if (u === 'https://api.z.ai/api/paas/v4/models') return json(zaiModels); if (u === 'https://api.z.ai/api/monitor/usage/quota/limit') return quotaAnswer(); return json({}, 404); };
+      calls = []; window.fetch = zaiRoute(() => json(quota));
+      const zaiOk = await fetchZai('zk-test').then(pick, e => ({ err: e.message }));
+      calls = []; window.fetch = zaiRoute(() => json({ code: 401, msg: 'token expired or incorrect' }));
+      const zaiRefusedQuota = await fetchZai('zk-payg').then(pick, e => ({ err: e.message }));
+      calls = []; window.fetch = zaiRoute(() => json({ error: 'boom' }, 500));
+      const zaiFailedQuota = await fetchZai('zk-test').then(pick, e => ({ err: e.message }));
+      window.fetch = async () => json({ error: { message: 'Invalid token', code: '401' } }, 401);
+      const zai401 = await fetchZai('zk-bad').then(() => 'resolved', e => e.message);
+      window.fetch = async () => json({ code: 401, msg: 'token expired or incorrect' });
+      const zaiBody401 = await fetchZai('zk-bad').then(() => 'resolved', e => e.message);
+      // Z.ai through the key driver: connected, the experimental clause in the status line, nothing stored, nothing remembered
+      window.fetch = zaiRoute(() => json(quota));
+      document.getElementById('zai-key').value = 'zk-test'; const remZ = document.getElementById('remember-zai'); if (remZ) remZ.checked = false;
+      await App.connectKey(connectorById('zai'));
+      const zaiDriver = { status: Store.connectorStatus(connectorById('zai')), label: (Store.connectors.zai || {}).label, text: document.getElementById('zai-status').textContent, src: !!Store.sources.zai, billed: Store.billedRows('zai').length, key: LS.get('key:zai', null) };
+      document.getElementById('zai-key').value = ''; LS.del('key:zai');
+      // MiniMax: no GroupId → the quota is not read (said so); GroupId + plan key → the plan endpoint with the plan key; refused / failed there → still validated; models 200-with-base_resp error / 401 → refusal
+      const mmModels = { object: 'list', data: [{ id: 'MiniMax-M2.5' }, { id: 'MiniMax-M2' }, { id: 'speech-02-hd' }] };
+      const remains = { data: { model_remains: [{ model_name: 'MiniMax-M2.5', current_interval_total_count: 1000, current_interval_usage_count: 700, start_time: Date.now() - 36e5, end_time: Date.now() + 144e5, remains_time: 86400 }] }, base_resp: { status_code: 0, status_msg: 'success' } };
+      const mmRoute = (planAnswer) => async (url, init) => { log(url, init); const u = String(url); if (u === 'https://api.minimax.io/v1/models') return json(mmModels); if (u.startsWith('https://platform.minimax.io/v1/api/openplatform/coding_plan/remains?GroupId=')) return planAnswer(); return json({}, 404); };
+      calls = []; window.fetch = mmRoute(() => json(remains));
+      const mmNoGroup = await fetchMiniMax('mk-test', { groupId: '', planKey: '' }).then(pick, e => ({ err: e.message }));
+      calls = []; window.fetch = mmRoute(() => json(remains));
+      const mmPlan = await fetchMiniMax('mk-test', { groupId: '1900 123', planKey: 'plan-key' }).then(pick, e => ({ err: e.message }));
+      calls = []; window.fetch = mmRoute(() => json({ base_resp: { status_code: 1004, status_msg: 'login fail' } }));
+      const mmPlanRefused = await fetchMiniMax('mk-test', { groupId: '1900123' }).then(pick, e => ({ err: e.message }));
+      calls = []; window.fetch = mmRoute(() => { throw new TypeError('Failed to fetch'); });
+      const mmPlanFailed = await fetchMiniMax('mk-test', { groupId: '1900123' }).then(pick, e => ({ err: e.message }));
+      window.fetch = async () => json({ base_resp: { status_code: 1004, status_msg: 'login fail' } });
+      const mmBodyRefused = await fetchMiniMax('mk-bad', {}).then(() => 'resolved', e => e.message);
+      window.fetch = async () => json({ error: 'unauthorized' }, 401);
+      const mm401 = await fetchMiniMax('mk-bad', {}).then(() => 'resolved', e => e.message);
+      // MiniMax through the key driver: the GroupId persists as a plain field, the plan key is a secret (password input; not remembered without Remember), nothing stored
+      calls = []; window.fetch = mmRoute(() => json(remains));
+      document.getElementById('minimax-key').value = 'mk-test'; document.getElementById('minimax-f-groupId').value = '1900123'; document.getElementById('minimax-f-planKey').value = 'plan-key'; const remM = document.getElementById('remember-minimax'); if (remM) remM.checked = false;
+      await App.connectKey(connectorById('minimax'));
+      const mmDriver = { status: Store.connectorStatus(connectorById('minimax')), label: (Store.connectors.minimax || {}).label, text: document.getElementById('minimax-status').textContent, src: !!Store.sources.minimax, billed: Store.billedRows('minimax').length, key: LS.get('key:minimax', null),
+        groupId: LS.get('field:minimax:groupId', null), planKey: LS.get('field:minimax:planKey', null), planType: document.getElementById('minimax-f-planKey').type, calls: calls.slice() };
+      document.getElementById('minimax-key').value = ''; document.getElementById('minimax-f-groupId').value = ''; document.getElementById('minimax-f-planKey').value = ''; LS.del('field:minimax:groupId'); LS.del('field:minimax:planKey'); LS.del('key:minimax');
+      window.fetch = realFetch;
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist(); App._render();
+      return { alDefault, alUs, alForeign, al401, alDriver, zaiOk, zaiRefusedQuota, zaiFailedQuota, zai401, zaiBody401, zaiDriver, mmNoGroup, mmPlan, mmPlanRefused, mmPlanFailed, mmBodyRefused, mm401, mmDriver };
+    });
+    const oneCall = (r, url, auth) => r && r.calls && r.calls.length === 1 && r.calls[0].u === url && r.calls[0].auth === auth && r.calls[0].signal;
+    ok('alibaba (B4): fetcher — blank base → GET dashscope-intl.aliyuncs.com/compatible-mode/v1/models (Bearer + timeout) → "dashscope-intl.aliyuncs.com · 3 models", detail points at Export Bill CSV + Imports, rows null, no billed, meta.base; a US base with a trailing /compatible-mode/v1/ is normalised; a non-aliyuncs host is refused before any request; 401 → "HTTP 401 — Incorrect API key"',
+      !b4.missing && oneCall(b4.alDefault, 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models', 'Bearer sk-ali') && b4.alDefault.label === 'dashscope-intl.aliyuncs.com · 3 models' && /Export Bill CSV/.test(b4.alDefault.detail) && /Imports/.test(b4.alDefault.detail) && b4.alDefault.rows === null && !b4.alDefault.hasBilled && b4.alDefault.base === 'https://dashscope-intl.aliyuncs.com'
+      && oneCall(b4.alUs, 'https://dashscope-us.aliyuncs.com/compatible-mode/v1/models', 'Bearer sk-us') && b4.alUs.label === 'dashscope-us.aliyuncs.com · 2 models'
+      && /aliyuncs\.com/.test(b4.alForeign.err) && b4.alForeign.calls === 0 && /HTTP 401/.test(b4.al401) && /Incorrect API key/.test(b4.al401), JSON.stringify({ d: b4.alDefault, us: b4.alUs, f: b4.alForeign, e: b4.al401, missing: b4.missing }));
+    ok('alibaba (B4): key driver — a workspace-dedicated host validates ("ws1.ap-southeast-1.maas.aliyuncs.com · 5 models"), the base URL persists as a plain field (LS field:alibaba-modelstudio:base), the key is not remembered, no rows and no billed stored, hub group API vendors',
+      !b4.missing && b4.alDriver.status === 'ok' && b4.alDriver.label === 'ws1.ap-southeast-1.maas.aliyuncs.com · 5 models' && /Connected/.test(b4.alDriver.text) && /bill/i.test(b4.alDriver.text) && b4.alDriver.base === 'https://ws1.ap-southeast-1.maas.aliyuncs.com' && b4.alDriver.key === null && !b4.alDriver.src && b4.alDriver.billed === 0 && b4.alDriver.group === 'api' && b4.alDriver.calls.length === 1, JSON.stringify(b4.alDriver));
+    ok('zai (B4): fetcher — GET api.z.ai/api/paas/v4/models (Bearer) → "2 models"; then the EXPERIMENTAL GET /api/monitor/usage/quota/limit (raw key in Authorization) → detail "experimental: Coding Plan quota — TOKENS_LIMIT 5-hour window 42% used (resets …), TIME_LIMIT weekly 10% used … never counted in totals", rows null, no billed path, meta.experimental.ok with 2 limits',
+      !b4.missing && b4.zaiOk.label === '2 models' && /experimental: Coding Plan quota — TOKENS_LIMIT 5-hour window 42% used \(resets /.test(b4.zaiOk.detail) && /TIME_LIMIT weekly 10% used/.test(b4.zaiOk.detail) && /never counted in totals/.test(b4.zaiOk.detail) && b4.zaiOk.rows === null && !b4.zaiOk.hasBilled
+      && b4.zaiOk.exp && b4.zaiOk.exp.ok === true && b4.zaiOk.exp.limits.length === 2 && b4.zaiOk.calls.length === 2 && b4.zaiOk.calls[0].u === 'https://api.z.ai/api/paas/v4/models' && b4.zaiOk.calls[0].auth === 'Bearer zk-test' && b4.zaiOk.calls[1].u === 'https://api.z.ai/api/monitor/usage/quota/limit' && b4.zaiOk.calls[1].auth === 'zk-test' && b4.zaiOk.calls[1].signal, JSON.stringify(b4.zaiOk || b4));
+    ok('zai (B4): the experimental call never fails the card — quota 200 with code 401 → still "2 models", detail says the quota endpoint refused (pay-as-you-go), meta.experimental.refused; quota 500 → detail "experimental: /api/monitor/usage/quota/limit failed (HTTP 500) — not counted", meta.experimental.error; models 401 → "HTTP 401 — Invalid token"; models 200 with body code 401 → "Z.ai refused the key (code 401 — token expired or incorrect)"',
+      !b4.missing && b4.zaiRefusedQuota.label === '2 models' && /experimental: quota endpoint — Z\.ai refused the key \(code 401 — token expired or incorrect\)/.test(b4.zaiRefusedQuota.detail) && /pay-as-you-go/.test(b4.zaiRefusedQuota.detail) && b4.zaiRefusedQuota.exp.ok === false && b4.zaiRefusedQuota.exp.refused === true && b4.zaiRefusedQuota.rows === null
+      && b4.zaiFailedQuota.label === '2 models' && /experimental: \/api\/monitor\/usage\/quota\/limit failed \(HTTP 500\) — not counted/.test(b4.zaiFailedQuota.detail) && b4.zaiFailedQuota.exp.ok === false && /HTTP 500/.test(b4.zaiFailedQuota.exp.error)
+      && /HTTP 401 — Invalid token/.test(b4.zai401) && b4.zaiBody401 === 'Z.ai refused the key (code 401 — token expired or incorrect)', JSON.stringify({ r: b4.zaiRefusedQuota, f: b4.zaiFailedQuota, e: b4.zai401, b: b4.zaiBody401 }));
+    ok('zai (B4): key driver — connected as "2 models" with the experimental clause (42% used) in the status line; no rows, no billed, key not remembered',
+      !b4.missing && b4.zaiDriver.status === 'ok' && b4.zaiDriver.label === '2 models' && /Connected/.test(b4.zaiDriver.text) && /experimental/.test(b4.zaiDriver.text) && /42% used/.test(b4.zaiDriver.text) && !b4.zaiDriver.src && b4.zaiDriver.billed === 0 && b4.zaiDriver.key === null, JSON.stringify(b4.zaiDriver));
+    ok('minimax (B4): fetcher — GET api.minimax.io/v1/models (Bearer) → "3 models"; without a GroupId the quota is not read and the detail says so (meta.experimental.skipped); with GroupId "1900 123" + plan key → GET platform.minimax.io/…/coding_plan/remains?GroupId=1900%20123 with Bearer plan-key → detail "experimental: Coding Plan quota — MiniMax-M2.5: usage_count 700 / total 1,000 … REMAINING … never counted in totals", rows null, no billed, meta.experimental.ok',
+      !b4.missing && b4.mmNoGroup.label === '3 models' && /experimental Coding Plan quota not read/.test(b4.mmNoGroup.detail) && /GroupId/.test(b4.mmNoGroup.detail) && b4.mmNoGroup.exp.skipped === 'no GroupId' && b4.mmNoGroup.calls.length === 1 && b4.mmNoGroup.calls[0].u === 'https://api.minimax.io/v1/models' && b4.mmNoGroup.calls[0].auth === 'Bearer mk-test' && b4.mmNoGroup.rows === null
+      && b4.mmPlan.label === '3 models' && /experimental: Coding Plan quota — MiniMax-M2\.5: usage_count 700 \/ total 1,000/.test(b4.mmPlan.detail) && /REMAINING/.test(b4.mmPlan.detail) && /never counted in totals/.test(b4.mmPlan.detail) && b4.mmPlan.rows === null && !b4.mmPlan.hasBilled && b4.mmPlan.exp.ok === true
+      && b4.mmPlan.calls.length === 2 && b4.mmPlan.calls[1].u === 'https://platform.minimax.io/v1/api/openplatform/coding_plan/remains?GroupId=1900%20123' && b4.mmPlan.calls[1].auth === 'Bearer plan-key' && b4.mmPlan.calls[1].signal, JSON.stringify({ n: b4.mmNoGroup, p: b4.mmPlan, missing: b4.missing }));
+    ok('minimax (B4): the experimental call never fails the card — plan endpoint 200 with base_resp 1004 → still "3 models", detail names "MiniMax refused the request (1004 — login fail)", the standard key was used as fallback; plan endpoint network failure → "… coding_plan/remains failed (Failed to fetch) — not counted"; models 200 with base_resp 1004 → refusal error; models 401 → "HTTP 401"',
+      !b4.missing && b4.mmPlanRefused.label === '3 models' && /MiniMax refused the request \(1004 — login fail\)/.test(b4.mmPlanRefused.detail) && b4.mmPlanRefused.exp.ok === false && b4.mmPlanRefused.calls[1].auth === 'Bearer mk-test'
+      && b4.mmPlanFailed.label === '3 models' && /coding_plan\/remains failed \(Failed to fetch\) — not counted/.test(b4.mmPlanFailed.detail) && b4.mmPlanFailed.exp.ok === false
+      && b4.mmBodyRefused === 'MiniMax refused the request (1004 — login fail)' && /HTTP 401/.test(b4.mm401), JSON.stringify({ r: b4.mmPlanRefused, f: b4.mmPlanFailed, b: b4.mmBodyRefused, e: b4.mm401 }));
+    ok('minimax (B4): key driver — connected as "3 models" with "usage_count 700" in the status line (2 calls); the GroupId persists as a plain field, the plan key is a password input and is not remembered without Remember, key not remembered, no rows / billed',
+      !b4.missing && b4.mmDriver.status === 'ok' && b4.mmDriver.label === '3 models' && /Connected/.test(b4.mmDriver.text) && /usage_count 700/.test(b4.mmDriver.text) && b4.mmDriver.calls.length === 2 && b4.mmDriver.groupId === '1900123' && b4.mmDriver.planKey === null && b4.mmDriver.planType === 'password' && b4.mmDriver.key === null && !b4.mmDriver.src && b4.mmDriver.billed === 0, JSON.stringify(b4.mmDriver));
   } finally {
     await page.close();
   }

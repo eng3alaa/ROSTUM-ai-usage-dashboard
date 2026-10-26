@@ -820,4 +820,110 @@ async function fetchNovita(key) {
   return { label: balance === null ? 'Novita · key accepted' : `Novita · balance ${fmtUSD(balance)}`, rows: null,
     detail: `${balance === null ? 'key accepted (no credit_balance in the answer)' : 'credit_balance ' + fmtUSD(balance) + ' (reported ×10000)'} · no per-model usage endpoint · billed USD per month exists only on /openapi/v1/billing/*, which is CORS-blocked from this page (preflight 401) — readable through the local collector as a proxy in a later version, not fetched here · a bogus key answers 403` };
 }
+/* ---------- Plan 9 B4: API cards batch 2 — Alibaba Model Studio (validate; bill CSV through Imports), Z.ai and MiniMax (validate + EXPERIMENTAL quota in the status line only) ---------- */
+const DASHSCOPE_INTL = 'https://dashscope-intl.aliyuncs.com';
+/** fields.base → an Alibaba Cloud DashScope base: blank = the international (Singapore) default; otherwise the compatibleBaseUrl rules (https, no credentials /
+ *  query / fragment; a trailing /v1 or /compatible-mode/v1 is tolerated) and the host must be *.aliyuncs.com — keys are region-bound and this card sends them
+ *  nowhere else. Throws before any request is made. */
+function dashscopeBaseUrl(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return DASHSCOPE_INTL;
+  const base = compatibleBaseUrl(s).replace(/\/compatible-mode$/i, '');
+  if (!/\.aliyuncs\.com$/i.test(new URL(base).hostname)) throw new Error('Base URL must be an Alibaba Cloud host (*.aliyuncs.com) — the key is sent nowhere else');
+  return base;
+}
+/** Alibaba Cloud Model Studio / DashScope — GET {base}/compatible-mode/v1/models (Bearer; 401 on a bogus key; CORS * verified on dashscope-intl). DashScope keys carry
+ *  no usage or balance endpoint, so rows stay null; exact tokens and billed cost come from the console's bill CSV dropped on Imports (isAlibabaBillCSV). */
+async function fetchAlibabaModelStudio(key, fields) {
+  const base = dashscopeBaseUrl(fields && fields.base);
+  const j = await fetchJSON(base + '/compatible-mode/v1/models', { 'Authorization': 'Bearer ' + key });
+  if (!Array.isArray(j && j.data)) throw new Error('GET /compatible-mode/v1/models answered without a model list');
+  const host = new URL(base).host, n = j.data.length;
+  return { label: `${host} · ${n} model${n === 1 ? '' : 's'}`, rows: null, meta: { base },
+    detail: `key valid on ${host} · ${n} models · no usage or balance endpoint — for exact tokens and billed cost export the Model Studio bill (console → Expenses and Costs → Bill Details → Billing Month → Product Name: Model Studio → Export Bill CSV) and drop the CSV on Imports` };
+}
+/** EXPERIMENTAL probe (design decision 9): runs only after the key validated; its answer reaches the status detail and meta.experimental, never rows, billed or
+ *  totals; a failure is recorded in both places instead of failing the card. `summarise(json)` → { ok, text, …facts }, or throws on a shape it cannot read. */
+async function experimentalProbe(url, headers, summarise) {
+  const path = new URL(url).pathname;
+  try { return { ...summarise(await fetchJSON(url, headers)), endpoint: path }; }
+  catch (e) { return { ok: false, endpoint: path, error: e.message, text: `experimental: ${path} failed (${e.message}) — not counted` }; }
+}
+const ZAI_API = 'https://api.z.ai/api', ZAI_WINDOWS = { 3: '5-hour window', 6: 'weekly' };
+/** Z.ai / Zhipu GLM API — GET /paas/v4/models (Bearer; a bogus key → 401, or Z.ai's 200 whose body says code 401 — both refusals; CORS ACAO null + credentials
+ *  verified). No documented usage or balance endpoint → rows null. Then the EXPERIMENTAL Coding Plan quota (GET /monitor/usage/quota/limit — undocumented,
+ *  reverse-engineered by community widgets, field schema unverified; Authorization carries the raw key as those tools send it): quota percentages per window →
+ *  status detail + meta.experimental only; pay-as-you-go keys get code 401 there, which is recorded, not an error. */
+async function fetchZai(key) {
+  const j = await fetchJSON(ZAI_API + '/paas/v4/models', { 'Authorization': 'Bearer ' + key });
+  if (!Array.isArray(j && j.data)) throw new Error(zaiRefusal(j) || 'GET /paas/v4/models answered without a model list');
+  const n = j.data.length;
+  const exp = await experimentalProbe(ZAI_API + '/monitor/usage/quota/limit', { 'Authorization': key, 'Accept-Language': 'en-US,en' }, zaiQuotaSummary);
+  return { label: `${n} model${n === 1 ? '' : 's'}`, rows: null, meta: { experimental: exp },
+    detail: `key valid · ${n} models · no usage or billing endpoint (spend and quota are console-only) · ${exp.text}` };
+}
+/** Z.ai's error inside a 200: { code: 401, msg: 'token expired or incorrect' } → the message, or '' when the body is not that shape */
+function zaiRefusal(j) {
+  return j && j.code != null && Number(j.code) !== 0 ? `Z.ai refused the key (code ${j.code}${j.msg ? ' — ' + j.msg : ''})` : '';
+}
+/** { code: 0, success: true, data: { limits: [{ type, unit, percentage, …a reset epoch ms }] } } → one clause per limit; a non-zero code is the endpoint's refusal */
+function zaiQuotaSummary(j) {
+  const refused = zaiRefusal(j);
+  if (refused) return { ok: false, refused: true, text: `experimental: quota endpoint — ${refused} (pay-as-you-go keys carry no Coding Plan quota)` };
+  const limits = j && j.data && Array.isArray(j.data.limits) ? j.data.limits : null;
+  if (!limits) throw new Error('answered in an unexpected shape');
+  const pct = (l) => (Number.isFinite(Number(l.percentage)) ? Math.round(Number(l.percentage)) + '% used' : 'no percentage');
+  const clause = (l) => `${l.type || 'limit'} ${ZAI_WINDOWS[l.unit] || 'unit ' + l.unit} ${pct(l)}${zaiReset(l)}`;
+  return { ok: true, limits: limits.map(l => ({ type: l.type, unit: l.unit, percentage: l.percentage })),
+    text: `experimental: Coding Plan quota — ${limits.length ? limits.map(clause).join(', ') : 'no limits listed'} (reverse-engineered endpoint: quota %, not tokens; never counted in totals)` };
+}
+/** a numeric field whose name says reset (epoch ms; the field name is unverified) → ' (resets <local time>)' */
+function zaiReset(l) {
+  const k = Object.keys(l).find(key => /reset/i.test(key) && Number(l[key]) > 1e12);
+  return k ? ` (resets ${new Date(Number(l[k])).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })})` : '';
+}
+const MINIMAX_API = 'https://api.minimax.io', MINIMAX_PLAN_API = 'https://platform.minimax.io/v1/api/openplatform/coding_plan/remains';
+/** MiniMax Open Platform — GET /v1/models (Bearer; 401 on a bogus key; CORS * verified) → { data: [{ id }] }; a 200 whose base_resp.status_code ≠ 0 is MiniMax's own
+ *  refusal. No documented usage or balance endpoint → rows null. EXPERIMENTAL, only when fields.groupId is given: GET platform.minimax.io/…/coding_plan/remains?GroupId=
+ *  with the Coding Plan key (fields.planKey, else the key — plan and standard keys are not interchangeable): per-model prompt counts for the 5-hour window → status
+ *  detail + meta.experimental only; the field semantics (usage_count = remaining per community scripts) are unverified and the detail says so. */
+async function fetchMiniMax(key, fields) {
+  const j = await fetchJSON(MINIMAX_API + '/v1/models', { 'Authorization': 'Bearer ' + key });
+  const refused = minimaxRefusal(j);
+  if (refused) throw new Error(refused);
+  if (!Array.isArray(j && j.data)) throw new Error('GET /v1/models answered without a model list');
+  const n = j.data.length, groupId = String((fields && fields.groupId) || '').trim();
+  const exp = groupId ? await experimentalProbe(MINIMAX_PLAN_API + '?GroupId=' + encodeURIComponent(groupId), { 'Authorization': 'Bearer ' + ((fields && fields.planKey) || key) }, minimaxQuotaSummary)
+    : { ok: null, skipped: 'no GroupId', text: 'experimental Coding Plan quota not read — enter the GroupId (platform.minimax.io → user center → Basic information) and, for plan subscribers, the plan key' };
+  return { label: `${n} model${n === 1 ? '' : 's'}`, rows: null, meta: { experimental: exp },
+    detail: `key valid · ${n} models · no usage or billing endpoint (balance and M Plan usage are console-only) · ${exp.text}` };
+}
+/** { base_resp: { status_code, status_msg } } with a non-zero code is MiniMax's refusal inside a 200 → the message, else '' */
+function minimaxRefusal(j) {
+  const b = j && j.base_resp;
+  return b && b.status_code != null && Number(b.status_code) !== 0 ? `MiniMax refused the request (${b.status_code}${b.status_msg ? ' — ' + b.status_msg : ''})` : '';
+}
+/** the model list in the answer → one clause per model (usage_count / total, window end); a refusal in base_resp is recorded as such */
+function minimaxQuotaSummary(j) {
+  const refused = minimaxRefusal(j);
+  if (refused) return { ok: false, refused: true, text: `experimental: coding_plan/remains — ${refused} (needs the Coding Plan key and your GroupId)` };
+  const models = minimaxModelRemains(j);
+  if (!models) throw new Error('answered in an unexpected shape');
+  const clause = (m) => `${m.model_name || 'model'}: usage_count ${fmtInt(Number(m.current_interval_usage_count) || 0)} / total ${fmtInt(Number(m.current_interval_total_count) || 0)}${minimaxWindowEnd(m)}`;
+  return { ok: true, models: models.map(m => ({ model: m.model_name, usage: m.current_interval_usage_count, total: m.current_interval_total_count })),
+    text: `experimental: Coding Plan quota — ${models.map(clause).join('; ')} (community scripts read usage_count as REMAINING — unverified; prompt counts per 5-hour window, not tokens; never counted in totals)` };
+}
+/** the first non-empty array of { model_name, … } at the top level or up to two levels down (the wrapper key is undocumented: data.model_remains in community captures) */
+function minimaxModelRemains(j) {
+  const isList = (v) => Array.isArray(v) && v.length > 0 && v.every(x => x && typeof x === 'object' && 'model_name' in x);
+  const values = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.values(v) : []);
+  const candidates = [j, ...values(j), ...values(j).flatMap(values)];
+  return candidates.find(isList) || null;
+}
+/** end_time (epoch ms) → ' (window ends <local time>)' */
+function minimaxWindowEnd(m) {
+  const t = Number(m.end_time);
+  return t > 1e12 ? ` (window ends ${new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })})` : '';
+}
+
 
