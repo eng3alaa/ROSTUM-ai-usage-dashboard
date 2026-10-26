@@ -316,6 +316,72 @@ export async function run({ browser, ok }) {
       b6.bad.length === 0 && b6.n === 85 && b6.dupIds.length === 0 && b6.cursorOnce && b6.importsHas, JSON.stringify({ bad: b6.bad, n: b6.n, dupIds: b6.dupIds, cursorOnce: b6.cursorOnce, importsHas: b6.importsHas }));
     ok('registry (B6): honesty copy — Cursor opens "Exact", says state.vscdb carries no real token counts, names Export CSV and the team Admin API as collector-only, links cursor.com/dashboard as the usage page; zed carries decode "zstd" and names zstd, threads.db and "needs the local collector on this browser"; the three estimated cards open "Estimated" and say their export layout is third-party / undocumented / sniffed; Cody names Enterprise, Character.ai the weeks-long export, Mistral the Le Chat → Vibe rename and admin.mistral.ai',
       b6.cursor && b6.zed && b6.estimatedHonest && b6.cody && b6.characterai && b6.mistral, JSON.stringify(b6));
+    // ---- Plan 9 B7: registry invariants for EVERY Plan 9 entry — the 38 ids added since v8 (47 cards) — in one pass, kind by kind ----
+    const V8_IDS = ['collector', 'local', 'anthropic', 'openai', 'gemini', 'copilot', 'openrouter', 'codex', 'gemini-cli', 'copilot-cli', 'continue', 'cline', 'roo', 'aider', 'junie', 'lmstudio', 'ollama',
+      'groq', 'amazonq', 'replicate', 'windsurf', 'mistral', 'cohere', 'together', 'huggingface', 'xai', 'perplexity-api', 'localai', 'vllm', 'llamacpp', 'gpt4all', 'jan', 'tgwebui', 'fireworks', 'deepseek',
+      'claude-enterprise', 'azure-openai', 'vertex', 'bedrock', 'chatgpt-app', 'claudeai-app', 'grok', 'mscopilot', 'perplexity', 'meta-ai', 'deepseek-chat', 'imports'];
+    const PLAN9_IDS = ['openai-compatible', 'poe', 'deepinfra', 'moonshot', 'cerebras', 'nebius', 'meta-api', 'novita', 'alibaba-modelstudio', 'zai', 'minimax',
+      'sambanova', 'nvidia-nim', 'baseten', 'v0', 'tabnine', 'augment', 'gemini-code-assist', 'lovable', 'bolt', 'replit', 'qwen-chat', 'kimi-chat', 'zai-chat', 'youcom', 'notebooklm', 'm365-copilot',
+      'opencode', 'goose', 'devin', 'kilo', 'amp', 'zed', 'copilot-vscode', 'cursor', 'cody', 'mistral-vibe', 'characterai'];
+    const b7 = await page.evaluate((v8, p9) => {
+      const groups = HUB_GROUPS.map(g => g.id), imports = connectorById('imports');
+      const ids = CONNECTORS.map(c => c.id), problems = [];
+      const dup = ids.filter((x, i) => ids.indexOf(x) !== i);
+      if (dup.length) problems.push('duplicate id: ' + dup.join(','));
+      for (const id of [...v8, ...p9]) if (!ids.includes(id)) problems.push('missing: ' + id);
+      for (const id of ids) if (!v8.includes(id) && !p9.includes(id)) problems.push('unlisted entry (add it to V8_IDS or PLAN9_IDS and document it): ' + id);
+      const OPENS = { exact: /^Exact/, estimated: /^Estimated/, validate: /^Validate-only/, none: /^No data/ };
+      const fnOk = (name) => typeof name === 'string' && typeof globalThis[name] === 'function';
+      const SNIFF = { 'cursor-csv': 'isCursorUsageCSV', 'cody-export': 'isCodyExport', 'mistral-vibe-export': 'isMistralVibeExport', 'characterai-export': 'isCharacterAiExport' };
+      for (const id of p9) {
+        const c = connectorById(id); if (!c) continue;
+        const pre = id + ': ';
+        if (!groups.includes(c.category)) problems.push(pre + 'category=' + c.category);
+        if (c.statusEl !== id + '-status') problems.push(pre + 'statusEl=' + c.statusEl);
+        if (!document.getElementById(id + '-status') || !document.getElementById('src-' + id)) problems.push(pre + 'status element / source card not in the DOM');
+        if (!OPENS[c.quality]) problems.push(pre + 'quality=' + c.quality);
+        else if (!(typeof c.qualityNote === 'string' && c.qualityNote.length >= 80 && OPENS[c.quality].test(c.qualityNote))) problems.push(pre + 'qualityNote must be ≥ 80 chars and open with the quality word');
+        if (!c.links || !(c.links.get || c.links.docs)) problems.push(pre + 'links.get|docs missing');
+        if (!(typeof c.platform === 'string' && c.platform) || !PLATFORM_ORDER.includes(c.platform)) problems.push(pre + 'platform missing or not in PLATFORM_ORDER');
+        if (!c.brand || !c.mark || !c.name) problems.push(pre + 'brand/mark/name missing');
+        if (!Array.isArray(c.paths) || !c.paths.length) problems.push(pre + 'paths missing');
+        if (c.fetch && !fnOk(c.fetch)) problems.push(pre + 'fetch fn missing: ' + c.fetch);
+        if (c.parser && !fnOk(c.parser)) problems.push(pre + 'parser fn missing: ' + c.parser);
+        if (c.validate || c.poll) problems.push(pre + 'unexpected validate / poll (no Plan 9 card is a local server)');
+        if (c.kind === 'api-key') {
+          if (!fnOk(c.fetch)) problems.push(pre + 'api-key without a fetch fn');
+          if (c.keyLS !== 'key:' + id || typeof c.keyLabel !== 'string' || typeof c.keyHint !== 'string') problems.push(pre + 'keyLS / keyLabel / keyHint');
+          if (!Array.isArray(c.srcIds) || c.srcIds[0] !== id) problems.push(pre + 'srcIds must start with the own id');
+          if (c.sessionOnly || c.parser || c.patterns) problems.push(pre + 'api-key with sessionOnly / parser / patterns');
+          if (!c.links.usage && id !== 'openai-compatible') problems.push(pre + 'api-key without a usage link');
+        } else if (c.kind === 'link-only') {
+          if (c.quality !== 'none') problems.push(pre + 'link-only quality must be none');
+          if (!(typeof c.reason === 'string' && c.reason.length > 40 && /^no /i.test(c.reason))) problems.push(pre + 'link-only reason must open with "No …" (> 40 chars)');
+          if (c.fetch || c.parser || c.validate || c.poll || c.keyLS || c.patterns || (c.srcIds || []).length) problems.push(pre + 'link-only must not fetch, parse or own rows');
+          if (!c.links.usage) problems.push(pre + 'link-only without a vendor usage link');
+        } else if (c.kind === 'folder-log') {
+          if (!fnOk(c.parser) || !Array.isArray(c.patterns) || !c.patterns.length || !c.patterns.every(p => p instanceof RegExp)) problems.push(pre + 'folder-log parser / patterns');
+          if (!Array.isArray(c.srcIds) || !c.srcIds.includes(id)) problems.push(pre + 'folder-log srcIds lacks own id');
+          if (typeof c.hint !== 'string' || c.fetch || c.keyLS) problems.push(pre + 'folder-log hint / unexpected fetch / keyLS');
+          // a folder card that gives per-OS locations gives one for every desktop OS — never Windows alone
+          const os = { win: c.paths.some(p => /\bWindows\b/.test(p)), mac: c.paths.some(p => /\bmacOS\b/.test(p)), linux: c.paths.some(p => /\bLinux\b/.test(p)) };
+          if ((os.win || os.mac || os.linux) && !(os.win && os.mac && os.linux)) problems.push(pre + 'paths name some OSes but not all three: ' + JSON.stringify(os));
+        } else if (c.kind === 'export-file') {
+          if (!Array.isArray(c.srcIds) || !c.srcIds.length || !c.srcIds.every(s => imports.srcIds.includes(s))) problems.push(pre + 'export-file srcIds not a subset of imports.srcIds');
+          if (c.parser || c.fetch || c.patterns || c.keyLS) problems.push(pre + 'export-file must not parse / fetch itself');
+          if (typeof c.hint !== 'string') problems.push(pre + 'export-file hint');
+          for (const s of c.srcIds || []) if (!SNIFF[s] || !fnOk(SNIFF[s])) problems.push(pre + 'no import sniffer for ' + s);
+        } else problems.push(pre + 'unexpected kind ' + c.kind);
+        try { Store.connectorStatus(c); } catch (e) { problems.push(pre + 'connectorStatus threw'); }
+      }
+      // whole registry: every named driver function exists (a typo here is a card that silently never works)
+      for (const c of CONNECTORS) for (const k of ['fetch', 'parser', 'validate', 'poll']) if (c[k] && !fnOk(c[k])) problems.push(c.id + ': ' + k + ' fn missing: ' + c[k]);
+      const kinds = {}; for (const id of p9) { const c = connectorById(id); if (c) kinds[c.kind] = (kinds[c.kind] || 0) + 1; }
+      return { n: CONNECTORS.length, problems, kinds, imports: imports.srcIds.length };
+    }, V8_IDS, PLAN9_IDS);
+    ok('registry (B7): the registry is exactly the 47 v8 ids + the 38 Plan 9 ids (85, unique) and every Plan 9 entry satisfies the invariants — category ∈ HUB_GROUPS; statusEl = id+"-status" with a live status element and source card; quality ∈ exact|estimated|validate|none with a ≥ 80-char qualityNote that opens with the quality word; links.get|docs; platform in PLATFORM_ORDER; brand/mark/name; paths; api-key = fetch fn + keyLS key:<id> + own srcId first + usage link; link-only = quality none + "No …" reason + no fetch/parser/rows + usage link; folder-log = parser fn + RegExp patterns + own srcId + hint + paths for all three OSes when any is named; export-file = srcIds ⊂ imports.srcIds with a sniffer each, nothing parsed or fetched itself; every fetch/parser/validate/poll name in the whole registry resolves',
+      b7.n === 85 && b7.problems.length === 0, JSON.stringify(b7));
+    ok('registry (B7): the Plan 9 entries are 11 api-key + 16 link-only + 7 folder-log + 4 export-file cards', JSON.stringify(b7.kinds) === JSON.stringify({ 'api-key': 11, 'link-only': 16, 'folder-log': 7, 'export-file': 4 }), JSON.stringify(b7.kinds));
   } finally {
     await page.close();
   }

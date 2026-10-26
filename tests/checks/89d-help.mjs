@@ -41,6 +41,8 @@ export async function run({ browser, ok }) {
         text: dlg.textContent,
         pricesDate: (dlg.querySelector('#help-prices-date') || {}).textContent, verifiedOn: PRICES_VERIFIED_ON,
         pricesPara: (h => h && h.nextElementSibling && h.nextElementSibling.tagName === 'P' ? h.nextElementSibling.textContent : null)(q('h3').find(h => h.textContent.trim() === 'How prices work')),
+        startHere: (h => h && h.nextElementSibling && h.nextElementSibling.tagName === 'OL' ? h.nextElementSibling.textContent : null)(q('h3').find(h => h.textContent.trim() === 'Start here')),
+        numbers: (h => h && h.nextElementSibling && h.nextElementSibling.tagName === 'UL' ? [...h.nextElementSibling.children].map(li => ({ tag: li.tagName, lead: li.firstElementChild && li.firstElementChild.tagName === 'B' ? li.firstElementChild.textContent : null, text: li.textContent })) : null)(q('h3').find(h => h.textContent.trim() === 'Where the numbers come from')),
       };
     });
     ok('help (Plan 8): click opens the dialog with showModal() (open + :modal), aria-labelledby → #help-title "Help" inside the same .modal-head + .modal-close as the connector modal',
@@ -50,7 +52,16 @@ export async function run({ browser, ok }) {
       JSON.stringify(opened.heads) === JSON.stringify(HEADS), JSON.stringify(opened.heads));
     ok('help (Plan 8): Start here carries the collector command in <code id="help-cmd"> with a "Copy" button and names Validate & connect, the Admin key path and the chat-app exports',
       opened.cmd === 'node docs/tools/ai-usage-collector.mjs' && opened.copyBtn === 'Copy' && /Validate & connect/.test(opened.text) && /Admin key/.test(opened.text) && /ChatGPT/.test(opened.text) && /Takeout/.test(opened.text) && /Imports/.test(opened.text),
-      JSON.stringify({ cmd: opened.cmd, copyBtn: opened.copyBtn }));
+      JSON.stringify({ cmd: opened.cmd, copyBtn: opened.copyBtn }));    // Plan 9 B7: the collector also finds Cowork and the Plan 9 coding tools — Start here says so, by name
+    ok('help (Plan 9 B7): Start here says the collector also finds Cowork (the Claude desktop app\'s agent sessions) and names the Plan 9 coding tools it discovers — OpenCode, Goose, Devin CLI, Kilo Code, Amp, Zed',
+      typeof opened.startHere === 'string' && /Cowork/.test(opened.startHere) && ['OpenCode', 'Goose', 'Devin', 'Kilo Code', 'Amp', 'Zed'].every(t => opened.startHere.includes(t)), JSON.stringify(opened.startHere));
+    // Plan 9 B7: "Where the numbers come from" opens with one line per honesty class — exact / estimated / validate-only / link-only / experimental, each a <li> led by a <b>
+    const leads = (opened.numbers || []).map(i => i.lead);
+    ok('help (Plan 9 B7): "Where the numbers come from" lists Exact / Estimated / Validate-only / Link-only / Experimental — one <li> each, in that order, each led by a <b>; the experimental line names Z.ai and MiniMax and says the figures never feed rows, billed amounts or totals; the cost rules follow',
+      JSON.stringify(leads.slice(0, 5)) === JSON.stringify(['Exact', 'Estimated', 'Validate-only', 'Link-only', 'Experimental']) && leads.filter(l => ['Exact', 'Estimated', 'Validate-only', 'Link-only', 'Experimental'].includes(l)).length === 5
+      && (opened.numbers || []).every(i => i.tag === 'LI') && /Z\.ai/.test(opened.numbers[4].text) && /MiniMax/.test(opened.numbers[4].text) && /never/.test(opened.numbers[4].text) && /totals/.test(opened.numbers[4].text)
+      && /4 characters per token/.test(opened.numbers[1].text) && /est\./.test(opened.numbers[1].text) && leads.includes('API-equivalent cost') && leads.includes('Actual billed'), JSON.stringify(leads));
+
     const wantBadges = [['q-exact', 'exact'], ['q-estimated', 'estimated'], ['q-validate', 'validate-only'], ['q-none', 'no data']];
     ok('help (Plan 8): badge legend = the four real .badge.q-* spans with the QUALITY_LABEL texts (exact / estimated / validate-only / no data), plus the green-amber-gray dot legend (dots sized) with the 7-day rule',
       JSON.stringify(opened.badges) === JSON.stringify(wantBadges) && wantBadges.every(([k, t]) => opened.ql[k.slice(2)] === t) && opened.dots.every(Boolean) && opened.dotSized

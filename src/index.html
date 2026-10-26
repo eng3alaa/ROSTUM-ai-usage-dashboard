@@ -81,7 +81,7 @@
     <div class="help-body">
       <h3>Start here</h3>
       <ol>
-        <li><b>Fastest:</b> run the local collector, then click <b>Validate &amp; connect</b> on the <b>Local collector (automatic)</b> card (first card in Coding tools). Every coding tool and local runner it finds on this machine connects by itself.
+        <li><b>Fastest:</b> run the local collector, then click <b>Validate &amp; connect</b> on the <b>Local collector (automatic)</b> card (first card in Coding tools). Every coding tool and local runner it finds on this machine connects by itself: Claude Code and <b>Cowork</b> (the Claude desktop app's agent sessions, kept in the app's data folder, not in <code>.claude</code>), Codex CLI, Copilot CLI, Gemini CLI, Continue, Cline, Roo, Kilo Code, Junie, OpenCode, Goose, Devin CLI, Amp, Zed, LM Studio, Ollama and Jan; Copilot Chat's OTel file too, when <code>COPILOT_OTEL_FILE_EXPORTER_PATH</code> names it.
           <div class="help-cmd"><code id="help-cmd">node docs/tools/ai-usage-collector.mjs</code><button class="btn small" id="help-copy" type="button" title="Copy the command">Copy</button></div></li>
         <li><b>Exact and billed:</b> paste an Anthropic or OpenAI <b>Admin key</b> on its card under API vendors: exact usage plus what you were actually billed.</li>
         <li><b>Chat apps:</b> drop your ChatGPT, Claude.ai, Grok or Gemini Takeout export on <b>Imports</b> (or use the chat app's own card: Import file…).</li>
@@ -96,11 +96,15 @@
       <p><span class="dot ok"></span> connected · <span class="dot warn"></span> needs attention (an error, or the last sync is more than 7 days old) · <span class="dot off"></span> not connected</p>
       <h3>Where the numbers come from</h3>
       <ul>
+        <li><b>Exact</b> rows carry the counts the tool or vendor itself recorded: local session logs, Admin and usage APIs, the usage CSVs a console exports.</li>
+        <li><b>Estimated</b> rows come from text (about 4 characters per token) because the source keeps no counts: chat exports, Aider, JetBrains chat. They are marked <code>est.</code> everywhere and never mix silently with exact ones.</li>
+        <li><b>Validate-only</b> cards confirm your key (and show a balance where the vendor returns one) but add no rows and no dollars: the vendor offers no usage history to a local page.</li>
+        <li><b>Link-only</b> cards (badge <i>no data</i>) add nothing at all; the card says why and links to the vendor's usage page.</li>
+        <li><b>Experimental</b> figures — the Z.ai and MiniMax Coding Plan quota endpoints, reverse-engineered and unverified — appear in that card's status line only and never feed rows, billed amounts or totals.</li>
         <li><b>API-equivalent cost</b> = tokens × the list price for that model (the editable price list). It is what the same usage would cost on the vendor's API: a comparison, not an invoice.</li>
         <li><b>Actual billed</b> comes only from vendors that report money; the two figures are always shown separately.</li>
-        <li>Rows from estimated sources are marked <code>est.</code> and never mix silently with exact ones.</li>
-        <li>Local runners are $0, and so are coding-tool requests that name a local backend (Continue + Ollama, Codex OSS models and the like).</li>
-        <li>A model the price list does not know is priced at the fallback row and named in a notice above the KPIs: never guessed silently.</li>
+        <li><b>Local runners</b> are $0, and so are coding-tool requests that name a local backend (Continue + Ollama, Codex OSS models and the like).</li>
+        <li><b>Unknown models</b>: a model the price list does not know is priced at the fallback row and named in a notice above the KPIs: never guessed silently.</li>
       </ul>
       <h3>How prices work</h3>
       <p>Each row of your data is priced by the first rule that fits: the model id is lowercased and normalised (the vendors' spellings of one Claude model become one id); a retired id is priced as its successor (the Model breakdown says <i>priced as …</i>); a <b>platform override</b> — a host's own rate for a model it bills differently from the vendor (Groq, DeepInfra, SambaNova, Together AI, Cerebras) — beats the vendor row for data from that platform; then the first matching row of the API price list wins; a model no row knows falls to the Unknown model row. The bundled list was verified on <code id="help-prices-date"></code>; the banner above the list counts the days since. To change a price, edit any cell or add a row in the API price list: edits are stored in this browser only, read <i>user</i> in the list and in the breakdown, and carry no verified date. A platform override is a fixed built-in rate that an edit of the vendor row cannot change — the list says <i>wins for &lt;platform&gt;</i> where that applies.</p>

@@ -535,6 +535,40 @@ export async function run({ browser, ok }) {
     ok('focus (review m3): the hidden chip restore never lands on <body> — a restored card inside a collapsed group is skipped: the visible restored card when there is one, else the first visible card in the hub',
       chipFocus.onlyCollapsed.got.isCard && !chipFocus.onlyCollapsed.got.collapsed && chipFocus.onlyCollapsed.got.id === chipFocus.onlyCollapsed.expect && chipFocus.onlyCollapsed.codingCollapsed && chipFocus.onlyCollapsed.chipGone
       && chipFocus.mixed.got.isCard && !chipFocus.mixed.got.collapsed && chipFocus.mixed.got.id === chipFocus.mixed.expect && chipFocus.expanded, JSON.stringify(chipFocus));
+    // ---- Plan 9 B7: the hub at 85 cards — search box, group order and per-group counts, render time over 20 synchronous renders, a name search,
+    //      and the budgets editor listing the Plan 9 platforms once their data exists ----
+    const v9 = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; Budgets.limits = {}; LS.del('budgets'); App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load(); App._hubQuery = ''; document.getElementById('hub-search').value = '';
+      App._render();
+      const total = CONNECTORS.length, rendered = document.querySelectorAll('#accounts-hub .acct').length;
+      const box = document.getElementById('hub-search');
+      const groups = [...document.querySelectorAll('#accounts-hub .hub-group')].map(g => g.dataset.group);
+      const counts = Object.fromEntries(groups.map(g => [g, document.querySelectorAll(`#accounts-hub .hub-group[data-group="${g}"] .acct`).length]));
+      // perf: 20 synchronous renderHub() calls with every card present (every card disconnected = the cold-start shape; the CI runner is slower than a laptop)
+      const times = []; for (let i = 0; i < 20; i++) { const a = performance.now(); App.renderHub(); times.push(performance.now() - a); }
+      const avgMs = times.reduce((a, b) => a + b, 0) / times.length, maxMs = Math.max(...times);
+      // search still narrows by name at 85 cards
+      App._hubQuery = 'poe'; App._render();
+      const poe = [...document.querySelectorAll('#accounts-hub .acct')].map(c => c.dataset.connector);
+      App._hubQuery = ''; App._render();
+      // budgets editor: Plan 9 platforms appear once their data exists — once each, and not before (Zed is a coding tool, Poe a chat app, DeepInfra an API vendor)
+      App.renderBudgets();
+      const before = [...document.querySelectorAll('#budget-editor .budget-row')].map(r => r.dataset.platform);
+      const seed = [['zed', 'Zed', 'claude-sonnet-5'], ['poe', 'Poe', 'Claude-Sonnet-5'], ['deepinfra', 'DeepInfra', 'meta-llama/Llama-3.3-70B-Instruct']];
+      for (const [id, platform, model] of seed) Store.setSource(id, [{ d: dayKey(new Date()), platform, model, in: 1000, cw: 0, cr: 0, out: 100, msgs: 1 }], {});
+      App.renderBudgets();
+      const after = [...document.querySelectorAll('#budget-editor .budget-row')].map(r => r.dataset.platform);
+      const once = Object.fromEntries(seed.map(([, p]) => [p, after.filter(x => x === p).length]));
+      Store.sources = {}; Store.persist(); App.renderBudgets(); App._render();
+      return { total, rendered, boxShown: !box.hidden, groups, counts, avgMs, maxMs, poe, before, once };
+    });
+    ok('hub (B7): 85 registry cards all render; the search box is visible; the five groups come in spec order with coding 29 / chat 18 / local 8 / api 27 / cloud 3 cards',
+      v9.total === 85 && v9.rendered === 85 && v9.boxShown && JSON.stringify(v9.groups) === JSON.stringify(['coding', 'chat', 'local', 'api', 'cloud'])
+      && JSON.stringify(v9.counts) === JSON.stringify({ coding: 29, chat: 18, local: 8, api: 27, cloud: 3 }), JSON.stringify({ total: v9.total, rendered: v9.rendered, boxShown: v9.boxShown, groups: v9.groups, counts: v9.counts }));
+    ok('hub (B7): renderHub() averages under 80 ms over 20 synchronous runs with all 85 cards present (generous for the CI runner)', v9.avgMs < 80, `avg ${v9.avgMs.toFixed(1)} ms · max ${v9.maxMs.toFixed(1)} ms`);
+    ok('hub (B7): a name search for "poe" narrows the hub to the Poe card alone', JSON.stringify(v9.poe) === JSON.stringify(['poe']), JSON.stringify(v9.poe));
+    ok('budgets (B7): the editor lists a Plan 9 platform once its data exists — Zed, Poe, DeepInfra each once, none of them before',
+      ['Zed', 'Poe', 'DeepInfra'].every(p => !v9.before.includes(p)) && JSON.stringify(v9.once) === JSON.stringify({ Zed: 1, Poe: 1, DeepInfra: 1 }), JSON.stringify({ before: v9.before, once: v9.once }));
   } finally {
     await page.close();
   }
