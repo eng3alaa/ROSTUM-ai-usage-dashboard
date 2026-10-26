@@ -31,7 +31,7 @@ async function parseContinueDevData(files, onProgress) {
  *  Cline's Anthropic-protocol rows are exclusive (additive), its OpenAI-compatible handlers store inclusive
  *  prompt_tokens (apiProtocol 'openai', or absent with a non-Anthropic provider). Inclusive rows → in = tokensIn -
  *  cacheReads - cacheWrites, but only when tokensIn >= cr + cw (a row that is evidently exclusive keeps its real input).
- *  Platform = connector.platform ('Cline' | 'Roo Code'). Dedupe by taskId:ts.
+ *  Platform = connector.platform ('Cline' | 'Roo Code' | 'Kilo Code' — Plan 9 B5: Kilo is a Roo fork under its own card / globalStorage root). Dedupe by taskId:ts.
  *  meta.extCost = sum of the extension's own cost estimates (informational only). */
 const _clineMetaIndex = new WeakMap();   // siblingFiles array → Map(dir → task_metadata.json File)
 async function parseClineTasks(files, onProgress, seen = new Set(), c, siblingFiles) {
@@ -57,7 +57,7 @@ async function parseClineTasks(files, onProgress, seen = new Set(), c, siblingFi
       if (t == null || Number.isNaN(t)) return usage[usage.length - 1];
       let u = usage[0]; for (const e of usage) { if (e.ts <= t) u = e; else break; } return u;
     };
-    const isRoo = c && c.id === 'roo';
+    const isRoo = !!c && /^(roo|kilo)$/.test(c.id);   // Roo Code and its fork Kilo Code (Plan 9 B5) store tokensIn inclusive of cache on both protocols
     let arr; try { arr = JSON.parse(await file.text()); } catch { badLines++; continue; }
     if (!Array.isArray(arr)) { badLines++; continue; }
     lines++;

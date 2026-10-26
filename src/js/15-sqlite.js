@@ -119,3 +119,15 @@ function readSqliteTable(buffer, tableName) {
   return { columns, rows };
 }
 
+/** A SQLite timestamp cell → Date (the fallback when it cannot be read): ISO text, SQLite CURRENT_TIMESTAMP text 'YYYY-MM-DD HH:MM:SS[.ffffff]'
+ *  (UTC — no zone is written), unix seconds or milliseconds (number or digit string). Shared by the Ollama, Goose and Devin CLI parsers. */
+function sqliteTimestamp(v, fallback) {
+  if (typeof v === 'string' && /^\d{9,13}(\.\d+)?$/.test(v.trim())) v = +v;
+  if (typeof v === 'number' && Number.isFinite(v) && v > 0) return new Date(v < 1e12 ? v * 1000 : v);   // unix seconds vs milliseconds
+  if (typeof v === 'string') {
+    let s = v.trim().replace(/^(\d{4}-\d{2}-\d{2}) (\d)/, '$1T$2').replace(/(\.\d{3})\d+/, '$1');        // 'YYYY-MM-DD HH:MM:SS[.ffffff][zone]' → ISO, ≤ 3 fraction digits
+    if (/^\d{4}-\d{2}-\d{2}T/.test(s) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) s += 'Z';                   // SQLite CURRENT_TIMESTAMP / Go UTC text carry no zone → UTC
+    const d = new Date(s); if (!isNaN(d)) return d;
+  }
+  return new Date(fallback);
+}

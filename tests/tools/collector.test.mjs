@@ -119,12 +119,29 @@ export function seedHome(HOME = HOME_DEFAULT) {
   fs.writeFileSync(path.join(HOME, '.codex', 'sessions', 'notes.yaml'), 'not: a log\n');
 }
 
+// Plan 9 B5 — the Wave 3 coding tools' standard folders, seeded from the out/wave3 fixtures (gen.mjs). Kept out of seedHome because 89c's
+// end-to-end block asserts the found-tool count of seedHome alone. Windows layout (the suite runs on win32; APPDATA = LOCALAPPDATA = HOME here):
+//   opencode  ~/.local/share/opencode/opencode.db + storage/message/<sid>/msg_*.json (legacy JSON) — snapshot/ is OpenCode's git object store (never walked)
+//   goose     <APPDATA>/Block/goose/sessions/sessions.db · devin <APPDATA>/devin/cli/sessions.db · kilo <APPDATA>/Code/User/globalStorage/kilocode.kilo-code
+//   amp       ~/.local/share/amp/threads/*.json — the root is threads/ itself, so history.jsonl (prompt text) and session.json beside it are never listed
+export function seedWave3(HOME = HOME_DEFAULT) {
+  const W3 = path.join(OUT_DIR, 'wave3');
+  fs.cpSync(path.join(W3, 'opencode'), path.join(HOME, '.local', 'share', 'opencode'), { recursive: true });
+  fs.mkdirSync(path.join(HOME, '.local', 'share', 'opencode', 'snapshot', 'prj_1', 'objects', 'ab'), { recursive: true });
+  fs.writeFileSync(path.join(HOME, '.local', 'share', 'opencode', 'snapshot', 'prj_1', 'objects', 'ab', 'cdef.json'), '{"not":"a log"}\n');
+  fs.cpSync(path.join(W3, 'goose', 'sessions'), path.join(HOME, 'Block', 'goose', 'sessions'), { recursive: true });
+  fs.cpSync(path.join(W3, 'devin', 'cli'), path.join(HOME, 'devin', 'cli'), { recursive: true });
+  fs.cpSync(path.join(W3, 'kilo', 'tasks'), path.join(HOME, 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks'), { recursive: true });
+  fs.cpSync(path.join(W3, 'amp'), path.join(HOME, '.local', 'share', 'amp'), { recursive: true });
+}
+
 export async function run() {
   const results = [];
   const add = (name, pass, detail = '') => results.push({ name, pass: !!pass, detail: String(detail) });
   const summary = () => ({ pass: results.every((r) => r.pass), detail: results.filter((r) => !r.pass).map((r) => r.name + ': ' + r.detail).join(' | '), results });
   if (!fs.existsSync(path.join(OUT_DIR, 'codex', 'sessions'))) { const { generate } = await import('../fixtures/gen.mjs'); await generate(); }   // standalone run before the suite ever generated fixtures
   seedHome();
+  seedWave3();
   let a = null, b = null, c = null;
   const HOME_CW = path.join(OUT_DIR, `collector-cowork-${process.pid}`);   // B1 block: its own HOME (APPDATA / LOCALAPPDATA point at it too — see start())
   try {
@@ -173,8 +190,33 @@ export async function run() {
         && ['local', 'codex', 'copilot-cli', 'gemini-cli'].every(watchOk),
       JSON.stringify({ codex: tool('codex'), local: { watch: tool('local').watch, walkMs: tool('local').walkMs } }).slice(0, 800));
     const ids = (sj.tools || []).map((t) => t.id);
-    add('collector: status names every registry folder connector by its id (local, codex, copilot-cli, gemini-cli, continue, cline, roo, junie, lmstudio, ollama, jan) plus aider / tgwebui as --root-only',
-      ['local', 'codex', 'copilot-cli', 'gemini-cli', 'continue', 'cline', 'roo', 'junie', 'lmstudio', 'ollama', 'jan', 'aider', 'tgwebui'].every((id) => ids.includes(id)), ids.join(','));
+    add('collector: status names every registry folder connector by its id (local, codex, copilot-cli, gemini-cli, continue, cline, roo, junie, lmstudio, ollama, jan + Plan 9 B5 opencode, goose, devin, kilo, amp) plus aider / tgwebui as --root-only',
+      ['local', 'codex', 'copilot-cli', 'gemini-cli', 'continue', 'cline', 'roo', 'junie', 'lmstudio', 'ollama', 'jan', 'opencode', 'goose', 'devin', 'kilo', 'amp', 'aider', 'tgwebui'].every((id) => ids.includes(id)), ids.join(','));
+    // ---------------------------------------------------------------- Plan 9 B5: Wave 3 coding tools (seedWave3) ----------------------------------------------------------------
+    const w3 = (id) => tool(id);
+    const w3Roots = (id) => (w3(id).roots || []).map((r) => path.resolve(r));
+    add('collector (B5): /api/status → opencode (3 files: opencode.db + the two legacy msg_*.json; snapshot/ git objects never walked), goose (1), devin (1), kilo (4 — two tasks) and amp (3 threads; history.jsonl / session.json beside threads/ never listed) found under their standard roots; roo NOT found (kilocode.kilo-code is kilo\'s root now, not roo\'s)',
+      found('opencode', 3) && w3Roots('opencode')[0] === path.join(HOME, '.local', 'share', 'opencode')
+        && found('goose', 1) && w3Roots('goose')[0] === path.join(HOME, 'Block', 'goose', 'sessions')
+        && found('devin', 1) && w3Roots('devin')[0] === path.join(HOME, 'devin', 'cli')
+        && found('kilo', 4) && w3Roots('kilo')[0] === path.join(HOME, 'Code', 'User', 'globalStorage', 'kilocode.kilo-code')
+        && found('amp', 3) && w3Roots('amp')[0] === path.join(HOME, '.local', 'share', 'amp', 'threads')
+        && w3('roo').found === false && w3('roo').files === 0,
+      JSON.stringify(['opencode', 'goose', 'devin', 'kilo', 'amp', 'roo'].map((id) => [id, w3(id).found, w3(id).files, w3(id).roots])));
+    const w3List = async (id) => ((asJson(await API('/api/list?tool=' + id)) || {}).files || []).map((f) => f.path).sort();
+    const ocPaths = await w3List('opencode'), ampPaths = await w3List('amp'), kiloPaths = await w3List('kilo'), gooseList = await w3List('goose'), devinList = await w3List('devin');
+    add('collector (B5): /api/list → opencode ["opencode.db", "storage/message/ses_s1/msg_a1.json", …] (.db passes the extension allow-list; nothing under snapshot/), goose ["sessions.db"], devin ["sessions.db"], kilo tasks/<id>/{ui_messages,task_metadata}.json, amp ["T-abc.json","T-bad.json","T-nol.json"] — no history.jsonl, no session.json',
+      JSON.stringify(ocPaths) === JSON.stringify(['opencode.db', 'storage/message/ses_s1/msg_a1.json', 'storage/message/ses_s2/msg_a7.json']) && JSON.stringify(gooseList) === '["sessions.db"]' && JSON.stringify(devinList) === '["sessions.db"]'
+        && kiloPaths.length === 4 && kiloPaths.every((p) => /^tasks\/1786353[01]00000\/(ui_messages|task_metadata)\.json$/.test(p))
+        && JSON.stringify(ampPaths) === JSON.stringify(['T-abc.json', 'T-bad.json', 'T-nol.json']),
+      JSON.stringify({ ocPaths, gooseList, devinList, kiloPaths, ampPaths }));
+    const gooseWant = fs.readFileSync(path.join(HOME, 'Block', 'goose', 'sessions', 'sessions.db'));
+    const gooseGet = await API('/api/file?tool=goose&path=sessions.db');
+    const snapGet = await API('/api/file?tool=opencode&path=' + encodeURIComponent('snapshot/prj_1/objects/ab/cdef.json'));
+    const histGet = await API('/api/file?tool=amp&path=history.jsonl');
+    add('collector (B5): /api/file streams a SQLite store byte-exact (goose sessions.db, binary, SQLite header intact); a file under opencode\'s snapshot/ and amp\'s history.jsonl (outside the threads/ root) answer 404',
+      gooseGet.status === 200 && gooseGet.body.equals(gooseWant) && gooseWant.subarray(0, 15).toString('latin1') === 'SQLite format 3' && snapGet.status === 404 && histGet.status === 404,
+      `goose ${gooseGet.status} ${gooseGet.body.length}/${gooseWant.length} bytes · snapshot ${snapGet.status} · history ${histGet.status}`);
 
     const ls = await API('/api/list?tool=codex');
     const lj = asJson(ls) || {};

@@ -8,16 +8,6 @@
 async function parseOllamaDb(files, onProgress, seen = new Set(), c, siblingFiles) {
   const agg = makeAgg(); const addedIds = [], dupIds = []; let msgs = 0, lines = 0;
   const list = files.filter(f => /(^|\/)db\.sqlite$/i.test(f.path));
-  const when = (v, fallback) => {
-    if (typeof v === 'string' && /^\d{9,13}(\.\d+)?$/.test(v.trim())) v = +v;
-    if (typeof v === 'number' && Number.isFinite(v) && v > 0) return new Date(v < 1e12 ? v * 1000 : v);   // unix seconds vs milliseconds
-    if (typeof v === 'string') {
-      let s = v.trim().replace(/^(\d{4}-\d{2}-\d{2}) (\d)/, '$1T$2').replace(/(\.\d{3})\d+/, '$1');        // 'YYYY-MM-DD HH:MM:SS[.ffffff][zone]' → ISO, ≤ 3 fraction digits
-      if (/^\d{4}-\d{2}-\d{2}T/.test(s) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) s += 'Z';                   // SQLite CURRENT_TIMESTAMP / Go UTC text carry no zone → UTC
-      const d = new Date(s); if (!isNaN(d)) return d;
-    }
-    return new Date(fallback);
-  };
   for (let fi = 0; fi < list.length; fi++) {
     const { file } = list[fi];
     const table = readSqliteTable(await file.arrayBuffer(), 'messages');   // throws on a bad file (see above)
@@ -35,7 +25,7 @@ async function parseOllamaDb(files, onProgress, seen = new Set(), c, siblingFile
       const id = 'ollama-db:' + String(get(r, 'id') ?? (fi + ':' + lines));
       if (seen.has(id)) { dupIds.push(id); continue; }
       seen.add(id); addedIds.push(id);
-      const ts = when(get(r, 'created_at'), file.lastModified);
+      const ts = sqliteTimestamp(get(r, 'created_at'), file.lastModified);
       agg.add(dayKey(ts), (c && c.platform) || 'Ollama', String(get(r, 'model_name') || 'ollama'),
         { in: estTok((lastUser.get(chat) || '').length), out: estTok(text.length + String(get(r, 'thinking') ?? '').length), msgs: 1, est: 1 },
         'ollama-db:' + chat, ts.getHours());

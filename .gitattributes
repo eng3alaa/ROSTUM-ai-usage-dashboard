@@ -3,3 +3,5 @@
 # Blobs stay LF-normalised in the repository like every other text file here.
 "AI Usage Dashboard.html" text eol=crlf
 src/** text eol=crlf
+# Plan 9 B5: committed SQLite fixtures (OpenCode / Goose / Devin CLI) — never line-ending normalised
+tests/fixtures/sqlite/*.db binary

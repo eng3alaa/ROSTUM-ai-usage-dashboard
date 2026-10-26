@@ -18,7 +18,10 @@
  *           --html <path>           the dashboard file to serve at /  (default: ../../AI Usage Dashboard.html next to this script)
  *           --help
  * Tool ids = the dashboard's connector ids: local (Claude Code / Desktop), codex, copilot-cli, gemini-cli, continue, cline, roo,
- *           junie, lmstudio, ollama, jan, aider, tgwebui.
+ *           junie, lmstudio, ollama, jan, opencode, goose, devin, kilo, amp (Plan 9 B5), aider, tgwebui.
+ *           Plan 9 B5 roots: opencode = the OpenCode data dir (its snapshot/ git object store, bin/, log/ and cache/ are never walked — skipDirs);
+ *           goose = <data>/goose/sessions (sessions.db); devin = <data>/devin/cli (sessions.db); kilo = the kilocode.kilo-code globalStorage folder
+ *           (its own tool now — it used to be roo's second root); amp = <data>/amp/threads itself, so history.jsonl (prompt text) beside it is never listed.
  *
  * Discovery is per tool folder, not per home: codex reads ~/.codex/sessions and ~/.codex/archived_sessions only (the rest of ~/.codex is
  * tens of thousands of unrelated files). A tool with two roots prefixes every path with the root's folder name ("sessions/2026/…",
@@ -89,7 +92,8 @@ const HOME = os.homedir();
 const PLAT = process.platform;
 const env = (k) => (process.env[k] || '').trim();
 const APPDATA = env('APPDATA') || path.join(HOME, 'AppData', 'Roaming');
-const LOCALAPPDATA = env('LOCALAPPDATA') || path.join(HOME, 'AppData', 'Local');
+const LOCALAPPDATA = env('LOCALAPPDATA') || path.join(HOME, 'AppData', 'Local');const XDG_DATA = env('XDG_DATA_HOME') || path.join(HOME, '.local', 'share');   // the XDG data dir — also what OpenCode / Amp use on Windows (%USERPROFILE%\.local\share)
+
 const EDITORS = ['Code', 'Code - Insiders', 'Cursor', 'Windsurf', 'VSCodium'];
 const editorUserDirs = PLAT === 'win32' ? EDITORS.map((n) => path.join(APPDATA, n, 'User'))
   : PLAT === 'darwin' ? EDITORS.map((n) => path.join(HOME, 'Library', 'Application Support', n, 'User'))
@@ -133,11 +137,17 @@ const TABLE = [
   { id: 'gemini-cli',  name: 'Gemini CLI',                      groups: [[env('GEMINI_CLI_HOME') || path.join(HOME, '.gemini')]] },
   { id: 'continue',    name: 'Continue.dev',                    groups: [[path.join(HOME, '.continue')]] },
   { id: 'cline',       name: 'Cline (VS Code)',                 groups: [extStorage('saoudrizwan.claude-dev')] },
-  { id: 'roo',         name: 'Roo Code (VS Code)',              groups: [extStorage('rooveterinaryinc.roo-cline'), extStorage('kilocode.kilo-code')] },
+  { id: 'roo',         name: 'Roo Code (VS Code)',              groups: [extStorage('rooveterinaryinc.roo-cline')] },   // kilocode.kilo-code moved to its own tool (kilo, Plan 9 B5)
   { id: 'junie',       name: 'JetBrains AI Assistant / Junie',  groups: () => [[path.join(HOME, '.junie')], ...matterhornDirs().map((d) => [d])] },
   { id: 'lmstudio',    name: 'LM Studio',                       groups: [[path.join(HOME, '.lmstudio', 'conversations'), path.join(HOME, '.cache', 'lm-studio', 'conversations')]] },
   { id: 'ollama',      name: 'Ollama',                          groups: [[path.join(HOME, '.ai-usage')], [PLAT === 'win32' ? path.join(LOCALAPPDATA, 'Ollama') : PLAT === 'darwin' ? path.join(HOME, 'Library', 'Application Support', 'Ollama') : path.join(HOME, '.ollama')]] },
   { id: 'jan',         name: 'Jan',                             groups: [[PLAT === 'win32' ? path.join(APPDATA, 'Jan', 'data') : PLAT === 'darwin' ? path.join(HOME, 'Library', 'Application Support', 'Jan', 'data') : path.join(HOME, '.local', 'share', 'Jan', 'data')]] },
+  // Plan 9 B5 — Wave 3 coding tools (paths per the research; none installed on the research machine). skipDirs: folders under the root that hold no logs.
+  { id: 'opencode',    name: 'OpenCode',                        groups: [[env('OPENCODE_DATA_DIR'), env('OPENCODE_HOME'), path.join(XDG_DATA, 'opencode'), ...(PLAT === 'win32' ? [path.join(APPDATA, 'opencode')] : [])].filter(Boolean)], skipDirs: ['snapshot', 'bin', 'log', 'cache'] },
+  { id: 'goose',       name: 'Goose',                           groups: [[PLAT === 'win32' ? path.join(APPDATA, 'Block', 'goose', 'sessions') : path.join(XDG_DATA, 'goose', 'sessions')]] },
+  { id: 'devin',       name: 'Devin CLI',                       groups: [[env('DEVIN_DATA_DIR'), PLAT === 'win32' ? path.join(APPDATA, 'devin', 'cli') : PLAT === 'darwin' ? path.join(HOME, 'Library', 'Application Support', 'devin', 'cli') : path.join(XDG_DATA, 'devin', 'cli')].filter(Boolean)] },
+  { id: 'kilo',        name: 'Kilo Code (VS Code)',             groups: [extStorage('kilocode.kilo-code')] },
+  { id: 'amp',         name: 'Amp',                             groups: [[env('AMP_DATA_DIR'), path.join(HOME, '.local', 'share', 'amp'), ...(PLAT === 'win32' ? [path.join(LOCALAPPDATA, 'amp')] : [])].filter(Boolean).map((d) => path.join(d, 'threads'))] },
   { id: 'aider',       name: 'Aider',                           groups: [] },   // per-repo files — --root <folder that holds your repos> only
   { id: 'tgwebui',     name: 'text-generation-webui',           groups: [] },   // install folder — --root <install or user_data> only
 ];
@@ -226,7 +236,8 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'checkpoints']);
 // .project-cache/ (documents the user attached), session-env/, backups/ (.claude.json copies). Not logs: never walked, never served (B1 follow-up).
 const COWORK_SKIP_DIRS = new Set(['outputs', 'uploads', 'uploads-tmp', '.project-cache', 'session-env', 'backups']);
 const isCoworkRoot = (dir) => dir.split(/[\\/]/).includes(COWORK_DIR);
-const skipsDir = (rootDir, name) => SKIP_DIRS.has(name) || (isCoworkRoot(rootDir) && COWORK_SKIP_DIRS.has(name.toLowerCase()));
+// toolSkip: a tool's own skipDirs (TABLE) — folders under its root that hold no logs (OpenCode's snapshot/ git object store, Plan 9 B5); walked by neither walkRoot nor resolveFile
+const skipsDir = (rootDir, name, toolSkip) => SKIP_DIRS.has(name) || (isCoworkRoot(rootDir) && COWORK_SKIP_DIRS.has(name.toLowerCase())) || (!!toolSkip && toolSkip.includes(name.toLowerCase()));
 const TTL_MS = 30000;       // polling fallback only
 const DEBOUNCE_MS = 2000;
 const STAT_BATCH = 64;      // stats per Promise.all (the thread pool overlaps them: ~4× faster than one at a time on Windows)
@@ -247,7 +258,7 @@ function resolveRoots(t) {
 
 // recursive walk of one root: regular files only, no symlinks, skip dirs by name; paths relative with forward slashes. Async and
 // non-blocking: one readdir per directory, stats in parallel batches, an explicit yield every YIELD_EVERY entries.
-async function walkRoot(dir, prefix) {
+async function walkRoot(dir, prefix, toolSkip) {
   const files = []; let bytes = 0, newest = 0, sinceYield = 0;
   const stack = [''];
   while (stack.length) {
@@ -257,7 +268,7 @@ async function walkRoot(dir, prefix) {
     const names = [];
     for (const e of ents) {
       if (e.isSymbolicLink()) continue;
-      if (e.isDirectory()) { if (!skipsDir(dir, e.name)) stack.push(rel ? rel + '/' + e.name : e.name); continue; }
+      if (e.isDirectory()) { if (!skipsDir(dir, e.name, toolSkip)) stack.push(rel ? rel + '/' + e.name : e.name); continue; }
       if (!e.isFile()) continue;
       if (isTokenFile(path.join(abs, e.name))) continue;   // the token file is never listed (resolveFile refuses to serve it too)
       if (!servable(e.name)) continue;                     // extension allow-list + credential deny-list (A0 #17; resolveFile applies the same rule)
@@ -332,7 +343,7 @@ async function walkTool(t, s) {
   armWatchers(t, s, roots);
   const multi = roots.length > 1;
   let files = [], bytes = 0, newest = 0;
-  for (const r of roots) { const w = await walkRoot(r.dir, multi ? r.label + '/' : ''); files = files.concat(w.files); bytes += w.bytes; if (w.newest > newest) newest = w.newest; }
+  for (const r of roots) { const w = await walkRoot(r.dir, multi ? r.label + '/' : '', t.skipDirs); files = files.concat(w.files); bytes += w.bytes; if (w.newest > newest) newest = w.newest; }
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   Object.assign(s, { roots, candidates, found: roots.length > 0, files, bytes, newestMtime: files.length ? newest : null, scannedAt: Date.now(), walkMs: Date.now() - t0 });
 }
@@ -362,7 +373,7 @@ async function resolveFile(t, relIn) {
   else { root = s.roots[0].dir; rest = segs; }
   const abs = path.resolve(root, ...rest);
   if (!inside(abs, root)) return { status: 400, error: 'path resolves outside the tool folder' };
-  if (rest.slice(0, -1).some((sg) => skipsDir(root, sg))) return { status: 404, error: 'file not found' };   // a skipped folder (a Cowork session's outputs/, uploads/, …) is never served — same answer as a missing file
+  if (rest.slice(0, -1).some((sg) => skipsDir(root, sg, t.skipDirs))) return { status: 404, error: 'file not found' };   // a skipped folder (a Cowork session's outputs/, uploads/, …) is never served — same answer as a missing file
   if (isTokenFile(abs)) return { status: 404, error: 'file not found' };   // the token file is never served: ollama's first root is ~/.ai-usage, where it lives
   if (!servable(path.basename(abs))) return { status: 404, error: 'file not found' };   // not a usage-log type, or a credential file by name (A0 #17) — same answer as a missing file
   let st; try { st = await fsp.lstat(abs); } catch { return { status: 404, error: 'file not found' }; }

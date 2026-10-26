@@ -735,6 +735,61 @@ export async function generate() {
     '2026-10,,1234567890,bailian,Alibaba Cloud Model Studio,Model Studio,text_token;llm-ws1;qwen-turbo;input_token;app,Large Model Text Consumption,PayAsYouGo,7000,Token,0.01,0.00,0.01,USD,ap-southeast-1',
     '2026-10,2026-10-06 00:00:00,1234567890,oss,Object Storage Service,OSS,oss-bucket-1,Storage,PayAsYouGo,5,GB,0.50,0.00,0.50,USD,ap-southeast-1',
   ].join('\n') + '\n');
+  // ---- Plan 9 B5 — Wave 3 coding tools: OpenCode, Goose, Devin CLI (SQLite), Kilo Code (Roo layout), Amp (thread JSON). The .db files are
+  //   COMMITTED binaries under tests/fixtures/sqlite/ (regenerate with node tests/fixtures/sqlite/gen-sqlite.mjs; expected totals documented there)
+  //   and copied here so the suite never needs node:sqlite. Paths mirror the tools' real folders so collector.test.mjs can seed a HOME from them.
+  const SQLITE_DIR = path.join(import.meta.dirname, 'sqlite');
+  const copyDb = (name, rel) => { const p = path.join(OUT, ...rel.split('/')); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.copyFileSync(path.join(SQLITE_DIR, name), p); };
+  copyDb('opencode.db', 'wave3/opencode/opencode.db');
+  copyDb('opencode-v2.db', 'wave3/opencode-v2/opencode.db');
+  copyDb('goose-sessions.db', 'wave3/goose/sessions/sessions.db');
+  copyDb('devin-sessions.db', 'wave3/devin/cli/sessions.db');
+  // OpenCode ≤ 1.1 legacy layout kept beside the DB after the 1.2 migration: storage/message/<sessionID>/msg_<id>.json (ccusage's opencode family).
+  //   msg_a1 duplicates the DB's msg_a1 (same id → dupIds, never double counted); msg_a7 exists only here → in=10 out=2 (claude-sonnet-4-5, ~/web, 2026-09-05).
+  const ocMsg = (o) => JSON.stringify({ role: 'assistant', mode: 'build', ...o });
+  w('wave3/opencode/storage/message/ses_s1/msg_a1.json', ocMsg({ id: 'msg_a1', sessionID: 'ses_s1', modelID: 'claude-sonnet-4-5', providerID: 'anthropic', path: { cwd: 'D:\\proj-oc', root: 'D:\\proj-oc' },
+    cost: 0.0123, tokens: { input: 1000, output: 200, reasoning: 0, cache: { read: 300, write: 50 } }, time: { created: T('2026-09-10T09:00:00Z'), completed: T('2026-09-10T09:00:09Z') } }));
+  w('wave3/opencode/storage/message/ses_s2/msg_a7.json', ocMsg({ id: 'msg_a7', sessionID: 'ses_s2', modelID: 'claude-sonnet-4-5', providerID: 'anthropic', path: { cwd: '/home/me/web', root: '/home/me/web' },
+    cost: 0.0001, tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: T('2026-09-05T09:00:00Z'), completed: T('2026-09-05T09:00:01Z') } }));
+  // Kilo Code — Roo's task layout under globalStorage/kilocode.kilo-code/tasks (same parser, platform "Kilo Code"; tokensIn inclusive of cache like Roo):
+  //   task …3000000: openai-protocol tokensIn 3000 cw 100 cr 900 out 60 → in=2000 (claude-sonnet-4.5 via openrouter) · task …3100000: tokensIn 400 out 40 → local:1 (qwen3:14b via ollama)
+  //   ⇒ in=2400 cw=100 cr=900 out=100 msgs=2.
+  w('wave3/kilo/tasks/1786353000000/ui_messages.json', JSON.stringify([
+    { ts: T('2026-09-18T09:00:00.000Z'), type: 'say', say: 'text', text: 'kilo task' },
+    req(T('2026-09-18T09:00:05.000Z'), { request: '…', tokensIn: 3000, tokensOut: 60, cacheWrites: 100, cacheReads: 900, cost: 0.02, apiProtocol: 'openai' }),
+  ], null, 1));
+  w('wave3/kilo/tasks/1786353000000/task_metadata.json', JSON.stringify({ files_in_context: [], model_usage: [{ ts: T('2026-09-18T09:00:00.000Z'), model_id: 'claude-sonnet-4.5', model_provider_id: 'openrouter', mode: 'code' }] }));
+  w('wave3/kilo/tasks/1786353100000/ui_messages.json', JSON.stringify([
+    req(T('2026-09-18T21:00:05.000Z'), { request: '…', tokensIn: 400, tokensOut: 40, cacheWrites: 0, cacheReads: 0, cost: 0 }),
+  ], null, 1));
+  w('wave3/kilo/tasks/1786353100000/task_metadata.json', JSON.stringify({ files_in_context: [], model_usage: [{ ts: T('2026-09-18T21:00:00.000Z'), model_id: 'qwen3:14b', model_provider_id: 'ollama', mode: 'code' }] }));
+  // Amp — threads/**/*.json (CodeBurn shape: messages[].messageId/usage{inputTokens,outputTokens,cacheCreationInputTokens,cacheReadInputTokens,totalTokens},
+  //   usageLedger.events[]{id,timestamp,model,tokens{input,output,total},toMessageId,credits}).
+  //   T-abc (ledger): e1 in=1200 out=400 + cache from m-a1 (cw 200 cr 3000; total 4800 fully accounted) · e2 in=800 out=150, total 960 → the 10 unaccounted
+  //   tokens join output (out 160) · e2 repeated (dupIds 1) · e3 tokens not an object (badLines 1) ⇒ in=2000 out=560 cw=200 cr=3000 msgs=2 credits=19.
+  //   T-nol (no ledger → messages[].usage): n-a1 gpt-5.4 in=300 out=80 at its timestamp · n-a2 no model / no timestamp → "unknown", file date, in=5 out=1.
+  //   T-bad is not JSON (badLines) · session.json at the data-dir root is valid JSON but not a thread (meta.skippedFiles, never an error).
+  //   Folder totals: in=2305 out=641 cw=200 cr=3000 msgs=4 badLines=2 skippedFiles=1 credits=19.
+  const ampEvent = (id, timestamp, tokens, toMessageId, credits) => ({ id, timestamp, model: 'claude-sonnet-4-5', tokens, toMessageId, credits });
+  w('wave3/amp/threads/T-abc.json', JSON.stringify({ id: 'T-abc', title: 'wire the ledger', messages: [
+    { messageId: 'm-u1', role: 'user', content: [{ type: 'text', text: 'hi' }] },
+    { messageId: 'm-a1', role: 'assistant', content: [{ type: 'text', text: 'hello' }], usage: { inputTokens: 1200, outputTokens: 400, cacheCreationInputTokens: 200, cacheReadInputTokens: 3000, totalTokens: 4800 } },
+    { messageId: 'm-a2', role: 'assistant', content: [{ type: 'text', text: 'done' }], usage: { inputTokens: 800, outputTokens: 150, totalTokens: 950 } },
+  ], usageLedger: { events: [
+    ampEvent('e1', '2026-09-16T09:00:00.000Z', { input: 1200, output: 400, total: 4800 }, 'm-a1', 12),
+    ampEvent('e2', T('2026-09-16T21:00:00.000Z'), { input: 800, output: 150, total: 960 }, 'm-a2', 7),
+    ampEvent('e2', T('2026-09-16T21:00:00.000Z'), { input: 800, output: 150, total: 960 }, 'm-a2', 7),   // the thread file is rewritten on every update — a repeated event id counts once
+    ampEvent('e3', '2026-09-16T22:00:00.000Z', 'n/a', 'm-a2', 1),
+  ] } }, null, 1));
+  w('wave3/amp/threads/T-nol.json', JSON.stringify({ id: 'T-nol', messages: [
+    { messageId: 'n-u1', role: 'user', content: [{ type: 'text', text: 'no ledger here' }] },
+    { messageId: 'n-a1', role: 'assistant', model: 'gpt-5.4', timestamp: T('2026-09-17T10:00:00.000Z'), content: [], usage: { inputTokens: 300, outputTokens: 80, totalTokens: 380 } },
+    { messageId: 'n-a2', role: 'assistant', content: [], usage: { inputTokens: 5, outputTokens: 1 } },
+  ] }, null, 1));
+  w('wave3/amp/threads/T-bad.json', '{"id":"T-bad","messages":[{"role":"assistant","usage":{"inputTokens":');   // truncated write → not JSON
+  w('wave3/amp/session.json', JSON.stringify({ lastThreadId: 'T-abc', agentMode: 'smart' }));
+  w('wave3/amp/history.jsonl', jl({ text: 'fix the build', cwd: 'D:\\proj-amp', timestamp: '2026-09-16T08:59:00.000Z' }) + '\n');   // one line per prompt: text, cwd — never a token log
+
   // T14 (4b) — Ollama desktop-app db.sqlite (schema subset of ollama/app/store/schema.sql). Needs node:sqlite; when it is unavailable nothing is
   //   written and 87b's ollama-db block reports itself skipped. One chat, 2 user + 2 assistant messages. m2's record is 6000 + 400 chars → it
   //   exceeds one 4096-byte page → overflow page. created_at shapes: ISO 'Z' text (m1/m2), SQLite 'YYYY-MM-DD HH:MM:SS' (m3, UTC), unix-seconds
