@@ -1,5 +1,7 @@
 # ROSTUM - AI Usage & Cost Monitor — user guide
 
+[![tests](https://github.com/eng3alaa/ROSTUM-ai-usage-dashboard/actions/workflows/tests.yml/badge.svg)](https://github.com/eng3alaa/ROSTUM-ai-usage-dashboard/actions/workflows/tests.yml)
+
 One HTML file that shows how much you use AI — tokens, messages and the API-equivalent cost — across every platform you touch: Claude Code, ChatGPT, Gemini, Copilot, Cursor, local models, cloud endpoints and more. It runs entirely in your browser from `AI Usage Dashboard.html`; nothing is installed and nothing is uploaded anywhere except the API calls you explicitly trigger with your own keys.
 
 Every number on the page is labeled with where it came from and how trustworthy it is. The dashboard never guesses silently.
@@ -85,7 +87,7 @@ Flags: `--port <n>` (or `COLLECTOR_PORT`; default 11436; `0` picks a free port a
 - Every `/api/*` request needs the token (`Authorization: Bearer …`, or `?token=`), otherwise `401`. Without it any web page open in your browser could read the machine's AI transcripts through the port; the origin is deliberately not the gate (a `file://` page and a sandboxed iframe both have a `null` origin).
 - Read-only, and only inside the discovered roots (or the `--root` folders): paths with `..`, absolute paths and symbolic links are refused; the walk skips `node_modules`, `.git` and `checkpoints`; the token file is never listed or served.
 - The collector logs one line per request (method, path, status, bytes) — never file contents, never the token. The page sends the token only to the Collector URL on the card, as a header — never in a request URL, never into the page's HTML — and stores it only with **Remember token on this computer**.
-- What lands in the browser is exactly a folder pick's result: aggregated tokens per day / platform / model, no message text.
+- What the page keeps is the same as after a folder pick: aggregated tokens per day / platform / model. Raw log files stream through the page's memory while they are parsed, exactly as with a folder pick, and are not stored.
 
 **Two copies, two storages.** The page the collector serves (`http://127.0.0.1:11436`) and your `file://` copy are different origins, so each keeps its own browser storage: folder choices, imports, remembered keys and settings do not carry over between them. Pick one and stick with it (or export a CSV backup before switching).
 
@@ -269,6 +271,7 @@ Each major section header has a **▾** to collapse it; collapses are remembered
 - With the local collector (§1b) the files are read by that Node process on this machine and fetched by the page from `127.0.0.1` over a token-gated, read-only API — still nothing leaves the machine, and the same aggregated rows are all that is stored.
 - **Clear stored data…** (Data sources section) wipes everything the page remembered. Disconnect asks whether to keep or delete a source's data.
 - If the browser's storage is full the page says so in a banner; export a CSV backup, then clear.
+- The threat model, what is out of scope, and how to report a vulnerability privately are in [`SECURITY.md`](SECURITY.md).
 
 ---
 
