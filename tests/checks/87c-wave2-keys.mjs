@@ -396,6 +396,171 @@ export async function run({ browser, ok }) {
       !ce.missing && ce.driver.status === 'ok' && ce.driver.err === null && /Analytics key/.test(ce.driver.label) && /Connected/.test(ce.driver.text) && ce.driver.in === 3300 && ce.driver.msgs === 35 && ce.driver.platforms.length === 1 && ce.driver.platforms[0] === 'Claude Enterprise (org)' && Math.abs(ce.driver.billedTotal - 2.30) < 1e-9
       && ce.admin.platforms.length === 1 && ce.admin.platforms[0] === 'Anthropic API' && ce.admin.in === 5 && ce.admin.billed.length === 1 && ce.admin.billed[0] === 42 && /Connected/.test(ce.admin.text)
       && ce.kind === 'admin-key' && ce.cat === 'chat' && ce.quality === 'exact' && ce.platform === 'Claude Enterprise (org)' && ce.note && ce.card, JSON.stringify({ driver: ce.driver, admin: ce.admin, kind: ce.kind, cat: ce.cat, quality: ce.quality, note: ce.note, card: ce.card }));
+
+    // ---- Plan 9 B2: generic OpenAI-compatible card — validate (GET {base}/v1/models) + fingerprint OpenRouter / LiteLLM / vLLM / plain ----
+    const oc = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const c = connectorById('openai-compatible');
+      if (typeof fetchOpenAICompatible !== 'function' || !c || !document.getElementById('openai-compatible-key') || !document.getElementById('openai-compatible-f-base')) return { missing: true };
+      const reg = { kind: c.kind, cat: c.category, quality: c.quality, keyOptional: c.keyOptional === true, platform: c.platform, fields: (c.fields || []).map(f => f.id), secretBase: !!(c.fields || []).find(f => f.id === 'base' && (f.secret || f.type === 'password')),
+        note: /OpenRouter/.test(c.qualityNote) && /LiteLLM/.test(c.qualityNote) && /vLLM/.test(c.qualityNote) && /CORS/.test(c.qualityNote) && /^validate-only/i.test(c.qualityNote), badge: document.querySelector('#src-openai-compatible .badge').textContent };
+      const realFetch = window.fetch;
+      const text = (body, status = 200, type = 'text/plain') => new Response(body, { status, headers: { 'content-type': type } });
+      const json = (body, status = 200) => text(JSON.stringify(body), status, 'application/json');
+      let calls = [], server = {};
+      // stub: one virtual server per attempt — server[path] answers that path (a function of the URL and the Authorization header), everything else is 404
+      window.fetch = async (url, init) => {
+        const u = new URL(String(url)); const auth = init && init.headers && init.headers.Authorization;
+        calls.push({ url: u.toString(), path: u.pathname, auth: auth || null, signal: !!(init && init.signal) });
+        const h = server[u.pathname]; return h ? h(u, auth) : json({ error: { message: 'no route' } }, 404);
+      };
+      const models = (n) => json({ object: 'list', data: Array.from({ length: n }, (_, i) => ({ id: 'model-' + i, object: 'model' })) });
+      const attempt = (base, key) => fetchOpenAICompatible(key, { base }, { days: 90 }).then(r => ({ ok: true, r }), e => ({ ok: false, err: e.message }));
+      // 1) bad base URLs are refused before any request
+      const bad = {};
+      for (const b of ['', 'not a url', 'ftp://host/v1', 'http://api.example.com/v1', 'https://user:pw@api.example.com', 'https://api.example.com/v1?x=1']) { calls = []; const a = await attempt(b, 'k'); bad[b || '(empty)'] = { ok: a.ok, calls: calls.length, err: a.err }; }
+      // 2) plain server with a key: /v1 stripped once, Bearer sent, the three fingerprints answered 404 → validate-only, rows null
+      server = { '/v1/models': (u, auth) => auth === 'Bearer sk-plain' ? models(3) : json({ error: { message: 'bad key' } }, 401) };
+      calls = []; const plain = await attempt('https://api.example.com/v1/', 'sk-plain');
+      const plainCalls = calls.map(x => x.path);
+      // 3) open server, no key (keyOptional): 200 without a key is tolerated and said so
+      server = { '/v1/models': () => models(2) };
+      calls = []; const open = await attempt('http://localhost:1234', '');
+      const openAuth = calls.map(x => x.auth);
+      // 4) OpenRouter: {base}/v1/key → spend; today's usage_daily lands as a billed day, no token rows
+      server = { '/api/v1/models': () => models(5), '/api/v1/key': (u, auth) => auth === 'Bearer sk-or-1' ? json({ data: { label: 'sk-or-v1-abc', usage: 12.5, usage_daily: 1.25, limit: 100, limit_remaining: 87.5 } }) : json({}, 401) };
+      calls = []; const or = await attempt('https://openrouter.ai/api/v1', 'sk-or-1');
+      const orCalls = calls.map(x => x.path);
+      // 5) LiteLLM: {base}/key/info (key only in the header, never ?key=) → spend
+      server = { '/v1/models': () => models(4), '/key/info': (u, auth) => auth === 'Bearer sk-lite' && !u.searchParams.has('key') ? json({ key: 'sk-lite', info: { token: 'hashed', spend: 3.5, max_budget: 10, models: [] } }) : json({}, 401) };
+      calls = []; const lite = await attempt('http://localhost:4000', 'sk-lite');
+      const liteKeyInUrl = calls.some(x => /key=/.test(x.url));
+      // 6) vLLM: {base}/metrics answers with vllm: counters → named, pointed at the vLLM card, rows null
+      server = { '/v1/models': () => models(1), '/metrics': () => text('# HELP vllm:prompt_tokens_total x\nvllm:prompt_tokens_total{model_name="Qwen/Qwen3-8B"} 1200\nvllm:generation_tokens_total{model_name="Qwen/Qwen3-8B"} 300\n') };
+      calls = []; const vl = await attempt('http://127.0.0.1:8000', '');
+      // 7) a fingerprint error other than 404/401 is surfaced in the detail, the validation still stands
+      server = { '/v1/models': () => models(3), '/v1/key': () => json({ error: { message: 'upstream down' } }, 503) };
+      calls = []; const errSurf = await attempt('https://api.example.com', 'sk-x');
+      // 8) a rejected key → the error is the card's (HTTP 401)
+      server = { '/v1/models': () => json({ error: { message: 'Incorrect API key' } }, 401) };
+      calls = []; const rejected = await attempt('https://api.example.com/v1', 'sk-bad');
+      // 9) through the key driver: the base URL (non-secret) persists, the key follows Remember; an open server connects with an empty key
+      server = { '/v1/models': () => models(2) };
+      document.getElementById('openai-compatible-f-base').value = 'http://localhost:1234/v1'; document.getElementById('openai-compatible-key').value = '';
+      const rem = document.getElementById('remember-openai-compatible'); if (rem) rem.checked = false;
+      calls = []; await App.connectKey(c);
+      const st = Store.connectors['openai-compatible'] || {};
+      App.renderHub();
+      const hub = document.querySelector('#accounts-hub .acct[data-connector="openai-compatible"]');
+      const driver = { status: Store.connectorStatus(c), label: st.label || null, err: st.err || null, text: document.getElementById('openai-compatible-status').textContent, calls: calls.length,
+        base: LS.get('field:openai-compatible:base', null), key: LS.get('key:openai-compatible', null), hasSrc: !!Store.sources['openai-compatible'], group: hub && hub.closest('.hub-group').dataset.group };
+      // a rejected key through the driver → warn, message kept, nothing remembered
+      server = { '/v1/models': () => json({ error: { message: 'Incorrect API key' } }, 401) };
+      document.getElementById('openai-compatible-key').value = 'sk-bad'; if (rem) rem.checked = true;
+      await App.connectKey(c);
+      const driverBad = { status: Store.connectorStatus(c), err: (Store.connectors['openai-compatible'] || {}).err, key: LS.get('key:openai-compatible', null), text: document.getElementById('openai-compatible-status').textContent };
+      window.fetch = realFetch;
+      if (rem) rem.checked = false; document.getElementById('openai-compatible-key').value = ''; document.getElementById('openai-compatible-f-base').value = ''; LS.del('field:openai-compatible:base'); LS.del('key:openai-compatible');
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist(); App._render();
+      return { reg, bad, plain, plainCalls, open, openAuth, or, orCalls, lite, liteKeyInUrl, vl, errSurf, rejected, driver, driverBad, today: dayKeyUTC(new Date()) };
+    });
+    ok('openai-compatible (B2): registry entry — api-key · API vendors · validate-only badge · fields [base] (not secret) · key optional · copy names the OpenRouter / LiteLLM / vLLM fingerprints and the per-host CORS caveat',
+      !oc.missing && oc.reg.kind === 'api-key' && oc.reg.cat === 'api' && oc.reg.quality === 'validate' && oc.reg.badge === 'validate-only' && oc.reg.keyOptional && JSON.stringify(oc.reg.fields) === JSON.stringify(['base']) && !oc.reg.secretBase && oc.reg.note, JSON.stringify(oc.reg || oc));
+    ok('openai-compatible (B2): base URL rules — empty, non-URL, ftp, http on a non-local host, credentials in the URL and a query string are refused before any request',
+      !oc.missing && Object.values(oc.bad).every(b => !b.ok && b.calls === 0 && /base URL/i.test(b.err)), JSON.stringify(oc.bad));
+    ok('openai-compatible (B2): plain server — GET {base}/v1/models with Bearer (trailing /v1 stripped once, never /v1/v1), fingerprints /v1/key, /key/info, /metrics all 404 → "3 models", rows null, no billed path, detail "validated — this server exposes no usage endpoint"',
+      !oc.missing && oc.plain.ok && oc.plain.r.rows === null && oc.plain.r.billed === undefined && /3 models/.test(oc.plain.r.label) && /validated — this server exposes no usage endpoint/.test(oc.plain.r.detail)
+      && JSON.stringify(oc.plainCalls) === JSON.stringify(['/v1/models', '/v1/key', '/key/info', '/metrics']) && oc.plain.r.meta && oc.plain.r.meta.backend === 'plain', JSON.stringify({ plain: oc.plain, calls: oc.plainCalls }));
+    ok('openai-compatible (B2): open server (no key) — 200 without a key is accepted, no Authorization header sent, the detail says so',
+      !oc.missing && oc.open.ok && oc.openAuth.every(a => a === null) && /2 models/.test(oc.open.r.label) && /without a key/i.test(oc.open.r.detail) && oc.open.r.rows === null, JSON.stringify({ open: oc.open, auth: oc.openAuth }));
+    ok('openai-compatible (B2): OpenRouter fingerprint — {base}/v1/key → label names OpenRouter, $12.50 spent in the detail, usage_daily 1.25 → one billed day (today, UTC), rows null',
+      !oc.missing && oc.or.ok && /OpenRouter/.test(oc.or.r.label) && /12\.50/.test(oc.or.r.detail) && oc.or.r.rows === null && Array.isArray(oc.or.r.billed) && oc.or.r.billed.length === 1 && oc.or.r.billed[0].d === oc.today && oc.or.r.billed[0].amount === 1.25
+      && oc.orCalls.includes('/api/v1/key') && oc.or.r.meta.backend === 'openrouter', JSON.stringify({ or: oc.or, calls: oc.orCalls, today: oc.today }));
+    ok('openai-compatible (B2): LiteLLM fingerprint — {base}/key/info with the key in the Authorization header only (never ?key=) → label names LiteLLM, $3.50 spent of the $10 budget, rows null, no billed path',
+      !oc.missing && oc.lite.ok && /LiteLLM/.test(oc.lite.r.label) && /3\.50/.test(oc.lite.r.detail) && /\$10/.test(oc.lite.r.detail) && !oc.liteKeyInUrl && oc.lite.r.rows === null && oc.lite.r.billed === undefined && oc.lite.r.meta.backend === 'litellm', JSON.stringify({ lite: oc.lite, keyInUrl: oc.liteKeyInUrl }));
+    ok('openai-compatible (B2): vLLM fingerprint — {base}/metrics with vllm: counters → label names vLLM, detail points at the vLLM card (no poll from this card), rows null',
+      !oc.missing && oc.vl.ok && /vLLM/.test(oc.vl.r.label) && /vLLM card/.test(oc.vl.r.detail) && oc.vl.r.rows === null && oc.vl.r.meta.backend === 'vllm', JSON.stringify(oc.vl));
+    ok('openai-compatible (B2): a fingerprint failure other than 404/401 (503 on /v1/key) is surfaced in the detail, never swallowed — the model-list validation still stands; a 401 on /v1/models is the card\'s error',
+      !oc.missing && oc.errSurf.ok && /\/v1\/key/.test(oc.errSurf.r.detail) && /HTTP 503/.test(oc.errSurf.r.detail) && /upstream down/.test(oc.errSurf.r.detail) && oc.errSurf.r.meta.backend === 'plain'
+      && !oc.rejected.ok && /HTTP 401/.test(oc.rejected.err) && /Incorrect API key/.test(oc.rejected.err), JSON.stringify({ errSurf: oc.errSurf, rejected: oc.rejected }));
+    ok('openai-compatible (B2): key driver — an open server connects with an empty key (keyOptional), the base URL persists as a plain field (LS field:openai-compatible:base), no key remembered, no rows stored, hub group API vendors; a rejected key → warn + HTTP 401, not remembered',
+      !oc.missing && oc.driver.status === 'ok' && oc.driver.err === null && /2 models/.test(oc.driver.label) && /Connected/.test(oc.driver.text) && oc.driver.calls >= 1 && oc.driver.base === 'http://localhost:1234/v1' && oc.driver.key === null && !oc.driver.hasSrc && oc.driver.group === 'api'
+      && oc.driverBad.status === 'warn' && /HTTP 401/.test(oc.driverBad.err) && oc.driverBad.key === null && /Validation failed/.test(oc.driverBad.text), JSON.stringify({ driver: oc.driver, bad: oc.driverBad }));
+
+    // ---- Plan 9 B2: Poe — points_history paged by starting_after → exact tokens per bot (cost_breakdown strings), cost_usd → billed, current_balance in the label ----
+    const poe = await page.evaluate(async () => {
+      Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; App._drill = null; App.filters.hiddenPlatforms = new Set(); LS.del('view'); View.load();
+      const c = connectorById('poe');
+      if (typeof fetchPoe !== 'function' || typeof parsePoeCostBreakdown !== 'function' || !c || !document.getElementById('poe-key')) return { missing: true };
+      const reg = { kind: c.kind, cat: c.category, quality: c.quality, platform: c.platform, badge: document.querySelector('#src-poe .badge').textContent,
+        note: /^exact/i.test(c.qualityNote) && /cost_breakdown/i.test(c.qualityNote) && /unverified/i.test(c.qualityNote) && /'Chat'/.test(c.qualityNote) && /30 days/.test(c.qualityNote) };
+      // parser unit cases: the documented example breakdown (Input counts every prompt token; Cache write / Cache discount are its cached subsets), a flat string, garbage
+      const bd = { Input: '450 points (5290 tokens)', 'Cache write': '63 points (2921 tokens)', Output: '7 points (15 tokens)', 'Cache discount': '-181 points (2366 tokens)', Total: '339 points' };
+      const parser = { doc: parsePoeCostBreakdown(bd), plain: parsePoeCostBreakdown({ Input: '12 points (1,500 tokens)', Output: '3 points (40 tokens)', Total: '15 points' }),
+        str: parsePoeCostBreakdown('Input: 450 points (5290 tokens), Output: 7 points (15 tokens)'), junk: parsePoeCostBreakdown({ Total: '339 points' }), none: parsePoeCostBreakdown(null) };
+      // fixture: two pages (newest first), day A = 2026-10-20, day B = 2026-10-19 (creation_time in unix MICROseconds)
+      const us = (iso) => Date.parse(iso) * 1000;
+      const page1 = { has_more: true, length: 2, data: [
+        { creation_time: us('2026-10-20T14:00:00Z'), bot_name: 'Claude-Sonnet-4.5', query_id: 'q1', usage_type: 'API', api_key_name: 'main', cost_points: 339, cost_usd: '0.0339', cost_breakdown_in_points: bd },
+        { creation_time: us('2026-10-20T09:30:00Z'), bot_name: 'GPT-5', query_id: 'q2', usage_type: 'Chat', chat_name: 'ideas', cost_points: 120, cost_usd: '0.0120', cost_breakdown_in_points: { Input: '100 points (2000 tokens)', Output: '20 points (400 tokens)', Total: '120 points' } } ] };
+      const page2 = { has_more: false, length: 2, data: [
+        { creation_time: us('2026-10-19T22:10:00Z'), bot_name: 'Claude-Sonnet-4.5', query_id: 'q3', usage_type: 'Chat', chat_name: 'ideas', cost_points: 50, cost_usd: '0.0050', cost_breakdown_in_points: { Input: '40 points (800 tokens)', Output: '10 points (120 tokens)', Total: '50 points' } },
+        { creation_time: us('2026-10-19T08:00:00Z'), bot_name: 'Imagen-4', query_id: 'q4', usage_type: 'API', api_key_name: 'main', cost_points: 900, cost_usd: '0.0900', cost_breakdown_in_points: { 'Image generation': '900 points', Total: '900 points' } } ] };
+      const realFetch = window.fetch;
+      const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+      let calls = [], mode = 'ok';
+      window.fetch = async (url, init) => {
+        const u = new URL(String(url)); const auth = init && init.headers && init.headers.Authorization;
+        calls.push({ url: u.toString(), path: u.pathname, after: u.searchParams.get('starting_after'), limit: u.searchParams.get('limit'), auth: auth || null, signal: !!(init && init.signal) });
+        if (u.host !== 'api.poe.com') return json({ error: 'wrong host' }, 404);
+        if (mode === '401') return json({ error: { message: 'Invalid API key' } }, 401);
+        if (mode === '429') return json({ error: { message: 'Rate limit exceeded' } }, 429);
+        if (auth !== 'Bearer poe-test') return json({ error: { message: 'Invalid API key' } }, 401);
+        if (u.pathname === '/usage/current_balance') return json({ current_point_balance: 1234567 });
+        if (u.pathname === '/usage/points_history') return json(u.searchParams.get('starting_after') === 'q2' ? page2 : u.searchParams.get('starting_after') ? { has_more: false, length: 0, data: [] } : page1);
+        return json({}, 404);
+      };
+      const direct = await fetchPoe('poe-test', {}, { days: 90 });
+      const hist = calls.filter(x => x.path === '/usage/points_history');
+      const row = (d, m) => direct.rows.find(r => r.d === d && r.model === m);
+      const pick = (r) => r && { in: r.in, cw: r.cw, cr: r.cr, out: r.out, msgs: r.msgs, est: r.est };
+      const d1 = { label: direct.label, detail: direct.detail, n: direct.rows.length, platforms: [...new Set(direct.rows.map(r => r.platform))],
+        sonnetA: pick(row('2026-10-20', 'Claude-Sonnet-4.5')), gptA: pick(row('2026-10-20', 'GPT-5')), sonnetB: pick(row('2026-10-19', 'Claude-Sonnet-4.5')), imagenB: pick(row('2026-10-19', 'Imagen-4')),
+        billed: direct.billed.map(b => [b.d, Math.round(b.amount * 1e6) / 1e6]), meta: direct.meta, paging: hist.map(x => [x.after, x.limit]), auth: calls.every(x => x.auth === 'Bearer poe-test'), signals: calls.every(x => x.signal), balanceCalled: calls.some(x => x.path === '/usage/current_balance') };
+      // key rejected (401) and rate limit (429) are the card's errors
+      mode = '401'; const rej = await fetchPoe('poe-test', {}, { days: 90 }).then(() => 'resolved', e => e.message);
+      mode = '429'; const limited = await fetchPoe('poe-test', {}, { days: 90 }).then(() => 'resolved', e => e.message);
+      mode = 'ok';
+      // through the key driver: rows + billed under 'poe', platform Poe, hub group Chat apps
+      calls = [];
+      document.getElementById('poe-key').value = 'poe-test'; const rem = document.getElementById('remember-poe'); if (rem) rem.checked = false;
+      await App.connectKey(c);
+      const st = Store.connectors.poe || {}; const rows = (Store.sources.poe || {}).rows || [];
+      App.renderHub();
+      const hub = document.querySelector('#accounts-hub .acct[data-connector="poe"]');
+      const driver = { status: Store.connectorStatus(c), label: st.label || null, err: st.err || null, text: document.getElementById('poe-status').textContent, n: rows.length,
+        in: rows.reduce((a, r) => a + r.in, 0), out: rows.reduce((a, r) => a + r.out, 0), msgs: rows.reduce((a, r) => a + r.msgs, 0), platforms: [...new Set(rows.map(r => r.platform))],
+        billedTotal: Math.round(Store.billedRows('poe').reduce((a, b) => a + b.amount, 0) * 1e6) / 1e6, byType: (Store.sources.poe || {}).meta && Store.sources.poe.meta.byType, group: hub && hub.closest('.hub-group').dataset.group, leak: document.documentElement.outerHTML.includes('poe-test') };
+      window.fetch = realFetch;
+      document.getElementById('poe-key').value = ''; LS.del('key:poe');
+      Store.sources = {}; Store.billed = {}; Store.connectors = {}; Store.persist(); App._render();
+      return { reg, parser, d1, rej, limited, driver };
+    });
+    ok('poe (B2): registry entry — api-key · Chat apps · exact badge · platform Poe · copy says tokens come from the cost_breakdown strings, 30 days retention, and that usage_type \'Chat\' for subscription turns is unverified',
+      !poe.missing && poe.reg.kind === 'api-key' && poe.reg.cat === 'chat' && poe.reg.quality === 'exact' && poe.reg.badge === 'exact' && poe.reg.platform === 'Poe' && poe.reg.note, JSON.stringify(poe.reg || poe));
+    ok('poe (B2): parsePoeCostBreakdown — documented example → in 3 (5290 − 2921 cache write − 2366 cache discount), cw 2921, cr 2366, out 15, parsed; "1,500 tokens" → 1500; flat string form parsed; Total-only / null → tokens 0, parsed false',
+      !poe.missing && JSON.stringify(poe.parser.doc) === JSON.stringify({ in: 3, cw: 2921, cr: 2366, out: 15, parsed: true }) && JSON.stringify(poe.parser.plain) === JSON.stringify({ in: 1500, cw: 0, cr: 0, out: 40, parsed: true })
+      && JSON.stringify(poe.parser.str) === JSON.stringify({ in: 5290, cw: 0, cr: 0, out: 15, parsed: true }) && poe.parser.junk.parsed === false && poe.parser.junk.in === 0 && poe.parser.none.parsed === false, JSON.stringify(poe.parser));
+    ok('poe (B2): points_history paged by starting_after (limit 100; page 2 asks after q2; stops at has_more false) → 4 day·bot rows, platform Poe, exact: Sonnet day A in 3 / cw 2921 / cr 2366 / out 15 / 1 query, GPT-5 2000/400, Sonnet day B 800/120, Imagen-4 unparsed → tokens 0 + 1 query; billed per day 0.095 / 0.0459; label "Poe · balance 1,234,567 points"; meta byType API 2 / Chat 2, unparsed 1',
+      !poe.missing && poe.d1.n === 4 && poe.d1.platforms.length === 1 && poe.d1.platforms[0] === 'Poe' && JSON.stringify(poe.d1.sonnetA) === JSON.stringify({ in: 3, cw: 2921, cr: 2366, out: 15, msgs: 1, est: 0 })
+      && JSON.stringify(poe.d1.gptA) === JSON.stringify({ in: 2000, cw: 0, cr: 0, out: 400, msgs: 1, est: 0 }) && JSON.stringify(poe.d1.sonnetB) === JSON.stringify({ in: 800, cw: 0, cr: 0, out: 120, msgs: 1, est: 0 }) && JSON.stringify(poe.d1.imagenB) === JSON.stringify({ in: 0, cw: 0, cr: 0, out: 0, msgs: 1, est: 0 })
+      && JSON.stringify(poe.d1.billed) === JSON.stringify([['2026-10-19', 0.095], ['2026-10-20', 0.0459]]) && poe.d1.label === 'Poe · balance 1,234,567 points' && JSON.stringify(poe.d1.paging) === JSON.stringify([[null, '100'], ['q2', '100']])
+      && poe.d1.meta.byType.API === 2 && poe.d1.meta.byType.Chat === 2 && poe.d1.meta.unparsed === 1 && poe.d1.meta.queries === 4 && poe.d1.auth && poe.d1.signals && poe.d1.balanceCalled && /4 queries/.test(poe.d1.detail) && /1 breakdown/.test(poe.d1.detail), JSON.stringify(poe.d1));
+    ok('poe (B2): 401 → "HTTP 401 — Invalid API key" (key rejected); 429 → "HTTP 429 — Rate limit exceeded" surfaced, never retried silently',
+      !poe.missing && /HTTP 401/.test(poe.rej) && /Invalid API key/.test(poe.rej) && /HTTP 429/.test(poe.limited) && /Rate limit exceeded/.test(poe.limited), JSON.stringify({ rej: poe.rej, limited: poe.limited }));
+    ok('poe (B2): key driver stores rows (in 2803 / out 535 / 4 queries, platform Poe) + billed $0.1409 under poe, label with the balance, meta.byType kept, hub group Chat apps, key never in the DOM',
+      !poe.missing && poe.driver.status === 'ok' && poe.driver.err === null && /balance 1,234,567 points/.test(poe.driver.label) && /Connected/.test(poe.driver.text) && poe.driver.n === 4 && poe.driver.in === 2803 && poe.driver.out === 535 && poe.driver.msgs === 4
+      && poe.driver.platforms.length === 1 && poe.driver.platforms[0] === 'Poe' && poe.driver.billedTotal === 0.1409 && poe.driver.byType && poe.driver.byType.API === 2 && poe.driver.group === 'chat' && !poe.driver.leak, JSON.stringify(poe.driver));
   } finally {
     await page.close();
   }

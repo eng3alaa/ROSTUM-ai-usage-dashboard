@@ -1474,7 +1474,7 @@ const App = {
     const gen = this._gen[c.id] = (this._gen[c.id] || 0) + 1;
     const keyEl = $(c.id + '-key');
     const key = keyEl ? keyEl.value.trim() : '';
-    if (!key) { status.textContent = `Paste ${c.keyLabel ? 'your ' + c.keyLabel : 'a key'} first${c.keyHint ? ' (' + c.keyHint + ')' : ''}.`; return; }
+    if (!key && !c.keyOptional) { status.textContent = `Paste ${c.keyLabel ? 'your ' + c.keyLabel : 'a key'} first${c.keyHint ? ' (' + c.keyHint + ')' : ''}.`; return; }
     const fields = {};
     for (const f of c.fields || []) { const fe = $(c.id + '-f-' + f.id); fields[f.id] = fe ? fe.value.trim() : ''; }
     const rem = $('remember-' + c.id);

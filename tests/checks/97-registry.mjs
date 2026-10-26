@@ -179,6 +179,21 @@ export async function run({ browser, ok }) {
     ok('registry (4b): every Wave 2 entry satisfies the invariants — quality ∈ exact|estimated|validate|none, qualityNote ≥ 80 chars, links.get|docs, category ∈ HUB_GROUPS, statusEl = id+"-status" and in the DOM, data kinds list their own id in srcIds, export-file srcIds ⊂ imports.srcIds, link-only has reason + quality none, cloud-token sessionOnly, fetch/parser/validate/poll names resolve; ids unique; platforms unique except GitHub Copilot; all 29 Wave 2 platforms present; local runners $0',
       inv.problems.length === 0 && inv.w2 >= 29 && inv.n >= 46 && inv.orderHasAll, JSON.stringify(inv));
     ok('registry (4b): all five hub groups are non-empty', Object.values(inv.byGroup).every(n => n > 0), JSON.stringify(inv.byGroup));
+
+    // ---- Plan 9 B2: generic OpenAI-compatible card + Poe — fetch:-contract key cards with the required shape and hub placement ----
+    const b2 = await page.evaluate(() => {
+      const oc = connectorById('openai-compatible') || {}, po = connectorById('poe') || {};
+      return {
+        oc: { kind: oc.kind, cat: oc.category, quality: oc.quality, keyOptional: oc.keyOptional === true, fetch: typeof globalThis[oc.fetch] === 'function', keyLS: oc.keyLS, srcIds: JSON.stringify(oc.srcIds), statusEl: oc.statusEl === 'openai-compatible-status' && !!document.getElementById(oc.statusEl),
+          fields: JSON.stringify((oc.fields || []).map(f => [f.id, !!(f.secret || f.type === 'password')])), platform: oc.platform, sessionOnly: !!oc.sessionOnly, docs: !!(oc.links && oc.links.docs) },
+        po: { kind: po.kind, cat: po.category, quality: po.quality, fetch: typeof globalThis[po.fetch] === 'function', keyLS: po.keyLS, srcIds: JSON.stringify(po.srcIds), statusEl: po.statusEl === 'poe-status' && !!document.getElementById(po.statusEl), platform: po.platform, noFields: !po.fields,
+          get: !!(po.links && po.links.get && /poe\.com\/api\/keys/.test(po.links.get)), docs: !!(po.links && po.links.docs), parser: typeof globalThis.parsePoeCostBreakdown === 'function' },
+        inOrder: PLATFORM_ORDER.includes('Poe') && PLATFORM_ORDER.includes(oc.platform || '') };
+    });
+    ok('registry (B2): openai-compatible is an api-key entry in API vendors — quality validate, one non-secret field "base", keyOptional, not sessionOnly, fetch fn registered, keyLS key:openai-compatible, srcIds [own id], statusEl in the DOM, docs link',
+      b2.oc.kind === 'api-key' && b2.oc.cat === 'api' && b2.oc.quality === 'validate' && b2.oc.keyOptional && b2.oc.fetch && b2.oc.keyLS === 'key:openai-compatible' && b2.oc.srcIds === JSON.stringify(['openai-compatible']) && b2.oc.statusEl && b2.oc.fields === JSON.stringify([['base', false]]) && !!b2.oc.platform && !b2.oc.sessionOnly && b2.oc.docs, JSON.stringify(b2.oc));
+    ok('registry (B2): poe is an api-key entry in Chat apps — quality exact, no extra fields, fetch fn + parsePoeCostBreakdown registered, keyLS key:poe, srcIds [poe], statusEl in the DOM, get link poe.com/api/keys + docs; both platforms in PLATFORM_ORDER',
+      b2.po.kind === 'api-key' && b2.po.cat === 'chat' && b2.po.quality === 'exact' && b2.po.fetch && b2.po.parser && b2.po.keyLS === 'key:poe' && b2.po.srcIds === JSON.stringify(['poe']) && b2.po.statusEl && b2.po.platform === 'Poe' && b2.po.noFields && b2.po.get && b2.po.docs && b2.inOrder, JSON.stringify(b2));
   } finally {
     await page.close();
   }

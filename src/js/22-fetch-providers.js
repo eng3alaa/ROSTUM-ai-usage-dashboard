@@ -587,3 +587,139 @@ do {
 Write-Host "Saved to Desktop\\openai-usage.json"`;
 }
 
+
+/* ---------- Poe (Plan 9 B2): Usage API — current_balance (label) + points_history paged by starting_after ---------- */
+const POE_API = 'https://api.poe.com/usage';
+const POE_PAGE_LIMIT = 100, POE_MAX_PAGES = 50;
+/** Poe key-driver fetcher. GET /usage/current_balance validates the key (a 401 is the card's error) and fills the label; GET
+ *  /usage/points_history?limit=100 is paged with starting_after=<last query_id> until has_more is false, a page is empty, the oldest item is
+ *  older than opts.days (default 90; Poe keeps 30) or 50 pages were read. A 429 — or any other non-2xx — is surfaced verbatim, never retried.
+ *  Poe forgets after 30 days, so the days this card already stored that are OLDER than the oldest fetched day are kept; every day from that one
+ *  on is replaced by the fresh figures (rows and billed alike). */
+async function fetchPoe(key, fields, opts) {
+  const h = { 'Authorization': 'Bearer ' + key };
+  const days = (opts && opts.days) || 90;
+  const balance = await fetchJSON(POE_API + '/current_balance', h);
+  const history = await fetchPoeHistory(h, Date.now() - days * 864e5);
+  const fresh = parsePoePointsHistory(history.items);
+  const firstFetchedDay = fresh.rows.reduce((min, r) => (!min || r.d < min) ? r.d : min, null);
+  const rows = keepOlderDays(((Store.sources.poe || {}).rows || []), fresh.rows, firstFetchedDay);
+  const billed = keepOlderDays(Store.billedRows('poe'), fresh.billed, firstFetchedDay);
+  const points = Number(balance && balance.current_point_balance);
+  return { label: Number.isFinite(points) ? `Poe · balance ${points.toLocaleString('en-US')} points` : 'Poe key',
+    detail: poeDetail(fresh, history.pages, rows.length - fresh.rows.length), rows, billed, meta: { ...fresh.meta, days, pages: history.pages } };
+}
+/** Every points_history item newer than cutoffMs, newest first, across pages → { items, pages }. */
+async function fetchPoeHistory(h, cutoffMs) {
+  const items = []; let after = null, pages = 0;
+  while (pages < POE_MAX_PAGES) {
+    const url = new URL(POE_API + '/points_history');
+    url.searchParams.set('limit', String(POE_PAGE_LIMIT));
+    if (after) url.searchParams.set('starting_after', after);
+    const j = await fetchJSON(url, h); pages++;
+    const data = Array.isArray(j && j.data) ? j.data : [];
+    if (!data.length) break;
+    items.push(...data.filter(it => it && poeCreationMs(it.creation_time) >= cutoffMs));
+    const oldest = data[data.length - 1];
+    after = oldest && oldest.query_id ? String(oldest.query_id) : null;
+    if (!j.has_more || !after || poeCreationMs(oldest.creation_time) < cutoffMs) break;
+  }
+  return { items, pages };
+}
+/** stored rows (or billed days) strictly older than `fromDay` + the fresh ones; no fresh day → the stored set is returned unchanged. */
+function keepOlderDays(stored, fresh, fromDay) {
+  if (!fromDay) return stored.slice();
+  return stored.filter(r => r && r.d < fromDay).concat(fresh);
+}
+function poeDetail(fresh, pages, keptOlderRows) {
+  const m = fresh.meta;
+  const byType = Object.entries(m.byType).map(([t, n]) => `${n} ${t}`).join(' / ');
+  const total = fresh.billed.reduce((a, b) => a + b.amount, 0);
+  return `${fresh.rows.length} day·bot rows · ${m.queries} queries${byType ? ` (${byType})` : ''} · ${fmtUSD(total)} billed (cost_usd) · ${pages} page${pages === 1 ? '' : 's'}`
+    + (m.unparsed ? ` · ${m.unparsed} breakdown${m.unparsed === 1 ? '' : 's'} without token counts (tokens 0)` : '')
+    + (keptOlderRows > 0 ? ` · ${keptOlderRows} older stored rows kept` : '');
+}
+
+/* ---------- Generic OpenAI-compatible server (Plan 9 B2, design 6): validate GET {base}/v1/models, then fingerprint the gateway ---------- */
+const COMPATIBLE_LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+/** fields.base → origin + path with trailing slashes and one trailing /v1 removed. https only — http is accepted for localhost / 127.0.0.1 /
+ *  [::1]; credentials, a query string or a fragment in the URL are refused. Throws before any request is made. */
+function compatibleBaseUrl(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) throw new Error('Enter the server\'s base URL first (e.g. https://api.example.com/v1 or http://localhost:8000)');
+  let u; try { u = new URL(s); } catch { throw new Error('Base URL is not a valid URL: ' + s); }
+  if (!(u.protocol === 'https:' || (u.protocol === 'http:' && COMPATIBLE_LOCAL_HOSTS.includes(u.hostname)))) throw new Error('Base URL must be https:// (http:// only for localhost / 127.0.0.1)');
+  if (u.username || u.password) throw new Error('Base URL must not carry credentials — paste the key in the key field');
+  if (u.search || u.hash) throw new Error('Base URL must not carry a query string or fragment');
+  return u.origin + u.pathname.replace(/\/+$/, '').replace(/\/v1$/i, '');
+}
+/** Key-driver fetcher (keyOptional card). GET {base}/v1/models must answer 200 with a `data` array (a 200 without a key = open server, said so);
+ *  then the gateway fingerprints run in order and the first match names the label — OpenRouter ({base}/v1/key → spend; usage_daily is today's
+ *  spend → one billed day merged with the days this card already stored), LiteLLM proxy ({base}/key/info → lifetime spend; the key travels in the
+ *  header only), vLLM ({base}/metrics with vllm: counters → named, pointer to the vLLM card) — else plain. None of them yields per-day token
+ *  numbers, so rows is always null (never [] — nothing was read, nothing is replaced). A probe's 404 / 401 means "not this backend"; any other
+ *  failure is surfaced in the detail, never swallowed. */
+async function fetchOpenAICompatible(key, fields, opts) {
+  const base = compatibleBaseUrl(fields && fields.base);
+  const h = key ? { 'Authorization': 'Bearer ' + key } : {};
+  const models = await fetchJSON(base + '/v1/models', h);
+  if (!Array.isArray(models && models.data)) throw new Error('GET /v1/models answered without a model list — not an OpenAI-compatible server?');
+  const n = models.data.length, probes = [];
+  const fp = await fingerprintCompatible(base, h, probes);
+  const errors = probes.filter(p => p.error).map(p => `${p.path}: ${p.error}`).join('; ');
+  const detail = (fp.detail || 'validated — this server exposes no usage endpoint (fingerprints tried: OpenRouter /v1/key, LiteLLM /key/info, vLLM /metrics)')
+    + (key ? '' : ' · answered without a key (open server)') + (errors ? ` · probe errors: ${errors}` : '');
+  const out = { label: `${fp.name ? fp.name + ' · ' : ''}${new URL(base).host} · ${n} model${n === 1 ? '' : 's'}`, detail, rows: null,
+    meta: { base, backend: fp.backend, probes } };
+  if (fp.billedToday) out.billed = mergeBilledDay('openai-compatible', fp.billedToday.d, fp.billedToday.amount);
+  return out;
+}
+/** The gateway probes in order; the first recognised answer wins. Each probe appends { path, status[, error] } to `probes` — a 404 / 401 is a
+ *  negative answer, a non-JSON 200 or any other failure keeps its message for the detail. */
+async function fingerprintCompatible(base, h, probes) {
+  const probe = async (path, recognise) => {
+    try { const j = await fetchJSON(base + path, h); probes.push({ path, status: 200 }); return recognise(j); }
+    catch (e) { probes.push(probeFailure(path, e)); return null; }
+  };
+  return (await probe('/v1/key', openRouterFingerprint)) || (await probe('/key/info', liteLlmFingerprint)) || (await probeVllmMetrics(base, probes))
+    || { backend: 'plain', name: '', detail: '' };
+}
+function probeFailure(path, e) {
+  const p = { path, status: e.status || 0 };
+  if (e.status === 404 || e.status === 401) return p;
+  p.error = e.status ? e.message : (e.name === 'SyntaxError' ? 'answered with a non-JSON body' : e.message);
+  return p;
+}
+/** OpenRouter: GET {base}/v1/key → { data: { usage, usage_daily, limit_remaining, … } } (USD). The key's label is not shown — it is derived from the key. */
+function openRouterFingerprint(j) {
+  const d = j && j.data;
+  if (!d || typeof d !== 'object' || typeof d.usage !== 'number') return null;
+  const today = Number.isFinite(d.usage_daily) ? { d: dayKeyUTC(new Date()), amount: finAmt(d.usage_daily) } : null;
+  const left = Number.isFinite(d.limit_remaining) ? ` · ${fmtUSD(d.limit_remaining)} of the key limit left` : '';
+  return { backend: 'openrouter', name: 'OpenRouter', billedToday: today,
+    detail: `OpenRouter gateway (GET /v1/key) — ${fmtUSD(d.usage)} spent on this key, ${today ? fmtUSD(today.amount) + ' today (booked as today\'s billed day)' : 'no daily figure'}${left} · no per-model tokens here (the OpenRouter card reads the daily activity)` };
+}
+/** LiteLLM proxy: GET {base}/key/info (the key named by the Authorization header) → { key, info: { spend, max_budget, … } } (USD). */
+function liteLlmFingerprint(j) {
+  const info = j && j.info;
+  if (!info || typeof info !== 'object' || !('spend' in info)) return null;
+  const spend = finAmt(Number(info.spend)), budget = Number(info.max_budget);
+  return { backend: 'litellm', name: 'LiteLLM proxy', billedToday: null,
+    detail: `LiteLLM proxy (GET /key/info) — ${fmtUSD(spend)} spent on this key${Number.isFinite(budget) ? ' of its ' + fmtUSD(budget) + ' budget' : ''} · lifetime spend only, no per-day history read` };
+}
+/** vLLM: GET {base}/metrics is Prometheus text with vllm: counters (parsePrometheus). Live token counting stays with the vLLM card (metrics-poll driver). */
+async function probeVllmMetrics(base, probes) {
+  const path = '/metrics';
+  let res;
+  try { res = await fetch(base + path, { cache: 'no-store', signal: requestTimeout() }); }
+  catch (e) { probes.push({ path, status: 0, error: e.message }); return null; }
+  if (!res.ok) { const e = new Error('HTTP ' + res.status); e.status = res.status; probes.push(probeFailure(path, e)); return null; }
+  probes.push({ path, status: 200 });
+  if (!parsePrometheus(await res.text()).some(m => m.name.startsWith('vllm:'))) return null;
+  return { backend: 'vllm', name: 'vLLM', billedToday: null,
+    detail: 'vLLM server (GET /metrics answers with vllm: counters) — validated only here; connect it through the vLLM card (Local runners) for live token counting from those counters' };
+}
+/** The stored billed days of `id` with day `d` replaced by `amount` — for gateways that report only today's spend, so yesterday's figure survives the next sync. */
+function mergeBilledDay(id, d, amount) {
+  return Store.billedRows(id).filter(b => b && b.d !== d).concat([{ d, amount }]).sort((a, b) => a.d < b.d ? -1 : 1);
+}
