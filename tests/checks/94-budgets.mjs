@@ -114,7 +114,7 @@ export async function run({ browser, ok }) {
         { d: todayKey(), platform: 'OpenAI Codex CLI', model: 'gpt-6-astra', in: 1_000_000, cw: 0, cr: 0, out: 100_000, msgs: 5730 },   // $3 + $1.50 at the fallback row
         { d: todayKey(), platform: 'OpenAI Codex CLI', model: 'codex-auto-review', in: 100_000, cw: 0, cr: 0, out: 0, msgs: 3 },         // $0.30
       ], {});
-      Store.setSource('anthropic', [{ d: todayKey(), platform: 'Anthropic API', model: 'claude-sonnet-5', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 1 }], {});   // priced: $2
+      Store.setSource('anthropic', [{ d: todayKey(), platform: 'Anthropic API', model: 'claude-3-haiku-20240307', in: 8_000_000, cw: 0, cr: 0, out: 0, msgs: 1 }], {});   // priced: $2
       Store.setSource('ollama', [{ d: todayKey(), platform: 'Ollama', model: 'llama-mystery', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 9 }], {});               // local: $0, never flagged
       App._render();
       const list = App.unpricedModels(Store.allRows());
@@ -136,8 +136,8 @@ export async function run({ browser, ok }) {
       !!un.text && /2 models are priced at the fallback rate \(\$3 in \/ \$15 out per M\): gpt-6-astra \(5,730 msgs, \$4\.50\), codex-auto-review \(3 msgs, \$0\.300\) — set their prices in the API price list\./.test(un.text) && /serious/.test(un.level) && un.buttons.join() === 'Set prices,Dismiss',
       JSON.stringify([un.text, un.level, un.buttons]));
     ok('unpriced: totals unchanged — the fallback price is still applied (breakdown total $6.80)', un.total === '$6.80', String(un.total));
-    ok('unpriced (Plan 10 T3b): a second sentence discloses the models priced from an unverified or user-edited row — claude-sonnet-5 is an Aug-2026 row carried over unverified (c: existing), with its count, message count and cost',
-      /API price list\. 1 model is priced from an unverified or user-edited row, so its cost is an estimate: claude-sonnet-5 \(unverified since Aug 2026, 1 msg, \$2\.00\)\./.test(un.text || ''), String(un.text));
+    ok('unpriced (Plan 10 T3b): a second sentence discloses the models priced from an unverified or user-edited row — claude-3-haiku-20240307 is an Aug-2026 row carried over unverified (c: existing), with its count, message count and cost',
+      /API price list\. 1 model is priced from an unverified or user-edited row, so its cost is an estimate: claude-3-haiku-20240307 \(unverified since Aug 2026, 1 msg, \$2\.00\)\./.test(un.text || ''), String(un.text));
 
     const fbRow = await page.evaluate(() => {
       const fb = Pricing.rows.find(r => r.pat === '.*'); const was = fb.in; fb.in = 4; Pricing.save();
@@ -192,7 +192,7 @@ export async function run({ browser, ok }) {
     const est = await page.evaluate(() => {
       LS.set('dismissedAlerts', {}); Store.sources = {}; LS.del('prices'); Pricing.load();
       Store.setSource('csv', [
-        { d: todayKey(), platform: 'Anthropic API', model: 'claude-sonnet-5', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 1 },   // c: existing → unverified since Aug 2026
+        { d: todayKey(), platform: 'Anthropic API', model: 'claude-3-haiku-20240307', in: 8_000_000, cw: 0, cr: 0, out: 0, msgs: 1 },   // c: existing → unverified since Aug 2026
         { d: todayKey(), platform: 'xAI', model: 'grok-4.3', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 2 },                   // c: high, verified → not listed
         { d: todayKey(), platform: 'Cursor', model: 'composer-1', in: 1_000_000, cw: 0, cr: 0, out: 0, msgs: 3 },               // c: low → low confidence
       ], {});
@@ -207,9 +207,9 @@ export async function run({ browser, ok }) {
       LS.set('dismissedAlerts', {}); Store.sources = {}; LS.del('prices'); Pricing.load(); App._render();
       return out;
     });
-    ok('unpriced (T3b): estimates alone — "3 models are priced from an unverified or user-edited row, so their cost is an estimate: claude-sonnet-5 (unverified since Aug 2026, 1 msg, $2.00), composer-1 (low confidence, 3 msgs, $1.25), grok-4.5 (user price, 4 msgs, $1.00)." — no fallback sentence, level info, Set prices + Dismiss, key estimates:<set>, dismissal hides it; the verified grok-4.3 row is not listed',
-      !!est.text && !/fallback rate/.test(est.text) && /^⚠ 3 models are priced from an unverified or user-edited row, so their cost is an estimate: claude-sonnet-5 \(unverified since Aug 2026, 1 msg, \$2\.00\), composer-1 \(low confidence, 3 msgs, \$1\.25\), grok-4\.5 \(user price, 4 msgs, \$1\.00\)\./.test(est.text)
-      && /\binfo\b/.test(est.cls) && !/serious/.test(est.cls) && est.buttons.join() === 'Set prices,Dismiss' && est.keys.join() === 'estimates:claude-sonnet-5,composer-1,grok-4.5' && est.gone, JSON.stringify(est));
+    ok('unpriced (T3b): estimates alone — "3 models are priced from an unverified or user-edited row, so their cost is an estimate: claude-3-haiku-20240307 (unverified since Aug 2026, 1 msg, $2.00), composer-1 (low confidence, 3 msgs, $1.25), grok-4.5 (user price, 4 msgs, $1.00)." — no fallback sentence, level info, Set prices + Dismiss, key estimates:<set>, dismissal hides it; the verified grok-4.3 row is not listed',
+      !!est.text && !/fallback rate/.test(est.text) && /^⚠ 3 models are priced from an unverified or user-edited row, so their cost is an estimate: claude-3-haiku-20240307 \(unverified since Aug 2026, 1 msg, \$2\.00\), composer-1 \(low confidence, 3 msgs, \$1\.25\), grok-4\.5 \(user price, 4 msgs, \$1\.00\)\./.test(est.text)
+      && /\binfo\b/.test(est.cls) && !/serious/.test(est.cls) && est.buttons.join() === 'Set prices,Dismiss' && est.keys.join() === 'estimates:claude-3-haiku-20240307,composer-1,grok-4.5' && est.gone, JSON.stringify(est));
   } finally {
     await page.close();
   }
