@@ -361,6 +361,10 @@ export async function run() {
     fs.rmSync(HOME_CW, { recursive: true, force: true });
     fs.cpSync(path.join(OUT_DIR, 'claude-logs', 'projects'), path.join(HOME_CW, '.claude', 'projects'), { recursive: true });
     fs.cpSync(path.join(OUT_DIR, 'cowork', 'local-agent-mode-sessions'), path.join(HOME_CW, 'Claude', 'local-agent-mode-sessions'), { recursive: true });
+    // a Cowork session's outputs/ uploads/ (+ uploads-tmp/ .project-cache/ session-env/ backups/) hold the files the task handled, not logs: never listed, never served
+    const cwSessionA = path.join(HOME_CW, 'Claude', 'local-agent-mode-sessions', '0f0f0f0f-0000-4000-8000-000000000001', '0f0f0f0f-0000-4000-8000-000000000002', 'local_aaaa0001-0000-4000-8000-000000000001');
+    fs.mkdirSync(path.join(cwSessionA, 'uploads'), { recursive: true });
+    fs.writeFileSync(path.join(cwSessionA, 'uploads', 'report.csv'), 'name,salary\nFIXTURE-PRIVATE,1\n');
     c = await start([], HOME_CW);
     add('collector (B1): starts against a HOME that holds both ~/.claude and <APPDATA>/Claude/local-agent-mode-sessions', c.port > 0, c.io());
     if (!c.port) return summary();
@@ -370,18 +374,27 @@ export async function run() {
     const loc = (s3.tools || []).find((t) => t.id === 'local') || {};
     const locRoots = (loc.roots || []).map((r) => path.resolve(r));
     const cwRoot = path.join(HOME_CW, 'Claude', 'local-agent-mode-sessions');
-    add('collector (B1): /api/status → local found with TWO roots — ~/.claude then <Claude app folder>/local-agent-mode-sessions — 7 files (2 Claude Code + 3 Cowork transcripts + audit.jsonl + the task\'s outputs/notes.jsonl; .credentials.json never counted); the candidates name the Cowork folder; the banner says "2 roots" for local',
-      loc.found === true && locRoots.length === 2 && locRoots[0] === path.join(HOME_CW, '.claude') && locRoots[1] === cwRoot && loc.files === 7 && (loc.candidates || []).map((x) => path.resolve(x)).includes(cwRoot)
-        && /^\s*local\b[^\n]*\b7 files\b[^\n]*\+/m.test(c.out.slice(0, c.out.indexOf('listening on'))),
+    add('collector (B1): /api/status → local found with TWO roots — ~/.claude then <Claude app folder>/local-agent-mode-sessions — 6 files (2 Claude Code + 3 Cowork transcripts + audit.jsonl; the task\'s outputs/ uploads/ files and .credentials.json never counted); the candidates name the Cowork folder; the banner names both roots',
+      loc.found === true && locRoots.length === 2 && locRoots[0] === path.join(HOME_CW, '.claude') && locRoots[1] === cwRoot && loc.files === 6 && (loc.candidates || []).map((x) => path.resolve(x)).includes(cwRoot)
+        && /^\s*local\b[^\n]*\b6 files\b[^\n]*\+/m.test(c.out.slice(0, c.out.indexOf('listening on'))),
       JSON.stringify(loc).slice(0, 800) + ' · banner: ' + c.out.slice(0, c.out.indexOf('listening on')).replace(/\s+/g, ' ').slice(0, 400));
     const l3 = asJson(await C('/api/list?tool=local')) || {};
     const p3 = (l3.files || []).map((f) => f.path).sort();
     const cwTranscript = p3.find((p) => /^local-agent-mode-sessions\/[^/]+\/[^/]+\/local_aaaa[^/]+\/\.claude\/projects\/[^/]+\/aaaa0001-0000-4000-8000-00000000000a\.jsonl$/.test(p));
     const cwAudit = p3.find((p) => /^local-agent-mode-sessions\/[^/]+\/[^/]+\/local_aaaa[^/]+\/audit\.jsonl$/.test(p));
-    add('collector (B1): /api/list?tool=local → roots = both; paths prefixed ".claude/…" (2) and "local-agent-mode-sessions/…" (5) including the Cowork transcript, its subagents/agent-*.jsonl and audit.jsonl; no credential file',
-      (l3.roots || []).length === 2 && p3.length === 7 && p3.filter((p) => p.startsWith('.claude/')).length === 2 && p3.filter((p) => p.startsWith('local-agent-mode-sessions/')).length === 5
+    add('collector (B1): /api/list?tool=local → roots = both; paths prefixed ".claude/…" (2) and "local-agent-mode-sessions/…" (4) including the Cowork transcript, its subagents/agent-*.jsonl and audit.jsonl; no credential file',
+      (l3.roots || []).length === 2 && p3.length === 6 && p3.filter((p) => p.startsWith('.claude/')).length === 2 && p3.filter((p) => p.startsWith('local-agent-mode-sessions/')).length === 4
         && !!cwTranscript && !!cwAudit && p3.some((p) => /\/subagents\/agent-a0001\.jsonl$/.test(p)) && !p3.some((p) => /credentials/i.test(p)),
       p3.join(','));
+    // trust gap (B1 follow-up): under a local-agent-mode-sessions root the per-session outputs/ uploads/ uploads-tmp/ .project-cache/ session-env/ backups/
+    // are the files a Cowork task handled — a token holder must get neither a listing nor the bytes, whatever the extension; ~/.claude keeps its rules
+    const cwSession = cwAudit ? cwAudit.replace(/audit\.jsonl$/, '') : 'local-agent-mode-sessions/x/y/local_z/';
+    const outputsGet = await C('/api/file?tool=local&path=' + encodeURIComponent(cwSession + 'outputs/notes.jsonl'));
+    const uploadsGet = await C('/api/file?tool=local&path=' + encodeURIComponent(cwSession + 'uploads/report.csv'));
+    add('collector (B1 trust): a Cowork session\'s outputs/notes.jsonl and uploads/report.csv are neither listed by /api/list nor served by /api/file (404 JSON "file not found", like a missing file, although both exist on disk and pass the extension allow-list)',
+      !p3.some((p) => /\/(outputs|uploads)\//.test(p)) && fs.existsSync(path.join(HOME_CW, 'Claude', ...(cwSession + 'outputs/notes.jsonl').split('/'))) && fs.existsSync(path.join(HOME_CW, 'Claude', ...(cwSession + 'uploads/report.csv').split('/')))
+        && outputsGet.status === 404 && isJsonCT(outputsGet) && /file not found/.test(outputsGet.body.toString()) && uploadsGet.status === 404 && isJsonCT(uploadsGet) && /file not found/.test(uploadsGet.body.toString()) && !uploadsGet.body.includes('FIXTURE-PRIVATE'),
+      `list has outputs/uploads: ${p3.filter((p) => /\/(outputs|uploads)\//.test(p)).join(',') || 'none'} · outputs ${outputsGet.status} ${outputsGet.body.toString().slice(0, 80)} · uploads ${uploadsGet.status} ${uploadsGet.body.toString().slice(0, 80)}`);
     const wantAudit = cwAudit ? fs.readFileSync(path.join(HOME_CW, 'Claude', ...cwAudit.split('/'))) : Buffer.alloc(0);
     const fAudit = await C('/api/file?tool=local&path=' + encodeURIComponent(cwAudit || 'none'));
     add('collector (B1): /api/file resolves the "local-agent-mode-sessions/…/audit.jsonl" path through the second root byte-exact',

@@ -42,7 +42,9 @@
  *     Access-Control-Allow-Private-Network: true; OPTIONS → 204 — so a file:// page (Chrome's Private Network Access rules) and
  *     the collector-served page can both call it.
  *   - Read-only. Paths are validated to stay inside the tool's root: "..", absolute paths and symlinks are rejected (400). The
- *     recursive walk follows no symlinks and skips node_modules / .git / checkpoints. The token file itself is never listed or served —
+ *     recursive walk follows no symlinks and skips node_modules / .git / checkpoints; under a Cowork root (local-agent-mode-sessions) it also
+ *     skips each session's outputs / uploads / uploads-tmp / .project-cache / session-env / backups — the files a task handled, not logs —
+ *     and /api/file refuses any path through them (404), whatever the extension. The token file itself is never listed or served —
  *     not even through ollama, whose first root is ~/.ai-usage where the token lives (404, checked before and after realpath).
  *   - Only usage-log file types are listed or served (extension allow-list), and never a credential file by name (deny-list) — see
  *     SERVE_EXT / DENY_NAME below for the exact rules and why each name is on the list. Anything else under a root answers 404.
@@ -220,6 +222,11 @@ const servable = (name) => !DENY_NAME.test(name) && SERVE_EXT.has(path.extname(n
 // falls back to the TTL: re-walk when the cache is older than TTL_MS (status says watch: 'polling'). A root set that changed (a folder
 // created or removed after start) is re-walked and re-watched — that check is a few stat calls per status.
 const SKIP_DIRS = new Set(['node_modules', '.git', 'checkpoints']);
+// Under a Cowork root (…/local-agent-mode-sessions) every session folder also holds the files the task handled — outputs/, uploads/, uploads-tmp/,
+// .project-cache/ (documents the user attached), session-env/, backups/ (.claude.json copies). Not logs: never walked, never served (B1 follow-up).
+const COWORK_SKIP_DIRS = new Set(['outputs', 'uploads', 'uploads-tmp', '.project-cache', 'session-env', 'backups']);
+const isCoworkRoot = (dir) => dir.split(/[\\/]/).includes(COWORK_DIR);
+const skipsDir = (rootDir, name) => SKIP_DIRS.has(name) || (isCoworkRoot(rootDir) && COWORK_SKIP_DIRS.has(name.toLowerCase()));
 const TTL_MS = 30000;       // polling fallback only
 const DEBOUNCE_MS = 2000;
 const STAT_BATCH = 64;      // stats per Promise.all (the thread pool overlaps them: ~4× faster than one at a time on Windows)
@@ -250,7 +257,7 @@ async function walkRoot(dir, prefix) {
     const names = [];
     for (const e of ents) {
       if (e.isSymbolicLink()) continue;
-      if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) stack.push(rel ? rel + '/' + e.name : e.name); continue; }
+      if (e.isDirectory()) { if (!skipsDir(dir, e.name)) stack.push(rel ? rel + '/' + e.name : e.name); continue; }
       if (!e.isFile()) continue;
       if (isTokenFile(path.join(abs, e.name))) continue;   // the token file is never listed (resolveFile refuses to serve it too)
       if (!servable(e.name)) continue;                     // extension allow-list + credential deny-list (A0 #17; resolveFile applies the same rule)
@@ -355,6 +362,7 @@ async function resolveFile(t, relIn) {
   else { root = s.roots[0].dir; rest = segs; }
   const abs = path.resolve(root, ...rest);
   if (!inside(abs, root)) return { status: 400, error: 'path resolves outside the tool folder' };
+  if (rest.slice(0, -1).some((sg) => skipsDir(root, sg))) return { status: 404, error: 'file not found' };   // a skipped folder (a Cowork session's outputs/, uploads/, …) is never served — same answer as a missing file
   if (isTokenFile(abs)) return { status: 404, error: 'file not found' };   // the token file is never served: ollama's first root is ~/.ai-usage, where it lives
   if (!servable(path.basename(abs))) return { status: 404, error: 'file not found' };   // not a usage-log type, or a credential file by name (A0 #17) — same answer as a missing file
   let st; try { st = await fsp.lstat(abs); } catch { return { status: 404, error: 'file not found' }; }
