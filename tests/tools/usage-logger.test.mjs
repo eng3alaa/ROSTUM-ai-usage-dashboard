@@ -47,8 +47,10 @@ const SMALL_CHUNKS = 20000;
 const SMALL_FINAL = Buffer.from('data: ' + JSON.stringify({ id: 'cmpl-1', object: 'text_completion', model: MODEL, choices: [], usage: { prompt_tokens: SMALL.in, completion_tokens: SMALL.out, total_tokens: SMALL.in + SMALL.out } }) + '\n\ndata: [DONE]\n\n');
 const EXPECT_BYTES = { '/api/chat': CHAT_BLOCK.length * CHAT_BLOCKS + CHAT_FINAL.length, '/v1/chat/completions': SSE_BLOCK.length + SSE_FINAL.length, '/api/generate': GEN_DOC.length, '/v1/completions': SMALL_CHUNK.length * SMALL_CHUNKS + SMALL_FINAL.length };
 
+let upstreamHits = 0;   // A0 #21: a request the proxy refused (421) must never reach the upstream
 function fakeUpstream() {
   return http.createServer((req, res) => {
+    upstreamHits++;
     req.resume();
     req.on('end', async () => {
       if (req.method !== 'POST') { res.writeHead(404); res.end(); return; }
@@ -62,9 +64,9 @@ function fakeUpstream() {
 }
 
 // --- client through the proxy ----------------------------------------------------------------------------------------------
-const post = (port, pathname) => new Promise((resolve, reject) => {
+const post = (port, pathname, extraHeaders = {}) => new Promise((resolve, reject) => {
   const body = JSON.stringify({ model: MODEL, messages: [{ role: 'user', content: 'hi' }], stream: true });
-  const req = http.request({ host: '127.0.0.1', port, path: pathname, method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } }, (res) => {
+  const req = http.request({ host: '127.0.0.1', port, path: pathname, method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), ...extraHeaders } }, (res) => {
     let bytes = 0;
     res.on('data', (c) => { bytes += c.length; });
     res.on('end', () => resolve({ status: res.statusCode, bytes }));
@@ -118,8 +120,17 @@ export async function run() {
     add('usage-logger: /v1 SSE stream over the window — the final usage chunk is logged (77/11)', v1.pass, v1.detail);
     add('usage-logger: non-streamed 200 KB /api/generate document — the counts near its end are logged (31/9)', gen.pass, gen.detail);
     const passthrough = PATHS.every((p) => got[p].status === 200 && got[p].bytes === EXPECT_BYTES[p]);
+    // A0 #21: Host allow-list like the collector's — a DNS name resolving to 127.0.0.1 (rebinding) is answered 421 and never forwarded (the Host rewrite would otherwise defeat Ollama's own loopback check)
+    const hitsBefore = upstreamHits;
+    const evil = await post(port, '/api/chat', { host: 'evil.test' });
+    const evilPort = await post(port, '/api/chat', { host: '127.0.0.1.evil.test:' + port });
+    const okHost = await post(port, '/v1/completions', { host: 'localhost:' + port });
+    add('usage-logger (A0 #21): Host evil.test / 127.0.0.1.evil.test:<port> → 421 JSON and the upstream is never hit; Host localhost:<port> is proxied (200)',
+      evil.status === 421 && evilPort.status === 421 && upstreamHits === hitsBefore + 1 && okHost.status === 200, JSON.stringify({ evil: evil.status, evilPort: evilPort.status, okHost: okHost.status, hits: upstreamHits - hitsBefore }));
     add('usage-logger: 20 000 small SSE chunks (~2 MB) — the final usage chunk is logged (5/3) and the request finishes in under 5 s (tail kept as a chunk list, one concat at read time)', small.pass && took['/v1/completions'] < 5000, small.detail + ' · ' + took['/v1/completions'] + ' ms');
-    add('usage-logger: exactly four JSONL lines and every body passed through byte-for-byte', lines.length === PATHS.length && passthrough, `${lines.length} line(s) · ${JSON.stringify(got)} · expected bytes ${JSON.stringify(EXPECT_BYTES)}`);
+    const until2 = Date.now() + 5000; let lines2 = readLines(logFile);   // the localhost-Host request's line is appended after its response ends — give it a moment too
+    while (Date.now() < until2 && lines2.length < PATHS.length + 1) { await sleep(100); lines2 = readLines(logFile); }
+    add('usage-logger: exactly four JSONL lines (+1 for the localhost Host check) and every body passed through byte-for-byte', lines.length === PATHS.length && passthrough && lines2.length === PATHS.length + 1, `${lines.length} line(s) then ${lines2.length} · ${JSON.stringify(got)} · expected bytes ${JSON.stringify(EXPECT_BYTES)}`);
     return summary();
   } catch (e) {
     add('usage-logger: test threw', false, (e && e.stack || String(e)) + ' · ' + io());

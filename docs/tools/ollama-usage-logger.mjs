@@ -24,6 +24,8 @@
  * and in the dashboard's Ollama card choose the folder that holds the JSONL (default ~/.ai-usage).
  *
  * Env: LOG_PORT (11435; 0 = any free port, printed at start) · OLLAMA_URL (http://127.0.0.1:11434) · USAGE_LOG (~/.ai-usage/ollama-usage.jsonl)
+ * Host allow-list: only Host 127.0.0.1, localhost or [::1] (with or without the port) is proxied; anything else → 421. The proxy rewrites Host
+ * for the upstream, which would otherwise defeat Ollama's own loopback-Host check for a DNS name that resolves to 127.0.0.1 (rebinding).
  * Line shape: {"ts":"<ISO>","platform":"Ollama","model":"llama4:8b","in":123,"out":456,"msgs":1,"path":"/api/chat"}
  * The dashboard reads it with parseUsageLoggerJsonl (any {ts, platform, model, in, out} JSONL works).
  */
@@ -113,7 +115,14 @@ function record(pathname, cap) {
   console.log(`logged ${r.model} in=${r.in} out=${r.out} (${pathname})`);
 }
 
+const HOST_OK = /^(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$/i;   // A0 #21 — the collector's rule: a rebinding name is answered 421, never proxied
 const server = http.createServer((req, res) => {
+  if (!HOST_OK.test(String(req.headers.host || '').trim())) {
+    req.resume();
+    res.writeHead(421, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'misdirected request', hint: 'the proxy answers only for Host 127.0.0.1, localhost or [::1] (with the port)' }));
+    return;
+  }
   const url = new URL(req.url, 'http://x');
   const capture = req.method === 'POST' && CAPTURE.test(url.pathname);
   const up = http.request({ hostname: UPSTREAM.hostname, port: UPSTREAM.port || 80, path: req.url, method: req.method, headers: { ...req.headers, host: UPSTREAM.host } }, (ur) => {

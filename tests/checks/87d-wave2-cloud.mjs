@@ -80,6 +80,13 @@ export async function run({ browser, ok }) {
         await App.connectKey(c);
         const degraded = { err: (Store.connectors['azure-openai'] || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('azure-openai-status').textContent, rows: (Store.sources['azure-openai'] || { rows: [] }).rows.length,
           billedStale: (Store.billed['azure-openai'] || {}).stale, billedKept: Store.billedRows('azure-openai').map(b => b.d + '|' + b.amount) };
+        // A0 #19: a Cost Management nextLink pointing off management.azure.com is refused — the bearer token never travels there; the cost half degrades like any cost failure, the Monitor rows land
+        const evilCost = JSON.parse(costText); evilCost.properties.nextLink = 'https://management.azure.com.evil.example/subscriptions/s1/providers/Microsoft.CostManagement/query?skiptoken=x';
+        calls.length = 0;
+        window.fetch = async (url, init = {}) => { const u = String(url); if (u.includes('management.azure.com/subscriptions/s1/providers/Microsoft.CostManagement/query')) { calls.push({ url: u, method: 'POST', headers: {}, body: init.body || null }); return new Response(JSON.stringify(evilCost), { status: 200, headers: { 'content-type': 'application/json' } }); } return stub(url, init); };
+        await App.connectKey(c);
+        const hostCheck = { evilCalls: calls.filter(x => /evil\.example/.test(x.url)).length, costCalls: calls.filter(x => x.url.includes('/Microsoft.CostManagement/query')).length, err: (Store.connectors['azure-openai'] || {}).err || null, status: Store.connectorStatus(c),
+          statusText: document.getElementById('azure-openai-status').textContent, billedStale: (Store.billed['azure-openai'] || {}).stale, rows: (Store.sources['azure-openai'] || { rows: [] }).rows.length };
         // expired token: 401 → the "mint a new one" message, attention state
         window.fetch = async () => new Response(JSON.stringify({ error: { code: 'ExpiredAuthenticationToken', message: 'The access token expiry UTC time is earlier than current UTC time.' } }), { status: 401, headers: { 'content-type': 'application/json' } });
         await App.connectKey(c);
@@ -114,7 +121,7 @@ export async function run({ browser, ok }) {
         const noScope = { billed: Store.billedRows('azure-openai').length, stale: (Store.billed['azure-openai'] || {}).stale, rows: (Store.sources['azure-openai'] || { rows: [] }).rows.length,
           err: (Store.connectors['azure-openai'] || {}).err || null, status: Store.connectorStatus(c), statusText: document.getElementById('azure-openai-status').textContent,
           costCalls: calls.filter(x => x.url.includes('/Microsoft.CostManagement/query')).length, scopeLS: LS.get('field:azure-openai:scope', null) };
-        out = { ui, happy, metricsCalls, costCalls, storage, expired, noRes, badScope, badRes, noScope, degraded };
+        out = { ui, happy, metricsCalls, costCalls, storage, expired, noRes, badScope, badRes, noScope, degraded, hostCheck };
       } finally {
         window.fetch = origFetch;
         keyEl.value = ''; resEl.value = ''; scopeEl.value = '';
@@ -129,6 +136,9 @@ export async function run({ browser, ok }) {
       && az.ui.textarea === 'TEXTAREA' && az.ui.scopeInput === 'INPUT'
       && az.ui.reg.kind === 'cloud-token' && az.ui.reg.cat === 'cloud' && az.ui.reg.so && az.ui.reg.q === 'exact' && az.ui.reg.fetch === 'fetchAzureOpenAI' && az.ui.reg.platform === 'Azure OpenAI'
       && az.ui.reg.srcIds.join() === 'azure-openai' && az.ui.reg.statusEl === 'azure-openai-status' && az.ui.reg.fields.join() === 'resources,scope', JSON.stringify(az.ui || az));
+    ok('azure (A0 #19): a Cost Management nextLink to management.azure.com.evil.example is refused before any request — 0 calls to that host, 1 cost call, the Monitor rows land (ok, no err), billed stays stale and the status line says the cost half is unavailable and names the refused host',
+      !!az.hostCheck && az.hostCheck.evilCalls === 0 && az.hostCheck.costCalls === 1 && az.hostCheck.err === null && az.hostCheck.status === 'ok' && az.hostCheck.rows > 0 && az.hostCheck.billedStale === true
+      && /cost unavailable/.test(az.hostCheck.statusText) && /management\.azure\.com/.test(az.hostCheck.statusText), JSON.stringify(az.hostCheck));
     // Expected (fixture comment in gen.mjs): west gpt-4o 08-10 1000/200 + east 150/0 (east's InputTokens 150 beats ITS OWN legacy 999) = 1150/200 ·
     // west gpt-4o 08-11 480/90 (newer wins over west's legacy 500/100) + east legacy 250/40 = 730/130 · gpt-4.1-mini 08-10 300/60 · azure-openai 08-12 0/7
     // → in = 1150+730+300+0 = 2180 · out = 200+130+60+7 = 397. A dedupe keyed by (day, model) across resources would read 930/357 instead.

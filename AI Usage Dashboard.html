@@ -865,6 +865,9 @@ const dayKeyUTC = (dateish) => {
   if (isNaN(d)) return null;
   return d.toISOString().slice(0, 10);
 };
+/* Every network request carries a timeout (A0 #25): a provider that never answers must not leave a card at "Fetching…" forever. */
+const REQUEST_TIMEOUT_MS = 30000;
+const requestTimeout = () => AbortSignal.timeout(REQUEST_TIMEOUT_MS);
 /* Provider payload numbers are untrusted — reject Infinity/NaN/garbage before they reach totals */
 const finTok = (v) => Number.isFinite(v) && v >= 0 ? v : 0;   // counts: finite and non-negative only
 const finAmt = (v) => Number.isFinite(v) ? v : 0;              // money: finite, negatives allowed (credits)
@@ -898,6 +901,54 @@ function bucketDays(days, maxCols = 160) {
   return { buckets, unit };
 }
 const fmtDayShort = (key) => { const d = new Date(key + 'T12:00:00'); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
+
+/* ---------- A0 #23: what a stored blob may contain. One bad row must not poison totals (NaN) or crash the page — rows / envelopes / entries
+ * without the shape the app writes are dropped and counted; Store.load announces the count in a banner. ---------- */
+const isRecord = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+/** A usage row: a day key, platform + model strings, finite non-negative counts (coerced; an absent count reads 0) — or null. */
+function validUsageRow(r) {
+  if (!isRecord(r) || !RE_DATEONLY.test(String(r.d)) || typeof r.platform !== 'string' || typeof r.model !== 'string') return null;
+  const out = { ...r };
+  for (const k of ['in', 'cw', 'cr', 'out', 'msgs']) { const v = r[k] == null ? 0 : +r[k]; if (!Number.isFinite(v) || v < 0) return null; out[k] = v; }
+  return out;
+}
+function loadSources(src, dropped) {
+  const out = {};
+  for (const [id, s] of Object.entries(isRecord(src) ? src : {})) {
+    if (!isRecord(s) || !Array.isArray(s.rows)) { dropped.other++; continue; }
+    const rows = []; for (const r of s.rows) { const v = validUsageRow(r); if (v) rows.push(v); else dropped.rows++; }
+    out[id] = { rows, meta: isRecord(s.meta) ? s.meta : {} };
+  }
+  return out;
+}
+function loadBilled(b, dropped) {
+  const out = {};
+  for (const [id, v] of Object.entries(isRecord(b) ? b : {})) {
+    const env = Array.isArray(v) ? { rows: v, at: null, stale: false } : v;   // v1 arrays migrate to { rows, at, stale } envelopes
+    if (!isRecord(env) || !Array.isArray(env.rows)) { dropped.other++; continue; }
+    const rows = []; for (const r of env.rows) { if (isRecord(r) && RE_DATEONLY.test(String(r.d)) && Number.isFinite(+r.amount)) rows.push({ ...r, amount: +r.amount }); else dropped.billed++; }
+    out[id] = { rows, at: Number.isFinite(+env.at) ? +env.at : null, stale: env.stale === true };
+  }
+  return out;
+}
+function loadProjectsBy(pb, dropped) {
+  const out = {};
+  for (const [id, list] of Object.entries(isRecord(pb) ? pb : {})) {
+    if (!Array.isArray(list)) { dropped.other++; continue; }
+    out[id] = list.filter(p => { const ok = isRecord(p) && typeof p.project === 'string'; if (!ok) dropped.other++; return ok; });
+  }
+  return out;
+}
+function loadConnectors(c, dropped) {
+  const out = {};
+  for (const [id, st] of Object.entries(isRecord(c) ? c : {})) { if (isRecord(st)) out[id] = st; else dropped.other++; }
+  return out;
+}
+function reportDropped(d) {
+  const n = d.rows + d.billed + d.other;
+  if (!n) return;
+  showStorageBanner('data-warning', `${n} stored item${n === 1 ? ' was' : 's were'} unreadable and dropped on load (${d.rows} usage row${d.rows === 1 ? '' : 's'}, ${d.billed} billed amount${d.billed === 1 ? '' : 's'}, ${d.other} other) — totals exclude them; export a CSV backup if the numbers look wrong.`);
+}
 
 /* ---------- persistent settings ---------- */
 /** One role="alert" banner per id at the top of the page (created on first use, its text replaced after) — textContent only. */
@@ -1387,10 +1438,25 @@ function normalizeModelId(model) {
     .replace(/-thinking$/, '');
 }
 
+/** A0 #23 — price rows a stored list may hold: pattern + label strings, finite in/out/cw/cr (coerced to numbers); anything else is dropped and announced. */
+function validPriceRows(list) {
+  const rows = []; let dropped = 0;
+  for (const r of list) {
+    const ok = isRecord(r) && typeof r.pat === 'string' && r.pat && typeof r.label === 'string' && ['in', 'out', 'cw', 'cr'].every(k => Number.isFinite(+r[k]));
+    if (ok) rows.push({ ...r, in: +r.in, out: +r.out, cw: +r.cw, cr: +r.cr }); else dropped++;
+  }
+  if (dropped) showStorageBanner('prices-warning', `${dropped} stored price row${dropped === 1 ? ' was' : 's were'} unreadable and dropped on load — check the price list (Reset restores the built-in rows).`);
+  return rows;
+}
+
 const Pricing = {
   rows: [],
   _cache: new Map(),
-  load() { this.rows = LS.get('prices', null) || JSON.parse(JSON.stringify(DEFAULT_PRICES)); this._cache.clear(); },
+  load() {
+    const saved = LS.get('prices', null);
+    this.rows = Array.isArray(saved) ? validPriceRows(saved) : JSON.parse(JSON.stringify(DEFAULT_PRICES));
+    this._cache.clear();
+  },
   save() { LS.set('prices', this.rows); this._cache.clear(); },
   reset() { this.rows = JSON.parse(JSON.stringify(DEFAULT_PRICES)); this.save(); },
   /** Plan 6: the catch-all row — the one whose pattern is '.*' (a user may edit or reorder the list), else the last row (what resolve() falls back to). */
@@ -1524,7 +1590,11 @@ const Insights = {
 /* ---------- BUDGETS — monthly USD limits per platform or 'total' ---------- */
 const Budgets = {
   limits: {},          // { total?: n, [platform]: n }
-  load() { this.limits = LS.get('budgets', null) || {}; },
+  load() {   // a budget is a finite positive number or nothing (A0 #23)
+    const saved = LS.get('budgets', null);
+    this.limits = {};
+    for (const [k, v] of Object.entries(isRecord(saved) ? saved : {})) if (Number.isFinite(+v) && +v > 0) this.limits[k] = +v;
+  },
   set(key, usd) { if (usd == null || !Number.isFinite(+usd) || !(+usd > 0)) delete this.limits[key]; else this.limits[key] = +usd; LS.set('budgets', this.limits); },
   monthKey(today) { return (today || todayKey()).slice(0, 7); },
   status(today) {
@@ -1943,15 +2013,19 @@ const Store = {
   _frozen: false,    // A0 #16: true when a corrupt blob could not be backed up — persist() then leaves it alone (the banner says so)
   load() {
     const saved = this._readSaved();
-    if (saved) { this.sources = saved.sources || {}; this.billed = saved.billed || {}; this.projects = saved.projects || []; this.projectsBy = saved.projectsBy || {}; this.connectors = saved.connectors || {}; }
-    // migrate v1 billed arrays to {rows, at, stale} envelopes
-    for (const [k, v] of Object.entries(this.billed)) {
-      if (Array.isArray(v)) this.billed[k] = { rows: v, at: null, stale: false };
+    if (isRecord(saved)) {   // every part shape-checked (A0 #23); v1 billed arrays migrate to envelopes inside loadBilled
+      const dropped = { rows: 0, billed: 0, other: 0 };
+      this.sources = loadSources(saved.sources, dropped);
+      this.billed = loadBilled(saved.billed, dropped);
+      this.projects = Array.isArray(saved.projects) ? saved.projects.filter(isRecord) : [];
+      this.projectsBy = loadProjectsBy(saved.projectsBy, dropped);
+      this.connectors = loadConnectors(saved.connectors, dropped);
+      reportDropped(dropped);
     }
     // migrate ONLY a genuine pre-v2 blob (no `connectors` key at all — v2's persist() always
     // writes the key, even as {}). Running this unconditionally on every load would resurrect
     // a keep-data disconnect (connectors[id] deleted, sources kept) as 'stored data'/ok again.
-    if (saved && !('connectors' in saved)) this.migrateConnectors();
+    if (isRecord(saved) && !('connectors' in saved)) this.migrateConnectors();
   },
   /** The persisted blob, parsed — or null when there is none. A blob that no longer parses is quarantined (A0 #16): kept byte-for-byte under
    *  'data.corrupt' so nothing is lost, announced in a banner, and this load starts empty; persist() then writes a fresh blob beside it. */
@@ -2288,7 +2362,11 @@ class RemoteFile {
     this._headers = { Authorization: 'Bearer ' + token };
   }
   async _open() {
-    const r = await fetch(this._url, { headers: this._headers });
+    // the timeout covers the connect + headers only: once the answer streams, a long parse pulling the body chunk by chunk must not be aborted (A0 #25)
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(new DOMException(`the collector did not answer within ${REQUEST_TIMEOUT_MS / 1000} s`, 'TimeoutError')), REQUEST_TIMEOUT_MS);
+    let r;
+    try { r = await fetch(this._url, { headers: this._headers, signal: ctrl.signal }); } finally { clearTimeout(timer); }
     if (!r.ok) throw new Error(`HTTP ${r.status}${r.statusText ? ' ' + r.statusText : ''} reading ${this.webkitRelativePath} from the collector`);
     return r;
   }
@@ -3636,7 +3714,7 @@ function parseOpenAICost(payload) {
 /** JSON GET. A non-2xx answer throws Error('HTTP <status>[ — <server message>]') with .status set, so callers can tell 404 (not available) from
  *  everything else (a real error for the card). */
 async function fetchJSON(url, headers) {
-  const res = await fetch(url, { headers });
+  const res = await fetch(url, { headers, signal: requestTimeout() });
   if (!res.ok) {
     let detail = '';
     try { const j = await res.json(); detail = (j.error && (j.error.message || j.error.type)) || ''; } catch { /* no JSON body: no detail */ }
@@ -3980,7 +4058,7 @@ async function fetchDeepSeekBalance(key, fields, opts) {
  *  verbatim), 403 → auth.denied (+ the server's own reason when it gives one), any other non-2xx → 'HTTP <status> — <server message>'.
  *  The bearer token / SigV4 signature travels only inside this request — nothing is logged or stored. */
 async function cloudJSON(url, init = {}, auth = {}) {
-  const res = await fetch(url, init);
+  const res = await fetch(url, { ...init, signal: requestTimeout() });
   if (res.ok) return res.status === 204 ? {} : res.json();
   let detail = '';
   try {
@@ -3990,6 +4068,14 @@ async function cloudJSON(url, init = {}, auth = {}) {
   if (res.status === 401 && auth.expired) throw new Error(auth.expired);
   if (res.status === 403 && auth.denied) throw new Error(auth.denied + (detail ? ` (${detail})` : ''));
   throw new Error(`HTTP ${res.status}${detail ? ' — ' + detail : ''}`);
+}
+
+/** A0 #19 — a Cost Management nextLink is followed with the bearer token, so it must stay on management.azure.com; anything else is refused and
+ *  the cost half reads "cost unavailable: …" with this message (the Monitor rows still land). */
+function assertAzureHost(link) {
+  let host = ''; try { host = new URL(link).host.toLowerCase(); } catch { /* not a URL: refused below */ }
+  if (host !== 'management.azure.com') throw new Error('Cost Management nextLink points at ' + (host || 'an invalid URL') + ', not management.azure.com — refused');
+  return link;
 }
 
 /** Azure OpenAI (Microsoft Foundry) — cloud-token fetcher. token: Entra access token (az account get-access-token --resource
@@ -4062,7 +4148,7 @@ async function fetchAzureOpenAI(token, fields, opts = {}) {
         if (!d) continue;
         byDay.set(d, (byDay.get(d) || 0) + finAmt(parseFloat(r[iCost])));
       }
-      url = props.nextLink || null;
+      url = props.nextLink ? assertAzureHost(props.nextLink) : null;   // the bearer token follows nextLink — only to management.azure.com (A0 #19)
     }
     billed = [...byDay.entries()].map(([d, amount]) => ({ d, amount })).sort((a, b) => a.d < b.d ? -1 : 1);
   } catch (e) { billed = null; costNote = ' · cost unavailable: ' + (e.message || String(e)).slice(0, 80); }   // tokens-only sync: reported in the status line, not an error state
@@ -4499,7 +4585,7 @@ async function readZipEntries(file) {
       const start = lho + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);   // local name + extra lengths may differ from the central ones
       const blob = file.slice(start, start + csize);
       if (method === 0) return new Uint8Array(await blob.arrayBuffer());
-      return new Uint8Array(await new Response(blob.stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+      return inflateBounded(blob, usize);
     };
     entries.push({ name, size: usize, method, bytes, text: async () => new TextDecoder('utf-8').decode(await bytes()) });
   }
@@ -4508,6 +4594,23 @@ async function readZipEntries(file) {
 
 /** "; N undated replies skipped" for a chat-export note, '' when none were (A0 #7). */
 const undatedNote = (meta) => meta.skipped ? `; ${meta.skipped} undated ${meta.skipped === 1 ? 'reply' : 'replies'} skipped` : '';
+
+/** deflate-raw → bytes, refusing to inflate past `declared` (the central directory's uncompressed size). The size is attacker-controlled, so this
+ *  bound is what stands between a small archive and an unbounded allocation (A0 #22); an honest entry is read whole. */
+async function inflateBounded(blob, declared) {
+  const reader = blob.stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+  const chunks = []; let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > declared) { await reader.cancel(); throw new Error(`ZIP entry inflates past its declared size (${declared} bytes) — refusing to read it`); }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total); let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.length; }
+  return out;
+}
 
 /* ---------- import router (drop zone) ---------- */
 /** Content sniff for ONE parsed .jsonl line dropped on Imports: which registered log format wrote it. Decisive shapes only — anything
@@ -6460,7 +6563,7 @@ const App = {
    *  path of connectCollector, _collectorTick and rescanViaCollector: the token travels as a header to the card's base URL only. */
   _collectorApi(base, token) {
     return async (path) => {
-      const r = await fetch(base + path, { headers: { Authorization: 'Bearer ' + token } });
+      const r = await fetch(base + path, { headers: { Authorization: 'Bearer ' + token }, signal: requestTimeout() });
       if (r.status === 401) { const e = new Error('Token rejected — copy the token the collector printed'); e.status = 401; throw e; }
       if (!r.ok) { const e = new Error(`Collector answered HTTP ${r.status} for ${path}`); e.status = r.status; throw e; }
       try { return await r.json(); }
@@ -6854,7 +6957,7 @@ const App = {
     if (!key) { status.textContent = 'Paste a Google AI Studio API key first (starts with AIza).'; return; }
     status.textContent = 'Validating…'; status.dataset.gen = String(gen);
     try {
-      const j = await fetchJSON('https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(key), {});
+      const j = await fetchJSON('https://generativelanguage.googleapis.com/v1beta/models', { 'x-goog-api-key': key });   // header, never ?key= (URLs land in history / logs — A0 #20)
       if (gen !== this._gen.gemini) { if (status.dataset.gen === String(gen)) status.textContent = ''; return; }   // superseded — only clear the placeholder if it's still ours
       if ($('remember-gemini') && $('remember-gemini').checked) LS.set('key:gemini', key);   // only a key Google accepted is remembered (A0 #11)
       const n = (j.models || []).length;
@@ -7287,13 +7390,16 @@ const App = {
   _timer: null,
   setupAutoRefresh() {
     const box = $('auto-refresh'), mins = $('auto-refresh-mins');
-    box.checked = LS.get('autoRefresh', false);
-    mins.value = String(LS.get('autoRefreshMins', 15));
+    const minutesOr15 = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n >= 1 ? n : 15; };   // never setInterval(NaN) (A0 #23)
+    box.checked = LS.get('autoRefresh', false) === true;
+    mins.value = String(minutesOr15(LS.get('autoRefreshMins', 15)));
     const apply = () => {
+      const every = minutesOr15(mins.value);
+      mins.value = String(every);
       LS.set('autoRefresh', box.checked);
-      LS.set('autoRefreshMins', parseInt(mins.value, 10));
+      LS.set('autoRefreshMins', every);
       if (this._timer) clearInterval(this._timer);
-      if (box.checked) this._timer = setInterval(() => this.refreshAll(), parseInt(mins.value, 10) * 60000);
+      if (box.checked) this._timer = setInterval(() => this.refreshAll(), every * 60000);
     };
     box.addEventListener('change', apply);
     mins.addEventListener('change', apply);

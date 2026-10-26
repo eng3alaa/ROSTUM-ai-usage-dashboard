@@ -252,6 +252,31 @@ export async function run({ browser, ok }) {
     ok('store (A0 #16): a corrupt aiusage:data blob loads as empty, is kept byte-for-byte under aiusage:data.corrupt and announced in a role="alert" banner naming that key; the next persist writes a fresh blob and leaves the backup untouched',
       quarantined.before.backup === RAW_CORRUPT && quarantined.before.sources === 0 && /could not be read/.test(quarantined.before.banner || '') && /aiusage:data\.corrupt/.test(quarantined.before.banner || '') && quarantined.before.role === 'alert'
       && quarantined.after.backup === RAW_CORRUPT && quarantined.after.freshRows === 1, JSON.stringify(quarantined));
+
+    // ---- A0 #23: Store / Pricing / Budgets shape-check what they load — bad rows are dropped and counted, never poison totals; autoRefreshMins never becomes setInterval(NaN) ----
+    await page.evaluate(() => {
+      const good = { d: '2026-08-10', platform: 'Gemini', model: 'g', in: 10, cw: 0, cr: 0, out: 5, msgs: 1 };
+      localStorage.setItem('aiusage:data', JSON.stringify({ sources: { csv: { rows: [good, { platform: 'Gemini', model: 'g', in: 1, out: 1 }, { d: '2026-08-11', platform: 'Gemini', model: 'g', in: 'abc', out: 5 }, 7, null], meta: {} }, junk: 'not a source', nometa: { rows: [good] } },
+        billed: { csv: { rows: [{ d: '2026-08-10', amount: 1.5 }, { d: 'yesterday', amount: 2 }, { d: '2026-08-11', amount: 'two' }], at: 1, stale: false }, bad: 'x' }, projects: 'nope', projectsBy: { csv: [{ project: 'p', model: 'g', in: 1, cw: 0, cr: 0, out: 1, msgs: 1 }, 'junk'] }, connectors: { csv: { label: 'ok', lastSync: 1, err: null }, broken: 'x' } }));
+      localStorage.setItem('aiusage:prices', JSON.stringify([{ pat: '^mine$', label: 'Mine', in: 1, out: 2, cw: 0, cr: 0 }, { label: 'no pattern', in: 1, out: 1, cw: 0, cr: 0 }, { pat: '^nan$', label: 'NaN price', in: 'x', out: 1, cw: 0, cr: 0 }, 'junk', { pat: '.*', label: 'Unknown model', in: 3, out: 15, cw: 3.75, cr: 0.3 }]));
+      localStorage.setItem('aiusage:budgets', JSON.stringify({ total: 'x', Gemini: 5, Bad: -1, Zero: 0, Str: '7' }));
+      localStorage.setItem('aiusage:autoRefresh', 'true'); localStorage.setItem('aiusage:autoRefreshMins', '"NaN"');
+    });
+    await page.reload({ waitUntil: 'load' });
+    const shaped = await page.evaluate(() => {
+      const out = { rows: Store.sources.csv.rows.map(r => r.d), junkSource: 'junk' in Store.sources, nometa: !!(Store.sources.nometa && Store.sources.nometa.meta), billed: Store.billedRows('csv').map(b => b.d + '|' + b.amount), badBilled: 'bad' in Store.billed,
+        projects: Array.isArray(Store.projects) && Store.projects.length === 0, projectsBy: (Store.projectsBy.csv || []).length, connectors: Object.keys(Store.connectors), banner: (document.getElementById('data-warning') || {}).textContent || null,
+        prices: Pricing.rows.map(r => r.pat), mine: Pricing.resolve('mine').label, budgets: Budgets.limits, mins: document.getElementById('auto-refresh-mins').value, timer: !!App._timer };
+      localStorage.removeItem('aiusage:prices'); localStorage.removeItem('aiusage:budgets'); localStorage.removeItem('aiusage:autoRefresh'); localStorage.removeItem('aiusage:autoRefreshMins');
+      if (App._timer) clearInterval(App._timer);
+      Store.sources = {}; Store.billed = {}; Store.projectsBy = {}; Store.connectors = {}; Store.persist(); Pricing.load(); Budgets.load();
+      return out;
+    });
+    ok('store (A0 #23): rows without a day / with a non-numeric count / non-objects are dropped (1 of 5 kept), a non-source value and a non-object connector entry are dropped, a source without meta gains one, billed rows without a day or amount are dropped (1 of 3), a non-array projects list resets; the banner counts what was dropped',
+      JSON.stringify(shaped.rows) === JSON.stringify(['2026-08-10']) && !shaped.junkSource && shaped.nometa && JSON.stringify(shaped.billed) === JSON.stringify(['2026-08-10|1.5']) && !shaped.badBilled && shaped.projects && shaped.projectsBy === 1
+      && JSON.stringify(shaped.connectors) === JSON.stringify(['csv']) && /dropped/.test(shaped.banner || '') && /4 usage rows/.test(shaped.banner || '') && /2 billed amounts/.test(shaped.banner || ''), JSON.stringify(shaped));
+    ok('prices / budgets / auto-refresh (A0 #23): a price row without a pattern or with a non-numeric price is dropped (^mine$ and .* kept, ^mine$ resolves), budgets keep only finite positive numbers ({ Gemini: 5, Str: 7 }), a non-numeric autoRefreshMins falls back to 15 (the timer runs)',
+      JSON.stringify(shaped.prices) === JSON.stringify(['^mine$', '.*']) && shaped.mine === 'Mine' && JSON.stringify(shaped.budgets) === JSON.stringify({ Gemini: 5, Str: 7 }) && shaped.mins === '15' && shaped.timer, JSON.stringify({ prices: shaped.prices, mine: shaped.mine, budgets: shaped.budgets, mins: shaped.mins, timer: shaped.timer }));
   } finally {
     await page.close();
   }

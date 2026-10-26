@@ -4,17 +4,37 @@ export async function run({ browser, ok }) {
   const { page } = await openDashboard(browser);
   try {
     const gem = await page.evaluate(async () => {
-      window.fetchJSON = async (url) => {
+      let seen = null;
+      window.__origFetchJSON = window.__origFetchJSON || window.fetchJSON;   // the real fetchJSON, for the timeout check below (every block after this one stubs it)
+      window.fetchJSON = async (url, headers) => {
+        seen = { url: String(url), headers: headers || {} };
         if (String(url).includes('generativelanguage')) return { models: [{ name: 'models/gemini-3.5-flash' }, { name: 'models/gemini-3-pro' }] };
         throw new Error('unexpected url ' + url);
       };
       document.getElementById('gemini-key').value = 'AIza-test';
       await App.fetchGemini();
       const st = Store.connectors.gemini;
-      return { label: st && st.label, status: Store.connectorStatus(connectorById('gemini')), statusText: document.getElementById('gemini-status').textContent };
+      return { label: st && st.label, status: Store.connectorStatus(connectorById('gemini')), statusText: document.getElementById('gemini-status').textContent, seen };
     });
     ok('gemini: key validates via models list, connector goes green',
       /2 models/.test(gem.label) && gem.status === 'ok' && /Connected/.test(gem.statusText), JSON.stringify(gem));
+    ok('gemini (A0 #20): the key travels in the x-goog-api-key header, never in the URL (?key= leaks into history / logs)',
+      !!gem.seen && !/key=/.test(gem.seen.url) && gem.seen.headers['x-goog-api-key'] === 'AIza-test', JSON.stringify(gem.seen));
+    // A0 #25: every request path carries a timeout signal (30 s) — fetchJSON, cloudJSON, the collector API and RemoteFile (headers phase)
+    const timeouts = await page.evaluate(async () => {
+      const origFetch = window.fetch, stubJSON = window.fetchJSON, seen = [];
+      window.fetchJSON = window.__origFetchJSON;
+      window.fetch = async (url, init = {}) => { seen.push({ url: String(url), signal: init.signal instanceof AbortSignal, aborted: init.signal ? init.signal.aborted : null }); return new Response('{"ok":1}', { status: 200, headers: { 'content-type': 'application/json' } }); };
+      try {
+        await fetchJSON('https://example.test/a', {});
+        await cloudJSON('https://example.test/b', { method: 'POST', body: '{}' }, {});
+        await App._collectorApi('http://127.0.0.1:1', 'tok')('/api/status');
+        await new RemoteFile('http://127.0.0.1:1', 'tok', 'codex', { path: 'x.jsonl', size: 8, mtime: 1 }).text();
+      } finally { window.fetch = origFetch; window.fetchJSON = stubJSON; }
+      return { seen, ms: typeof REQUEST_TIMEOUT_MS !== 'undefined' ? REQUEST_TIMEOUT_MS : null };
+    });
+    ok('timeouts (A0 #25): fetchJSON, cloudJSON, _collectorApi and RemoteFile all pass an AbortSignal (not yet aborted) to fetch; REQUEST_TIMEOUT_MS is 30000',
+      timeouts.seen.length === 4 && timeouts.seen.every(s => s.signal && s.aborted === false) && timeouts.ms === 30000, JSON.stringify(timeouts));
 
     const gemBad = await page.evaluate(async () => {
       window.fetchJSON = async () => { throw new Error('HTTP 400 — API key not valid'); };

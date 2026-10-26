@@ -110,6 +110,13 @@ export function seedHome(HOME = HOME_DEFAULT) {
   for (let i = 0; size < 2 * 1024 * 1024; i++) { const l = JSON.stringify({ i, pad: 'x'.repeat(200 + (i % 37)) }) + '\n'; lines.push(l); size += l.length; }
   fs.mkdirSync(path.join(HOME, '.gemini', 'tmp'), { recursive: true });
   fs.writeFileSync(path.join(HOME, '.gemini', ...BIG_FILE.split('/')), lines.join(''));
+  // A0 #17: credential files that really live under these roots, plus a file outside the extension allow-list — never listed, never served
+  fs.writeFileSync(path.join(HOME, '.claude', '.credentials.json'), '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-SECRET-FIXTURE","refreshToken":"sk-ant-ort01-SECRET-FIXTURE"}}\n');
+  fs.writeFileSync(path.join(HOME, '.claude', 'settings.json'), '{"env":{"ANTHROPIC_API_KEY":"sk-ant-api03-SECRET-FIXTURE"}}\n');
+  fs.writeFileSync(path.join(HOME, '.gemini', 'oauth_creds.json'), '{"access_token":"ya29.SECRET-FIXTURE","refresh_token":"1//SECRET-FIXTURE"}\n');
+  fs.writeFileSync(path.join(HOME, '.gemini', 'settings.json'), '{"selectedAuthType":"gemini-api-key"}\n');
+  fs.writeFileSync(path.join(HOME, '.gemini', '.env'), 'GEMINI_API_KEY=AIza-SECRET-FIXTURE\n');
+  fs.writeFileSync(path.join(HOME, '.codex', 'sessions', 'notes.yaml'), 'not: a log\n');
 }
 
 export async function run() {
@@ -137,8 +144,8 @@ export async function run() {
     const noTok = await API('/api/status', false);
     const badTok = await request(a.port, 'GET', '/api/status', { authorization: 'Bearer ' + 'f'.repeat(64) });
     const qTok = await request(a.port, 'GET', '/api/status?token=' + token);
-    add('collector: /api/* without a token → 401 JSON (with CORS headers); a wrong token → 401; ?token= works like the Bearer header',
-      noTok.status === 401 && isJsonCT(noTok) && asJson(noTok) && asJson(noTok).error && corsOk(noTok) && badTok.status === 401 && qTok.status === 200,
+    add('collector: /api/* without a token → 401 JSON (with CORS headers); a wrong token → 401; ?token= on /api/* → 401 too — the token is accepted in the Authorization header only (A0 #18: a URL token leaks into history / logs; the page sends the header)',
+      noTok.status === 401 && isJsonCT(noTok) && asJson(noTok) && asJson(noTok).error && corsOk(noTok) && badTok.status === 401 && qTok.status === 401 && !/\?token=/.test(asJson(noTok).hint || ''),
       `no token ${noTok.status} ${noTok.body.toString().slice(0, 200)} · wrong ${badTok.status} · ?token= ${qTok.status}`);
     // review m1: the request log echoes tool / path / refresh — an unauthenticated request must not be able to forge a log line through them
     await API('/api/file?tool=codex&path=' + encodeURIComponent('\nINJECTED 200 0\n'), false);
@@ -192,6 +199,15 @@ export async function run() {
         && tokViaOllamaUpper.status === 404 && !tokViaOllamaUpper.body.includes(token) && !(ollamaList.files || []).some((f) => /collector\.token$/i.test(f.path)),
       `status ${tokViaOllama.status}/${tokViaOllamaUpper.status} · body ${tokViaOllama.body.toString().slice(0, 120)} · ollama found=${tool('ollama').found} roots=${JSON.stringify(tool('ollama').roots)} list=${JSON.stringify((ollamaList.files || []).map((f) => f.path))}`);
 
+    // A0 #17: an extension allow-list (.jsonl .json .md .sqlite .db .csv .txt) and a credential-name deny-list apply to the listing AND to /api/file
+    const lsLocal = (asJson(await API('/api/list?tool=local')) || {}).files || [], lsGem = (asJson(await API('/api/list?tool=gemini-cli')) || {}).files || [], lsCodex = (asJson(await API('/api/list?tool=codex')) || {}).files || [];
+    const deniedFiles = [['local', '.credentials.json'], ['local', 'settings.json'], ['gemini-cli', 'oauth_creds.json'], ['gemini-cli', 'settings.json'], ['gemini-cli', '.env'], ['codex', 'sessions/notes.yaml']];
+    const denied = await Promise.all(deniedFiles.map(async ([t, p]) => [t + ':' + p, (await API(`/api/file?tool=${t}&path=${encodeURIComponent(p)}`)).status]));
+    add('collector (A0 #17): credential-named files that exist under the roots (~/.claude/.credentials.json + settings.json, ~/.gemini/oauth_creds.json + settings.json + .env) and a file outside the extension allow-list (sessions/notes.yaml) are neither listed by /api/list nor served by /api/file (404) — the .jsonl logs beside them still are',
+      deniedFiles.every(([, p]) => fs.existsSync(path.join(HOME, { local: '.claude', 'gemini-cli': '.gemini', codex: '.codex' }[deniedFiles.find(([, q]) => q === p)[0]], ...p.split('/'))))
+        && !lsLocal.some((f) => /credentials|settings/.test(f.path)) && lsLocal.length === 2 && !lsGem.some((f) => /oauth|settings|\.env/.test(f.path)) && lsGem.length === 1 && !lsCodex.some((f) => /\.yaml$/.test(f.path)) && lsCodex.length === 5
+        && denied.every(([, s]) => s === 404),
+      JSON.stringify({ denied, local: lsLocal.map((f) => f.path), gem: lsGem.map((f) => f.path), codexYaml: lsCodex.filter((f) => /yaml/.test(f.path)).map((f) => f.path) }));
     const trav = await API('/api/file?tool=codex&path=' + encodeURIComponent('../.ai-usage/collector.token'));
     const abs = await API('/api/file?tool=codex&path=' + encodeURIComponent(tokenFile));
     const slash = await API('/api/file?tool=codex&path=' + encodeURIComponent('/etc/passwd'));
@@ -332,9 +348,9 @@ export async function run() {
     const p2 = (l2.files || []).map((f) => f.path).sort();
     const want2 = fs.readFileSync(path.join(HOME, '.copilot', ...COPILOT_FILE.split('/')));
     const f2 = await B('/api/file?tool=aider&path=' + encodeURIComponent('.copilot/' + COPILOT_FILE));
-    // --root aider=~/.codex walks the WHOLE folder (5 rollouts + 1 archived + cache/junk.txt + config.toml = 8; checkpoints skipped) + ~/.copilot (2) = 10
-    add('collector: two --root aider=… folders → one tool with two roots: paths are prefixed with the root folder name (".codex/…", ".copilot/…"), 10 files, and /api/file resolves the prefixed path byte-exact',
-      t2('aider').found === true && (t2('aider').roots || []).length === 2 && t2('aider').files === 10 && p2.length === 10 && p2.every((p) => /^\.(codex|copilot)\//.test(p)) && p2.includes('.copilot/' + COPILOT_FILE) && p2.includes('.codex/cache/junk.txt') && f2.status === 200 && f2.body.equals(want2),
+    // --root aider=~/.codex walks the WHOLE folder (5 rollouts + 1 archived + cache/junk.txt = 7; checkpoints skipped; config.toml and sessions/notes.yaml are outside the extension allow-list — A0 #17) + ~/.copilot (2) = 9
+    add('collector: two --root aider=… folders → one tool with two roots: paths are prefixed with the root folder name (".codex/…", ".copilot/…"), 9 files (config.toml / notes.yaml never listed), and /api/file resolves the prefixed path byte-exact',
+      t2('aider').found === true && (t2('aider').roots || []).length === 2 && t2('aider').files === 9 && p2.length === 9 && p2.every((p) => /^\.(codex|copilot)\//.test(p)) && p2.includes('.copilot/' + COPILOT_FILE) && p2.includes('.codex/cache/junk.txt') && !p2.some((p) => /\.(toml|yaml)$/.test(p)) && f2.status === 200 && f2.body.equals(want2),
       `roots=${JSON.stringify(t2('aider').roots)} files=${t2('aider').files} paths=${p2.join(',')} file=${f2.status}`);
     return summary();
   } catch (e) {

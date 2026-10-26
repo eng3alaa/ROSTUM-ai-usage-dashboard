@@ -18,6 +18,24 @@ export async function run({ browser, ok }) {
       try { await readZipEntries(new File(['this is not a zip archive at all, just forty-odd bytes of text'], 'x.zip')); out.notZip = null; } catch (e) { out.notZip = e.message; }
       return out;
     }, b64('wave2', 'zip', 'mini.zip'));
+    // A0 #22: the declared (central-directory) size bounds the inflate — a lying header cannot make a tiny archive allocate without limit
+    const zb = await page.evaluate(async (b) => {
+      const bytes = Uint8Array.from(atob(b), ch => ch.charCodeAt(0));
+      const dv = new DataView(bytes.buffer);
+      let patched = 0;
+      for (let p = 0; p + 46 <= bytes.length; p++) {   // every central-directory record whose name is data/long.txt (deflated, 3000 bytes) now claims 100 bytes
+        if (dv.getUint32(p, true) !== 0x02014b50) continue;
+        const n = dv.getUint16(p + 28, true), name = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + n));
+        if (name === 'data/long.txt') { dv.setUint32(p + 24, 100, true); patched++; }
+      }
+      const entries = await readZipEntries(new File([bytes], 'lying.zip', { type: 'application/zip' }));
+      const e = entries.find(x => x.name === 'data/long.txt');
+      let err = null, got = null; try { got = (await e.bytes()).length; } catch (x) { err = x.message; }
+      const stillOk = await entries.find(x => x.name === 'hello.txt').text();
+      return { patched, size: e.size, got, err, stillOk };
+    }, b64('wave2', 'zip', 'mini.zip'));
+    ok('zip (A0 #22): an entry whose central directory claims 100 bytes but inflates to 3000 is refused while inflating ("inflates past its declared size"), nothing returned; the other entries still read',
+      zb.patched === 1 && zb.size === 100 && zb.got === null && /inflates past its declared size/.test(zb.err || '') && zb.stillOk === 'hello zip', JSON.stringify(zb));
     ok('zip: central-directory reader lists entries, inflates deflate-raw (3000 chars, first byte "a"=97) and reads stored text; unsupported method throws the documented error; non-ZIP throws',
       JSON.stringify(zr.names) === JSON.stringify(['hello.txt', 'data/long.txt', 'weird.bin']) && JSON.stringify(zr.sizes) === JSON.stringify([9, 3000, 1]) && zr.t0 === 'hello zip'
       && zr.t1len === 3000 && zr.b1len === 3000 && zr.b1first === 97 && /unsupported method/.test(zr.err || '') && /Not a ZIP/.test(zr.notZip || ''), JSON.stringify(zr));

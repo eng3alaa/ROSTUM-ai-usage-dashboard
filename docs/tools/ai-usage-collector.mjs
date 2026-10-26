@@ -31,7 +31,9 @@
  * The walk is async and yields (batched stats, setImmediate every ~500 entries), so /api/file streams are served during a walk.
  *
  * Security — the token is the gate, not the origin:
- *   - 127.0.0.1 only. Every /api/* request must carry  Authorization: Bearer <token>  (or ?token=<token>) or it gets 401.
+ *   - 127.0.0.1 only. Every /api/* request must carry  Authorization: Bearer <token>  or it gets 401 — the header only: a ?token= query is
+ *     read by the PAGE on GET / (pre-fill, then stripped from the address bar), never by the API, so the token cannot land in server logs,
+ *     browser history or Referer headers through an API URL.
  *     The token lives in ~/.ai-usage/collector.token (32 random bytes, hex; created on first run, mode 0600 where the OS honours it).
  *     Without it any web page open in the browser could read the machine's AI transcripts through this port; origin checks are
  *     no substitute (a sandboxed iframe has a null origin, exactly like a file:// page).
@@ -41,6 +43,8 @@
  *   - Read-only. Paths are validated to stay inside the tool's root: "..", absolute paths and symlinks are rejected (400). The
  *     recursive walk follows no symlinks and skips node_modules / .git / checkpoints. The token file itself is never listed or served —
  *     not even through ollama, whose first root is ~/.ai-usage where the token lives (404, checked before and after realpath).
+ *   - Only usage-log file types are listed or served (extension allow-list), and never a credential file by name (deny-list) — see
+ *     SERVE_EXT / DENY_NAME below for the exact rules and why each name is on the list. Anything else under a root answers 404.
  *   - Host allow-list: only Host 127.0.0.1, localhost or [::1] (with or without the port) is answered; anything else → 421 (a DNS name
  *     pointing at 127.0.0.1 — rebinding — reaches neither the page nor the API). Every response also carries X-Frame-Options: DENY and
  *     X-Content-Type-Options: nosniff. The 404 for a missing dashboard file names no path.
@@ -53,7 +57,7 @@
  *                                   (watch: 'fs'), when its cache is older than 30 s (watch: 'polling' — no recursive fs.watch there), when
  *                                   its root set changed, or on refresh=1 (all tools). walkMs = that walk's duration; watch is null when not found.
  *                                   files / newestMtime move whenever a file is added or modified, so the page's change detection works.
- *   GET /api/list?tool=<id>         { tool, name, root, roots, scannedAt, files: [{ path, size, mtime }] } — ALL regular files, paths relative,
+ *   GET /api/list?tool=<id>         { tool, name, root, roots, scannedAt, files: [{ path, size, mtime }] } — every servable regular file, paths relative,
  *                                   forward slashes; when a tool has more than one root each path is prefixed with that root's folder name
  *   GET /api/file?tool=<id>&path=<rel>   the file bytes, streamed, with Content-Length + Last-Modified (404 when missing) — exactly Content-Length
  *                                   bytes even when the file grows while it streams (a CLI appending to its live log). Waits only for the
@@ -167,11 +171,30 @@ const { token: TOKEN, created: TOKEN_CREATED } = loadToken();
 const TOKEN_BUF = Buffer.from(TOKEN);
 const TOKEN_FILE_REAL = (() => { try { return fs.realpathSync(TOKEN_FILE); } catch { return TOKEN_FILE; } })();   // loadToken just made sure it exists
 const isTokenFile = (p) => samePath(p, TOKEN_FILE) || samePath(p, TOKEN_FILE_REAL);   // never listed, never served (ollama's first root IS ~/.ai-usage)
-function authorized(req, url) {
+function authorized(req) {   // the Authorization header only — never a query parameter (A0 #18)
   const m = /^Bearer\s+(\S+)\s*$/i.exec(req.headers.authorization || '');
-  const given = Buffer.from(m ? m[1] : (url.searchParams.get('token') || ''));
+  const given = Buffer.from(m ? m[1] : '');
   return given.length === TOKEN_BUF.length && crypto.timingSafeEqual(given, TOKEN_BUF);
 }
+
+// ---- what is listed and served (A0 #17) -----------------------------------------------------------------------------------------------------
+// Allow-list by extension — the formats the dashboard's parsers read: .jsonl / .json logs and exports, .md (Aider history), .sqlite / .db
+// (Ollama, LM Studio, OpenCode stores), .csv exports, .txt usage logs. Anything else under a root (keys, scripts, YAML / TOML configs,
+// binaries) is neither listed nor served.
+const SERVE_EXT = new Set(['.jsonl', '.json', '.md', '.sqlite', '.db', '.csv', '.txt']);
+// Deny-list by file NAME (case-insensitive, checked first) — credential files that live under these very roots and would pass the extension check:
+//   credential          ~/.claude/.credentials.json (Claude OAuth access + refresh tokens)
+//   oauth               ~/.gemini/oauth_creds.json (Google OAuth tokens)
+//   token / tokens      as a word on its own: token.json, access_token.json, collector.token — NOT tokensGenerated.jsonl (Continue's usage log)
+//   secret, password, api_key / apikey   generic secret stores
+//   .env / .env.*       API keys in environment files (~/.gemini/.env)
+//   auth.json           tool logins (~/.codex/auth.json holds the OpenAI key / tokens)
+//   settings.json       Claude Code and Gemini CLI settings may carry an env block with API keys
+//   config.json         Continue's legacy config.json holds provider apiKey values; ~/.copilot/config.json holds the GitHub token
+//   mcp.json            MCP server definitions carry env blocks with keys
+// The collector's own token file is refused separately (isTokenFile). No tool's usage log uses these names.
+const DENY_NAME = /credential|oauth|(^|[^a-z])tokens?([^a-z]|$)|secret|password|api[-_]?key|^\.env(\.|$)|^(auth|settings|config|mcp)\.json$/i;
+const servable = (name) => !DENY_NAME.test(name) && SERVE_EXT.has(path.extname(name).toLowerCase());
 
 // ---- roots + change-driven walk ------------------------------------------------------------------------------------------------------------
 // Each found root is watched with fs.watch({ recursive: true }); an event marks the tool dirty (2 s debounce: the first event arms a timer,
@@ -213,6 +236,7 @@ async function walkRoot(dir, prefix) {
       if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) stack.push(rel ? rel + '/' + e.name : e.name); continue; }
       if (!e.isFile()) continue;
       if (isTokenFile(path.join(abs, e.name))) continue;   // the token file is never listed (resolveFile refuses to serve it too)
+      if (!servable(e.name)) continue;                     // extension allow-list + credential deny-list (A0 #17; resolveFile applies the same rule)
       names.push(e.name);
     }
     for (let i = 0; i < names.length; i += STAT_BATCH) {
@@ -315,6 +339,7 @@ async function resolveFile(t, relIn) {
   const abs = path.resolve(root, ...rest);
   if (!inside(abs, root)) return { status: 400, error: 'path resolves outside the tool folder' };
   if (isTokenFile(abs)) return { status: 404, error: 'file not found' };   // the token file is never served: ollama's first root is ~/.ai-usage, where it lives
+  if (!servable(path.basename(abs))) return { status: 404, error: 'file not found' };   // not a usage-log type, or a credential file by name (A0 #17) — same answer as a missing file
   let st; try { st = await fsp.lstat(abs); } catch { return { status: 404, error: 'file not found' }; }
   if (st.isSymbolicLink()) return { status: 400, error: 'symbolic links are not served' };
   if (!st.isFile()) return { status: 404, error: 'not a regular file' };
@@ -389,7 +414,7 @@ async function handle(req, res, url) {
   }
   if (p === '/favicon.ico') { res.writeHead(204); res.end(); return 0; }   // the browser asks for it on the served page — no icon, no 404 in the console
   if (!p.startsWith('/api/')) return sendJson(res, 404, { error: 'not found', hint: 'GET / (dashboard), /api/status, /api/list?tool=<id>, /api/file?tool=<id>&path=<rel>' });
-  if (!authorized(req, url)) return sendJson(res, 401, { error: 'unauthorized', hint: 'send Authorization: Bearer <token> (or ?token=) — the token is printed when the collector starts and stored in ~/.ai-usage/collector.token' });
+  if (!authorized(req)) return sendJson(res, 401, { error: 'unauthorized', hint: 'send Authorization: Bearer <token> — the token is printed when the collector starts and stored in ~/.ai-usage/collector.token' });
   const refresh = url.searchParams.get('refresh') === '1';
   if (p === '/api/status') {
     await Promise.all(TABLE.map((t) => ensureFresh(t, refresh)));
