@@ -15,7 +15,7 @@ const read = (...p) => fs.readFileSync(path.join(OUT, 'wave3', ...p), 'utf8');
 const b64 = (...p) => fs.readFileSync(path.join(OUT, 'wave3', ...p)).toString('base64');
 const SQLITE_DIR = path.join(import.meta.dirname, '..', 'fixtures', 'sqlite');
 
-export async function run({ browser, ok }) {
+export async function run({ browser, ok, skip }) {
   const { page } = await openDashboard(browser);
   try {
     await page.evaluate(() => { Store.sources = {}; Store.billed = {}; Store.projects = []; Store.projectsBy = {}; Store.connectors = {}; });
@@ -237,10 +237,12 @@ export async function run({ browser, ok }) {
     if (zd.cap) {
       ok('zed (B6, page path — this browser decodes zstd): threads.db → t1 cumulative 1000/50/300/200 msgs 2 (claude-sonnet-4-5; project D:/proj-zed) + t2 400/80 local:1 ($0, ollama) + t3 legacy json 10/5 (request_token_usage summed) → in=1410 cw=50 cr=300 out=285 msgs=4; t4 corrupt blob = 1 bad row; t5 empty skipped; 5 rows read; day = updated_at; sid = thread id; through the card: Connected with the rows and "1 unreadable line"',
         zedExact(zd.direct) && zd.scanned.status === 'ok' && zd.scanned.rows === 3 && /Connected/.test(zd.scanned.text) && /1 unreadable line/.test(zd.scanned.text), JSON.stringify({ direct: zd.direct, scanned: zd.scanned }));
+      skip('zed (B6, page path — this browser has NO zstd)', 'This browser supports DecompressionStream("zstd"); the no-zstd branch is unavailable.');
     } else {
       ok('zed (B6, page path — this browser has NO zstd): threads.db is 1 unreadable file with the reason "needs the local collector on this browser" (0 rows, never silently zero); through the card the scan FAILS with that reason (status warn, scanErr names the collector, no rows stored)',
         !zd.missing && zd.direct.rows === 0 && zd.direct.badFiles === 1 && /needs the local collector on this browser/.test(zd.direct.reason || '') && zd.scanned.status === 'warn' && zd.scanned.rows === 0
         && /needs the local collector on this browser/.test(zd.scanned.text) && /1 file\(s\) unreadable/.test(zd.scanned.text) && /needs the local collector/.test(zd.scanned.err || ''), JSON.stringify({ direct: zd.direct, scanned: zd.scanned }));
+      if (!zd.missing) skip('zed (B6, page path — this browser decodes zstd)', 'This browser does not support DecompressionStream("zstd"); the zstd branch is unavailable.');
     }
     ok('zed (B6, collector path): remoteDecodeFor(zed) is "zstd" exactly when the page lacks zstd (null otherwise); a RemoteFile built with decode "zstd" asks GET …/api/file?tool=zed&path=threads.db&decode=zstd and the decoded JSONL parses to the same exact totals (in=1410 cw=50 cr=300 out=285 msgs=4; the t4 error line = 1 bad row); without decode the URL carries no decode parameter',
       !zd.missing && zd.decodeFlag === (zd.cap ? null : 'zstd') && zd.urls.length === 1 && /\/api\/file\?tool=zed&path=threads\.db&decode=zstd$/.test(zd.urls[0]) && zedExact(zd.viaCollector) && !/decode=/.test(zd.plainUrl || ''),
@@ -313,7 +315,7 @@ export async function run({ browser, ok }) {
     const regen = path.join(OUT, 'wave3', 'regen');
     const built = await buildSqliteFixtures(regen);
     if (!built) {
-      ok('sqlite fixtures: committed .db files match a fresh gen-sqlite.mjs build', true, 'skipped: node:sqlite unavailable in this Node — only this equality check is skipped; every parser check above ran from the committed files');
+      skip('sqlite fixtures: committed .db files match a fresh gen-sqlite.mjs build', 'node:sqlite unavailable in this Node — only this equality check is skipped; every parser check above ran from the committed files');
     } else {
       // zed-threads.db (B6) is built only when this Node's zlib has zstd; its data cells are zstd frames whose bytes differ between zstd library versions, so
       // blob cells compare as 'blob' (the decoded content is what 87g's Zed block asserts) — every other cell must be identical

@@ -4,7 +4,7 @@ import { openDashboard, OUT } from '../lib/harness.mjs';
 
 const read = (...p) => fs.readFileSync(path.join(OUT, ...p), 'utf8');
 
-export async function run({ browser, ok }) {
+export async function run({ browser, ok, skip }) {
   const { page } = await openDashboard(browser);
   try {
     // ---- T4: LocalAI history through the connectServer rows extension ----
@@ -518,7 +518,7 @@ export async function run({ browser, ok }) {
     // ---- T14 (4b): readSqliteTable + Ollama desktop db.sqlite (estimated) through the Ollama card ----
     const dbPath = path.join(OUT, 'wave2', 'ollama-app', 'db.sqlite');
     if (!fs.existsSync(dbPath)) {
-      ok('ollama-db: readSqliteTable + parseOllamaFiles (fixture skipped)', true, 'node:sqlite unavailable — fixture skipped');
+      skip('ollama-db: readSqliteTable + parseOllamaFiles', 'node:sqlite unavailable — fixture skipped');
     } else {
       const dbBuf = fs.readFileSync(dbPath);
       const dbB64 = dbBuf.toString('base64'), pageSize = dbBuf.readUInt16BE(16) === 1 ? 65536 : dbBuf.readUInt16BE(16);
