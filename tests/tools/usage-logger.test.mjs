@@ -58,6 +58,7 @@ function fakeUpstream() {
       else if (req.url === '/v1/chat/completions') { res.writeHead(200, { 'content-type': 'text/event-stream' }); await writeAll(res, SSE_BLOCK, 1); res.end(SSE_FINAL); }
       else if (req.url === '/api/generate') { res.writeHead(200, { 'content-type': 'application/json', 'content-length': GEN_DOC.length }); res.end(GEN_DOC); }
       else if (req.url === '/v1/completions') { res.writeHead(200, { 'content-type': 'text/event-stream' }); await writeAll(res, SMALL_CHUNK, SMALL_CHUNKS); res.end(SMALL_FINAL); }
+      else if (req.url === '/v1/responses') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(SMALL_CHUNK); setTimeout(() => res.socket.resetAndDestroy(), 50); }   // dies mid-body: headers + one chunk, then a TCP reset
       else { res.writeHead(404); res.end(); }
     });
   });
@@ -75,6 +76,16 @@ const post = (port, pathname, extraHeaders = {}) => new Promise((resolve, reject
   req.on('error', reject);
   req.setTimeout(10000, () => req.destroy(new Error('timeout ' + pathname)));
   req.end(body);
+});
+const rawBadRequest = (port) => new Promise((resolve, reject) => {
+  const socket = net.connect({ host: '127.0.0.1', port });
+  let response = '';
+  socket.setEncoding('utf8');
+  socket.setTimeout(10000, () => socket.destroy(new Error('malformed request timeout')));
+  socket.once('connect', () => socket.end('GET // HTTP/1.1\r\nHost: 127.0.0.1:' + port + '\r\n\r\n'));
+  socket.on('data', (chunk) => { response += chunk; });
+  socket.once('end', () => resolve(response));
+  socket.once('error', reject);
 });
 const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.on('error', reject); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const canConnect = (port) => new Promise((resolve) => { const s = net.connect({ host: '127.0.0.1', port }); s.once('connect', () => { s.destroy(); resolve(true); }); s.once('error', () => resolve(false)); });
@@ -131,6 +142,26 @@ export async function run() {
     const until2 = Date.now() + 5000; let lines2 = readLines(logFile);   // the localhost-Host request's line is appended after its response ends — give it a moment too
     while (Date.now() < until2 && lines2.length < PATHS.length + 1) { await sleep(100); lines2 = readLines(logFile); }
     add('usage-logger: exactly four JSONL lines (+1 for the localhost Host check) and every body passed through byte-for-byte', lines.length === PATHS.length && passthrough && lines2.length === PATHS.length + 1, `${lines.length} line(s) then ${lines2.length} · ${JSON.stringify(got)} · expected bytes ${JSON.stringify(EXPECT_BYTES)}`);
+    // Plan 9 review: the upstream dies mid-body (headers + a chunk out, then a TCP reset). The proxy must not answer that with a 502 — the headers are already on the
+    // wire, so writeHead would throw ERR_HTTP_HEADERS_SENT inside an event handler and take the whole process down. Expected: the cut client sees no complete 200
+    // (its connection is destroyed, never a 200 that looks whole), the child is still running, and the NEXT request through the same proxy is served and logged.
+    const cut = (e) => ({ status: 'cut', error: e.code || e.message });
+    const died = await post(port, '/v1/responses').catch(cut);
+    await sleep(300);
+    const next = await post(port, '/v1/completions').catch(cut);
+    const until3 = Date.now() + 5000; let lines3 = readLines(logFile);
+    while (Date.now() < until3 && lines3.length < PATHS.length + 2) { await sleep(100); lines3 = readLines(logFile); }
+    add('usage-logger (review): an upstream that resets the connection mid-body does not crash the proxy — no ERR_HTTP_HEADERS_SENT on stderr, the child still runs, the cut client gets no complete 200, and the next /v1/completions through the same proxy is served (200, byte-exact) and logged (one more line)',
+      exited === null && !/ERR_HTTP_HEADERS_SENT/.test(err) && died.status === 'cut' && next.status === 200 && next.bytes === EXPECT_BYTES['/v1/completions'] && lines3.length === PATHS.length + 2,
+      JSON.stringify({ died, next, exited, lines: lines3.length }) + ' · ' + io());
+    const hitsBeforeBad = upstreamHits;
+    const bad = await rawBadRequest(port).catch((e) => String(e));
+    const hitsAfterBad = upstreamHits;
+    const afterBad = await post(port, '/api/generate').catch(cut);
+    add('usage-logger (T2): malformed request returns 400 JSON and the same proxy survives',
+      /^HTTP\/1\.1 400\b/.test(bad) && bad.includes('{"error":"bad request"}') && hitsAfterBad === hitsBeforeBad
+        && exited === null && afterBad.status === 200 && afterBad.bytes === EXPECT_BYTES['/api/generate'],
+      JSON.stringify({ bad, afterBad, exited, hitsBeforeBad, hitsAfterBad }) + ' ' + io());
     return summary();
   } catch (e) {
     add('usage-logger: test threw', false, (e && e.stack || String(e)) + ' · ' + io());

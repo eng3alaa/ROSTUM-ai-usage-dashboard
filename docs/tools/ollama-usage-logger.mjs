@@ -117,6 +117,14 @@ function record(pathname, cap) {
 
 const HOST_OK = /^(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$/i;   // A0 #21 — the collector's rule: a rebinding name is answered 421, never proxied
 const server = http.createServer((req, res) => {
+  try { proxyRequest(req, res); }
+  catch {
+    req.resume();
+    console.error('usage-logger: bad request');
+    failClient(res, 'bad request', 400);
+  }
+});
+function proxyRequest(req, res) {
   if (!HOST_OK.test(String(req.headers.host || '').trim())) {
     req.resume();
     res.writeHead(421, { 'content-type': 'application/json' });
@@ -131,11 +139,18 @@ const server = http.createServer((req, res) => {
     if (cap) ur.on('data', (chunk) => cap.push(chunk));   // tee for the log; pipe() below owns the pass-through and its backpressure
     ur.pipe(res);
     ur.on('end', () => { if (cap && (ur.statusCode || 500) < 400) { try { record(url.pathname, cap); } catch (e) { console.error('usage-logger: parse failed', e.message); } } });
-    ur.on('error', () => res.end());
+    ur.on('error', (e) => failClient(res, 'upstream response failed: ' + e.message));
   });
-  up.on('error', (e) => { res.writeHead(502, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'upstream unreachable: ' + e.message })); });
+  up.on('error', (e) => failClient(res, 'upstream unreachable: ' + e.message));
   req.pipe(up);
-});
+}
+// The client's answer when the upstream fails: 502 JSON while nothing has gone out, else the connection is cut. Once the headers are on the wire a writeHead
+// would throw ERR_HTTP_HEADERS_SENT inside an event handler — fatal for the whole proxy — and a clean end() would hand the client a truncated body as a whole one.
+function failClient(res, message, status = 502) {
+  if (res.headersSent) { res.destroy(); return; }
+  res.writeHead(status, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ error: message }));
+}
 server.listen(PORT, '127.0.0.1', () => {
   const port = server.address().port;   // LOG_PORT=0 → whatever the OS handed out
   console.log(`ollama-usage-logger: http://127.0.0.1:${port} → ${UPSTREAM.origin} · writing ${OUT}`);

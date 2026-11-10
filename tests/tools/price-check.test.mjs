@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { checkRows, classifyRow, exitCodeFor, extractRates, renderMarkdown } from '../../docs/tools/price-check.mjs';
+import { checkRows, classifyRow, exitCodeFor, extractRates, fetchPage, renderMarkdown } from '../../docs/tools/price-check.mjs';
 
 const CLI = path.join(import.meta.dirname, '..', '..', 'docs', 'tools', 'price-check.mjs');
 
@@ -44,12 +44,16 @@ const PAGES = {
   '/single': `<html><body><p>test-single runs at $0.25 per 1M tokens on our fastest hardware.</p></body></html>`,
 };
 
+const HUGE = Buffer.from('<html><body>' + '<p>test-huge costs $1.00 per 1M tokens.</p>'.repeat(140000) + '</body></html>');   // ≈ 6 MB of static HTML — over the 5 MB body cap
+
 function startStub() {
   const hits = {}; const agents = new Set();
   const server = http.createServer((req, res) => {
     hits[req.url] = (hits[req.url] || 0) + 1;
     agents.add(req.headers['user-agent'] || '');
     if (req.url === '/err500') { res.writeHead(500, { 'content-type': 'text/plain' }); return res.end('boom'); }
+    if (req.url === '/huge-declared') { res.writeHead(200, { 'content-type': 'text/html', 'content-length': HUGE.length }); return res.end(HUGE); }   // 6 MB, Content-Length announced
+    if (req.url === '/huge-chunked') { res.writeHead(200, { 'content-type': 'text/html' }); for (let i = 0; i < 6; i++) res.write(HUGE.subarray(i * 1024 * 1024, (i + 1) * 1024 * 1024)); return res.end(); }   // 6 MB, chunked — no length to check up front
     const html = PAGES[req.url];
     if (!html) { res.writeHead(404); return res.end('nope'); }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(html);
@@ -139,6 +143,13 @@ export async function run() {
     add('price-check: one fetch per distinct URL (4 rows share /table → 1 hit; /prose 1; 7 pages in all) with User-Agent "ROSTUM price-check"',
       stub.hits['/table'] === 1 && stub.hits['/prose'] === 1 && Object.values(stub.hits).reduce((a, b) => a + b, 0) === 7 && [...stub.agents].every((a) => a === 'ROSTUM price-check'),
       JSON.stringify({ hits: stub.hits, agents: [...stub.agents] }));
+    // Plan 9 review: a page body is read up to 5 MB and no further — a vendor page (or a rogue host behind a redirect) cannot make the job buffer gigabytes
+    const hugeDeclared = await fetchPage(stub.base + '/huge-declared', globalThis.fetch);
+    const hugeChunked = await fetchPage(stub.base + '/huge-chunked', globalThis.fetch);
+    const smallPage = await fetchPage(stub.base + '/million', globalThis.fetch);
+    add('price-check (review): fetchPage caps the body at 5 MB — a 6 MB page with Content-Length and a 6 MB chunked page both come back as { error: "body over 5 MB" } (→ page-unreachable), never as html; a small page still returns its html',
+      HUGE.length > 5 * 1024 * 1024 && hugeDeclared.error === 'body over 5 MB' && hugeDeclared.html === undefined && hugeChunked.error === 'body over 5 MB' && hugeChunked.html === undefined && typeof smallPage.html === 'string' && /test-million/.test(smallPage.html),
+      JSON.stringify({ declared: hugeDeclared.error || ('html ' + (hugeDeclared.html || '').length), chunked: hugeChunked.error || ('html ' + (hugeChunked.html || '').length), small: smallPage.error || 'html' }));
     const withSummary = (patch) => ({ ...report, summary: { ...s, ...patch, coverage: { ...cov, overall: { ...cov.overall, ...(patch.coverage || {}) } } } });
     add('price-check: exitCodeFor → 1 on drift>0; 1 on coverage<70 with no drift; 0 when drift=0 and coverage ≥ 70',
       exitCodeFor(report) === 1 && exitCodeFor(withSummary({ drift: 0, coverage: { pct: 69.9 } })) === 1 && exitCodeFor(withSummary({ drift: 0, coverage: { pct: 70 } })) === 0,
