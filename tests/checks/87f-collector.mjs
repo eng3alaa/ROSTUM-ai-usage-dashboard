@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { openDashboard, OUT } from '../lib/harness.mjs';
+import { openDashboard, OUT, FIXTURE_CLOCK_AT } from '../lib/harness.mjs';
 
 // Plan 7 T2: the local collector card; T3: automatic mode (the status watch, per-tool re-scan on change, Re-scan routing, restore on init). window.fetch is stubbed INSIDE the page to serve /api/status, /api/list and /api/file from the
 // existing fixture texts (Claude jsonl + Codex rollouts + Copilot CLI events); every request's Authorization header is recorded.
@@ -14,7 +14,7 @@ const BASE = 'http://127.0.0.1:11436';
 const NOT_RUNNING = 'Not running at http://127.0.0.1:11436 — start it with: node docs/tools/ai-usage-collector.mjs';
 
 export async function run({ browser, ok }) {
-  const { page, errors } = await openDashboard(browser);
+  const { page, errors } = await openDashboard(browser, { clockAt: FIXTURE_CLOCK_AT });
   try {
     const fx = {
       local: {

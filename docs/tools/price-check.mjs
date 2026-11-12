@@ -22,7 +22,9 @@
  *   no-source         the row has source_url: null (informational — not counted in coverage)
  * Coverage = (match + drift) / rows that have a source, overall and per vendor (an override's platform is its vendor).
  *
- * Fetching: global fetch, 20 s timeout per page, 3 pages at a time, User-Agent "ROSTUM price-check", one fetch per distinct URL.
+ * Fetching: global fetch, 20 s timeout per page, 3 pages at a time, User-Agent "ROSTUM price-check", one fetch per distinct URL. Redirects are
+ * followed (fetch's own 20-hop limit; the request carries no secret, so a redirect target learns nothing) and a body is read up to 5 MB and no
+ * further — a bigger page (or a rogue host behind a redirect) is page-unreachable with detail "body over 5 MB", never buffered.
  * A fetch failure is a row status, never an exception.
  */
 import fs from 'node:fs';
@@ -33,6 +35,7 @@ const DEFAULT_ROWS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..
 const USER_AGENT = 'ROSTUM price-check';
 const TIMEOUT_MS = 20000;
 const CONCURRENCY = 3;
+const BODY_MAX_BYTES = 5 * 1024 * 1024;   // a pricing page is a few hundred KB of HTML; past this the body is not read
 const WINDOW_CHARS = 200;        // text after an anchor that may hold its prices (one table row or one prose sentence)
 const TOLERANCE = 0.005;
 const COVERAGE_FLOOR_PCT = 70;
@@ -136,10 +139,22 @@ export async function fetchPage(url, fetchImpl) {
   try {
     const res = await fetchImpl(url, { headers: { 'user-agent': USER_AGENT, accept: 'text/html,*/*' }, redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (!res.ok) return { error: `HTTP ${res.status}${res.statusText ? ' ' + res.statusText : ''}` };
-    return { html: await res.text() };
+    return { html: await readBodyCapped(res, BODY_MAX_BYTES) };
   } catch (e) {
     return { error: errorText(e) };
   }
+}
+/** the body as text, read chunk by chunk and abandoned the moment Content-Length or the bytes seen pass `max` (throws "body over 5 MB") */
+async function readBodyCapped(res, max) {
+  const over = new Error(`body over ${max / 1024 / 1024} MB`);
+  if (+res.headers.get('content-length') > max) { await res.body.cancel(); throw over; }
+  const chunks = []; let bytes = 0;
+  for await (const chunk of res.body) {   // leaving the loop by throw cancels the stream — the rest of the body is never read
+    bytes += chunk.length;
+    if (bytes > max) throw over;
+    chunks.push(chunk);
+  }
+  return new TextDecoder('utf-8').decode(Buffer.concat(chunks));   // what res.text() does: UTF-8, BOM stripped
 }
 
 /** run fn over items, at most `limit` at a time, keeping order */

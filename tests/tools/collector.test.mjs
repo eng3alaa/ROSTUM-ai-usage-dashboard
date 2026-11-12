@@ -13,13 +13,19 @@
 // Plan 7 review fixes: the token file is never served even through ollama (whose root is ~/.ai-usage) (M2); query values are sanitised in the
 // request log (m1); /api/file never triggers a dirty re-walk (m5); hardening headers, Host allow-list → 421, a 404 for / that names no path (m7);
 // GET /README.md served (m8). Plan 8: GET /docs/user-guide.html served (the Help dialog's "Full user guide" link is relative to the page too).
+// Plan 9 integration review (collector half): per-tool include globs (only a tool's own log files are listed or served — CLAUDE.md, memory/*.md,
+// settings.local.json, MCP configs never), single-file roots (copilot-vscode serves ONLY the OTel outfile; a root that is HOME is refused), the
+// post-realpath re-check + `~1` short-name rejection (8.3 names, case folding), decode=zstd table-only + output budget (COLLECTOR_ZSTD_BUDGET test
+// seam → 413/415), the per-tool walk cap (COLLECTOR_WALK_CAP test seam → capped: true).
 // Windows-safe: 127.0.0.1 only, every wait ≤ 10 s (35 s only on a platform without recursive fs.watch), every child is killed in
 // finally, the temp HOME is deleted afterwards.
 import http from 'node:http';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import zlib from 'node:zlib';
+import vm from 'node:vm';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.join(import.meta.dirname, '..', '..');
@@ -30,7 +36,10 @@ const HOME_DEFAULT = HOME;
 const CODEX_FILE = 'sessions/2026/08/10/rollout-2026-08-10T09-00-00-abc.jsonl';
 const CODEX_ARCHIVED = 'archived_sessions/rollout-2026-08-10T09-00-00-abc.jsonl';   // Codex's archived_sessions/ is flat: rollout-*.jsonl directly inside
 const COPILOT_FILE = 'session-state/sess-1/events.jsonl';
-const BIG_FILE = 'tmp/big-2mb.jsonl';   // under ~/.gemini — the only file of that tool, ≥ 2 MB
+const BIG_FILE = 'tmp/abc123/chats/session-big-2mb.json';   // under ~/.gemini (seedReviewFixtures — the Node test only): the only gemini-cli file, ≥ 2 MB, named like a Gemini session so the include glob lists it
+const TOUCHED_FILE = 'tmp/abc123/chats/session-touched.json';   // the second gemini-cli file, written mid-test (review m5)
+const CKPT_ROLLOUT = 'sessions/checkpoints/rollout-2026-01-01T00-00-00-ckpt.jsonl';   // a rollout-named file inside a skipped folder: never listed — and the CHECKPOINTS spelling must not reach it either (8.3 / case re-check)
+const EXT_STORAGE = (id) => path.join('Code', 'User', 'globalStorage', id);   // the VS Code extension globalStorage layout under APPDATA (= HOME here)
 const CODEX_PATHS = [
   'archived_sessions/rollout-2026-08-10T09-00-00-abc.jsonl',
   'sessions/2026/08/10/rollout-2026-08-10T09-00-00-abc.jsonl',
@@ -63,6 +72,16 @@ const rawGet = (port, p, headers, onFirstData) => new Promise((resolve, reject) 
   s.on('end', () => { const buf = Buffer.concat(chunks); const i = buf.indexOf('\r\n\r\n'); resolve({ head: buf.subarray(0, i).toString('latin1'), body: buf.subarray(i + 4) }); });
   s.on('error', reject);
   s.setTimeout(30000, () => s.destroy(new Error('timeout raw GET ' + p)));
+});
+const rawBadRequest = (port) => new Promise((resolve, reject) => {
+  const socket = net.connect({ host: '127.0.0.1', port });
+  let response = '';
+  socket.setEncoding('utf8');
+  socket.setTimeout(10000, () => socket.destroy(new Error('malformed request timeout')));
+  socket.once('connect', () => socket.end('GET // HTTP/1.1\r\nHost: 127.0.0.1:' + port + '\r\n\r\n'));
+  socket.on('data', (chunk) => { response += chunk; });
+  socket.once('end', () => resolve(response));
+  socket.once('error', reject);
 });
 const asJson = (r) => { try { return JSON.parse(r.body.toString('utf8')); } catch { return null; } };
 const isJsonCT = (r) => /^application\/json/i.test(r.headers['content-type'] || '');
@@ -105,11 +124,9 @@ export function seedHome(HOME = HOME_DEFAULT) {
   fs.mkdirSync(path.join(HOME, '.codex', 'cache'), { recursive: true });
   fs.writeFileSync(path.join(HOME, '.codex', 'cache', 'junk.txt'), 'not a session\n');
   fs.writeFileSync(path.join(HOME, '.codex', 'config.toml'), 'model = "gpt-5-codex"\n');
-  // gemini-cli: one ≥ 2 MB file (deterministic JSON lines) for the streaming-while-walking check
-  const lines = []; let size = 0;
-  for (let i = 0; size < 2 * 1024 * 1024; i++) { const l = JSON.stringify({ i, pad: 'x'.repeat(200 + (i % 37)) }) + '\n'; lines.push(l); size += l.length; }
+  // gemini-cli: a .jsonl that is NOT a session file — passes the extension allow-list, fails the tool's include glob (**/session-*.json): found, nothing listed
   fs.mkdirSync(path.join(HOME, '.gemini', 'tmp'), { recursive: true });
-  fs.writeFileSync(path.join(HOME, '.gemini', ...BIG_FILE.split('/')), lines.join(''));
+  fs.writeFileSync(path.join(HOME, '.gemini', 'tmp', 'not-a-session.jsonl'), '{"i":1}\n');
   // A0 #17: credential files that really live under these roots, plus a file outside the extension allow-list — never listed, never served
   fs.writeFileSync(path.join(HOME, '.claude', '.credentials.json'), '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-SECRET-FIXTURE","refreshToken":"sk-ant-ort01-SECRET-FIXTURE"}}\n');
   fs.writeFileSync(path.join(HOME, '.claude', 'settings.json'), '{"env":{"ANTHROPIC_API_KEY":"sk-ant-api03-SECRET-FIXTURE"}}\n');
@@ -117,6 +134,14 @@ export function seedHome(HOME = HOME_DEFAULT) {
   fs.writeFileSync(path.join(HOME, '.gemini', 'settings.json'), '{"selectedAuthType":"gemini-api-key"}\n');
   fs.writeFileSync(path.join(HOME, '.gemini', '.env'), 'GEMINI_API_KEY=AIza-SECRET-FIXTURE\n');
   fs.writeFileSync(path.join(HOME, '.codex', 'sessions', 'notes.yaml'), 'not: a log\n');
+  // Plan 9 review: files under the roots that pass the extension allow-list but are not that tool's logs — the per-tool include globs (and the wider
+  // deny-list: settings.*.json, mcp*.json) keep them out of the listing and off /api/file
+  fs.writeFileSync(path.join(HOME, '.claude', 'CLAUDE.md'), '# user instructions FIXTURE-PRIVATE\n');
+  fs.mkdirSync(path.join(HOME, '.claude', 'projects', '-D--proj1', 'memory'), { recursive: true });
+  fs.writeFileSync(path.join(HOME, '.claude', 'projects', '-D--proj1', 'memory', 'notes.md'), 'memory FIXTURE-PRIVATE\n');
+  fs.writeFileSync(path.join(HOME, '.claude', 'settings.local.json'), '{"permissions":{"allow":["Bash(rm:*)"]}}\n');
+  fs.writeFileSync(path.join(HOME, '.copilot', 'mcp-config.json'), '{"mcpServers":{"x":{"env":{"TOKEN":"FIXTURE-PRIVATE"}}}}\n');
+  fs.writeFileSync(path.join(HOME, '.codex', ...CKPT_ROLLOUT.split('/')), '{"type":"session_meta"}\n');
 }
 
 // Plan 9 B5 — the Wave 3 coding tools' standard folders, seeded from the out/wave3 fixtures (gen.mjs). Kept out of seedHome because 89c's
@@ -142,15 +167,205 @@ export function seedB6(HOME = HOME_DEFAULT) {
   fs.cpSync(path.join(OUT_DIR, 'b6', 'zed', 'threads'), path.join(HOME, 'Zed', 'threads'), { recursive: true });
   fs.cpSync(path.join(OUT_DIR, 'b6', 'copilot-otel'), path.join(HOME, 'copilot-otel'), { recursive: true });
 }
+// Plan 9 review — Node-test-only seeding (89c's end-to-end block seeds seedHome alone and asserts what the page then sees): gemini-cli's ≥ 2 MB session-named
+// file for the streaming checks; cline + roo with their task fixtures AND an MCP settings file each (never listed); copilot-vscode siblings beside the OTel
+// outfile (a .jsonl that would pass the include glob but is not THE file, and a secret .json); the OTel outfile spelled straight under HOME for the root-refusal run.
+export function seedReviewFixtures(HOME = HOME_DEFAULT) {
+  const lines = []; let size = 0;
+  for (let i = 0; size < 2 * 1024 * 1024; i++) { const l = JSON.stringify({ i, pad: 'x'.repeat(200 + (i % 37)) }) + '\n'; lines.push(l); size += l.length; }
+  fs.mkdirSync(path.dirname(path.join(HOME, '.gemini', ...BIG_FILE.split('/'))), { recursive: true });
+  fs.writeFileSync(path.join(HOME, '.gemini', ...BIG_FILE.split('/')), lines.join(''));
+  const cline = path.join(HOME, EXT_STORAGE('saoudrizwan.claude-dev')), roo = path.join(HOME, EXT_STORAGE('rooveterinaryinc.roo-cline'));
+  fs.cpSync(path.join(OUT_DIR, 'cline', 'tasks'), path.join(cline, 'tasks'), { recursive: true });
+  fs.cpSync(path.join(OUT_DIR, 'roo', 'tasks'), path.join(roo, 'tasks'), { recursive: true });
+  fs.mkdirSync(path.join(cline, 'settings'), { recursive: true });
+  fs.writeFileSync(path.join(cline, 'settings', 'cline_mcp_settings.json'), '{"mcpServers":{"x":{"env":{"API_KEY":"FIXTURE-PRIVATE"}}}}\n');
+  fs.mkdirSync(path.join(roo, 'settings'), { recursive: true });
+  fs.writeFileSync(path.join(roo, 'settings', 'mcp_settings.json'), '{"mcpServers":{}}\n');
+  fs.writeFileSync(path.join(HOME, 'copilot-otel', 'other.jsonl'), '{"not":"the outfile"}\n');
+  fs.writeFileSync(path.join(HOME, 'copilot-otel', 'secret.json'), '{"FIXTURE-PRIVATE":1}\n');
+  fs.writeFileSync(path.join(HOME, 'copilot.jsonl'), '{"resourceSpans":[]}\n');
+}
+// Plan 9 review (decode=zstd budget) — two --root zed folders: zed-view/threads.db where `threads` is a VIEW (→ 415) and zed-big/threads.db whose three rows
+// each decode to 1 MB (→ 413 under COLLECTOR_ZSTD_BUDGET=1500000). Built with node:sqlite + zlib zstd; when this Node lacks either, both folders get a copy
+// of the fixture store instead and false comes back — the collector (same Node) then answers 501 for them, which the caller asserts instead.
+async function seedZedDecoys(HOME) {
+  const dirs = { view: path.join(HOME, 'zed-view'), big: path.join(HOME, 'zed-big') };
+  for (const d of Object.values(dirs)) fs.mkdirSync(d, { recursive: true });
+  const sqlite = await import('node:sqlite').catch(() => null);
+  if (!sqlite || typeof sqlite.DatabaseSync !== 'function' || typeof zlib.zstdCompressSync !== 'function') {
+    for (const d of Object.values(dirs)) fs.copyFileSync(path.join(OUT_DIR, 'b6', 'zed', 'threads', 'threads.db'), path.join(d, 'threads.db'));
+    return false;
+  }
+  const cols = '(id TEXT PRIMARY KEY, summary TEXT NOT NULL, updated_at TEXT NOT NULL, data_type TEXT NOT NULL, data BLOB NOT NULL)';
+  const build = (dir, ddl, fill) => { const db = new sqlite.DatabaseSync(path.join(dir, 'threads.db')); db.exec('PRAGMA journal_mode=DELETE'); db.exec(ddl); fill(db); db.close(); };
+  build(dirs.view, `CREATE TABLE real_threads${cols}; CREATE VIEW threads AS SELECT * FROM real_threads`, (db) => db.prepare('INSERT INTO real_threads VALUES (?, ?, ?, ?, ?)').run('v1', 'via view', '2026-01-01T00:00:00Z', 'json', '{}'));
+  build(dirs.big, `CREATE TABLE threads${cols}`, (db) => { const ins = db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?)'); const frame = zlib.zstdCompressSync(Buffer.alloc(1024 * 1024, 0x20)); for (const id of ['b1', 'b2', 'b3']) ins.run(id, 'big', '2026-01-01T00:00:00Z', 'zstd', frame); });
+  return true;
+}
+
+// T2 fixtures stay out of seedHome(), whose browser integration contract is three tools / nine files.
+async function checkT2(add, token, skip) {
+  const source = fs.readFileSync(COLLECTOR, 'utf8');
+  const declaration = (name) => {
+    const line = source.split('\n').find((s) => s.startsWith('const ' + name + ' = '));
+    if (!line) throw new Error('missing collector declaration: ' + name);
+    return line;
+  };
+  const limits = vm.runInNewContext(declaration('env') + '\n' + declaration('envInt')
+    + '\n[envInt("COLLECTOR_WALK_CAP", 20000), envInt("COLLECTOR_ZSTD_BUDGET", 268435456), envInt("COLLECTOR_ZSTD_ROW_MAX", 67108864), envInt("LOW", 20000), envInt("BAD", 20000)]',
+    { process: { env: { COLLECTOR_WALK_CAP: '20001', COLLECTOR_ZSTD_BUDGET: '268435457', COLLECTOR_ZSTD_ROW_MAX: '67108865', LOW: '3', BAD: '0' } } });
+  add('collector (T2): environment limits can only lower defaults',
+    JSON.stringify(limits) === '[20000,268435456,67108864,3,20000]', JSON.stringify(limits));
+  const denyNames = ['hosts.json', 'apps.json', 'keys.json', 'accounts.json', 'places.sqlite', 'config.local.json', 'config.local.extra.json',
+    'mcp.json', 'mcp-config.json', 'mcp_settings.json', 'cline_mcp_settings.json'];
+  const denyName = vm.runInNewContext(declaration('DENY_NAME') + '\nDENY_NAME');
+  const logNames = ['ui_messages.json', 'task_metadata.json', 'tokensGenerated.jsonl', '.aider.chat.history.md', 'threads.db', 'events.jsonl',
+    'session-x.json', 'x.conversation.json', 'usage.jsonl', 'db.sqlite', 'messages.jsonl', 'opencode.db', 'sessions.db', 'T-x.json',
+    'msg_01HZmcpQ7x.json', 'msg_mcpQ7x.json'];
+  add('collector (T2): DENY_NAME independently rejects sensitive basenames and keeps log names',
+    denyNames.every((name) => denyName.test(name) && denyName.test(name.toUpperCase())) && logNames.every((name) => !denyName.test(name)),
+    JSON.stringify({ missed: denyNames.filter((name) => !denyName.test(name)), deniedLogs: logNames.filter((name) => denyName.test(name)) }));
+  const base = path.join(HOME, 't2');
+  const put = (rel, data = '{}\n') => { const file = path.join(base, ...rel.split('/')); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, data); };
+  const history = '.aider.chat.history.md', deep10 = Array(10).fill('d').join('/'), deep12 = deep10 + '/d/d';
+  put('aider/' + history, '# root\n');
+  put('aider/' + deep10 + '/' + history, '# depth 10\n');
+  put('aider/' + deep12 + '/' + history, '# depth 12\n');
+  put('aider/UPLOAD~1/' + history, '# short name\n');
+  for (const rel of ['logs/chat/root.json', 'logs/instruct/nested/session.json', 'root.json', 'notes.md', 'logs/other/session.json']) put('tgwebui/' + rel);
+  for (const name of [...denyNames, 'ui_messages.json']) put('amp/' + name);
+  for (const name of ['ui_messages.json', 'task_metadata.json', 'api_conversation_history.json']) put('cline/tasks/t1/' + name);
+  for (let i = 0; i < 4; i++) { put('nonmatching/file-' + i + '.txt'); fs.mkdirSync(path.join(base, 'directories', 'dir-' + i), { recursive: true }); }
+  for (const root of ['first', 'second']) { put(root + '/a.txt'); put(root + '/b.txt'); put(root + '/c.json'); }
+  for (const [dir, file] of [['frame', 'thread-fixture.json'], ['corrupt', 'thread-corrupt.json']])
+    put('zed/' + dir + '/threads.db', fs.readFileSync(path.join(OUT_DIR, 'b6', 'zed', 'threads', file)));
+  const sqlite = await import('node:sqlite').catch(() => null);
+  const hasSqlite = typeof sqlite?.DatabaseSync === 'function', hasZstd = typeof zlib.zstdDecompressSync === 'function';
+  const canCompress = typeof zlib.zstdCompressSync === 'function';
+  const makeDb = (dir, fill) => {
+    const file = path.join(base, 'zed', dir, 'threads.db'); fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (!hasSqlite) { fs.copyFileSync(path.join(OUT_DIR, 'b6', 'zed', 'threads', 'threads.db'), file); return; }
+    const db = new sqlite.DatabaseSync(file);
+    try {
+      db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, summary TEXT, updated_at TEXT, data_type TEXT, data BLOB); BEGIN');
+      const insert = db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?)');
+      fill((id, type, data) => insert.run(id, '', '', type, data));
+      db.exec('COMMIT');
+    } finally { db.close(); }
+  };
+  makeDb('rows', (insert) => { for (let i = 0; i < 10001; i++) insert(String(i), 'json', '{}'); });
+  makeDb('row', (insert) => insert('r', 'zstd', canCompress ? zlib.zstdCompressSync(Buffer.alloc(1025, 0x61)) : Buffer.from('28b52ffd', 'hex')));
+  makeDb('unicode', (insert) => insert('u', 'json', '\u00e9'.repeat(600)));
+  const codexRoot = path.join(base, 'codex', 'sessions'), linkedRollout = 'rollout-review.jsonl';
+  put('codex/sessions/checkpoints/' + linkedRollout);
+  put('codex/sessions/' + linkedRollout);
+  put('outside/' + linkedRollout);
+  for (const [name, target] of [['link', path.join(codexRoot, 'checkpoints')], ['outside-link', path.join(base, 'outside')]])
+    fs.symlinkSync(target, path.join(codexRoot, name), process.platform === 'win32' ? 'junction' : 'dir');
+  let child;
+  try {
+    const roots = ['aider', 'tgwebui', 'amp', 'cline', 'zed'].flatMap((id) => ['--root', id + '=' + path.join(base, id)]);
+    child = await start([...roots, '--root', 'codex=' + codexRoot], HOME, { COLLECTOR_ZSTD_ROW_MAX: '1024' });
+    add('collector (T2): isolated fixture server starts', child.port > 0, child.io());
+    if (!child.port) return;
+    const api = (p) => request(child.port, 'GET', p, { authorization: 'Bearer ' + token });
+    const file = (tool, rel, decode = '') => api('/api/file?tool=' + tool + '&path=' + encodeURIComponent(rel) + decode);
+    const list = async (tool) => {
+      const response = await api('/api/list?tool=' + tool);
+      if (response.status !== 200) throw new Error('list ' + tool + ': ' + response.status);
+      return asJson(response).files.map((f) => f.path).sort();
+    };
+    const status = asJson(await api('/api/status'));
+    const codexControl = await file('codex', linkedRollout);
+    add('collector (R-07): an ordinary rollout under the junction-test root is served', codexControl.status === 200, String(codexControl.status));
+    for (const [name, expected, error] of [['link', 404, 'file not found'], ['outside-link', 400, 'path resolves outside the tool folder (symbolic link)']]) {
+      const response = await file('codex', name + '/' + linkedRollout);
+      add('collector (R-07): post-realpath re-check rejects ' + name,
+        fs.lstatSync(path.join(codexRoot, name, linkedRollout)).isFile() && response.status === expected && asJson(response)?.error === error,
+        response.status + ' ' + response.body.toString());
+    }
+    const aider = await list('aider');
+    add('collector (T2): depth 10 is readable and depth 12 is not descended',
+      JSON.stringify(aider) === JSON.stringify([history, deep10 + '/' + history].sort()) && status.tools.find((t) => t.id === 'aider').capped === true,
+      JSON.stringify(aider));
+    const short = await file('aider', 'UPLOAD~1/' + history);
+    add('collector (T2): UPLOAD~1 is absent from listings and refused by file requests',
+      aider.includes(history) && !aider.some((p) => p.includes('UPLOAD~1')) && short.status === 404, JSON.stringify({ aider, status: short.status }));
+    const tgPaths = await list('tgwebui'), tgGood = ['logs/chat/root.json', 'logs/instruct/nested/session.json'];
+    const tgYes = await Promise.all(tgGood.map((p) => file('tgwebui', p)));
+    const tgNo = await Promise.all(['root.json', 'notes.md', 'logs/other/session.json'].map((p) => file('tgwebui', p)));
+    add('collector (T2): tgwebui serves only chat and instruct JSON logs',
+      JSON.stringify(tgPaths) === JSON.stringify(tgGood) && tgYes.every((r) => r.status === 200) && tgNo.every((r) => r.status === 404), JSON.stringify(tgPaths));
+    const taskPaths = await list('cline'), conversation = await file('cline', 'tasks/t1/api_conversation_history.json'), ui = await file('cline', 'tasks/t1/ui_messages.json');
+    add('collector (T2): Cline omits conversation history and still serves ui_messages',
+      JSON.stringify(taskPaths) === '["tasks/t1/task_metadata.json","tasks/t1/ui_messages.json"]' && conversation.status === 404 && ui.status === 200, JSON.stringify(taskPaths));
+    const denied = await Promise.all(denyNames.map((name) => file('amp', name))), allowed = await file('amp', 'ui_messages.json'), amp = await list('amp');
+    add('collector (T2): sensitive filenames return 404 under a served root',
+      denied.every((r) => r.status === 404) && allowed.status === 200 && JSON.stringify(amp) === '["ui_messages.json"]', JSON.stringify(denied.map((r) => r.status)));
+    const frame = await file('zed', 'frame/threads.db', '&decode=zstd'), corrupt = await file('zed', 'corrupt/threads.db', '&decode=zstd');
+    add(hasZstd ? 'collector (T2): raw threads.db frame decodes byte-exact' : 'collector (T2): raw frame returns 501 without zstd',
+      hasZstd ? frame.status === 200 && frame.body.equals(fs.readFileSync(path.join(OUT_DIR, 'b6', 'zed', 'thread-fixture.plain.json'))) : frame.status === 501, String(frame.status));
+    add(hasZstd ? 'collector (T2): corrupt threads.db frame returns 422 and server survives' : 'collector (T2): corrupt frame returns 501 without zstd and server survives',
+      corrupt.status === (hasZstd ? 422 : 501) && (await api('/api/status')).status === 200 && child.exited === null, String(corrupt.status));
+    const rows = await file('zed', 'rows/threads.db', '&decode=zstd'), row = await file('zed', 'row/threads.db', '&decode=zstd');
+    add(hasSqlite ? 'collector (T2): 10001 thread rows return 413' : 'collector (T2): row-count fixture returns 501 without SQLite',
+      hasSqlite ? rows.status === 413 && /10000 thread rows/.test(asJson(rows)?.error || '') : rows.status === 501, rows.body.toString().slice(0, 200));
+    add(hasSqlite && canCompress && hasZstd ? 'collector (T2): a row over the lowered per-row cap returns 413' : 'collector (T2): per-row fixture returns 501 without SQLite or zstd',
+      hasSqlite && canCompress && hasZstd ? row.status === 413 && /1024 bytes/.test(asJson(row)?.error || '') : row.status === 501, row.body.toString().slice(0, 200));
+    await child.stop();
+    child = await start(['--root', 'aider=' + path.join(base, 'nonmatching'), '--root', 'tgwebui=' + path.join(base, 'directories'),
+      '--root', 'amp=' + path.join(base, 'first'), '--root', 'amp=' + path.join(base, 'second'), '--root', 'zed=' + path.join(base, 'zed')],
+      HOME, { COLLECTOR_WALK_CAP: '3', COLLECTOR_ZSTD_BUDGET: '1000' });
+    add('collector (T2): lowered-limit fixture server starts', child.port > 0, child.io());
+    if (!child.port) return;
+    const capped = asJson(await api('/api/status'));
+    for (const [id, kind] of [['aider', 'nonmatching files'], ['tgwebui', 'directories']]) {
+      const tool = capped.tools.find((t) => t.id === id), paths = await list(id);
+      add('collector (T2): walk cap counts ' + kind,
+        tool.found === true && tool.capped === true && tool.files === 0 && paths.length === 0, JSON.stringify(tool));
+    }
+    const shared = capped.tools.find((t) => t.id === 'amp'), sharedPaths = await list('amp');
+    add('collector (T2): visited-entry budget is shared across roots',
+      shared.capped === true && shared.files === 1 && JSON.stringify(sharedPaths) === '["first/c.json"]', JSON.stringify(sharedPaths));
+    const unicode = await file('zed', 'unicode/threads.db', '&decode=zstd');
+    add(hasSqlite ? 'collector (T2): total decode budget counts UTF-8 bytes' : 'collector (T2): UTF-8 fixture returns 501 without SQLite',
+      hasSqlite ? unicode.status === 413 && /1000 bytes/.test(asJson(unicode)?.error || '') : unicode.status === 501, unicode.body.toString().slice(0, 200));
+    const shortHomeTest = 'collector (R-01): short HOME is refused like long HOME';
+    if (process.platform !== 'win32') skip(shortHomeTest, 'Windows 8.3 names require win32');
+    else {
+      const lookup = spawnSync('cmd.exe', ['/d', '/c', 'for %I in ("' + HOME + '") do @echo %~sI'],
+        { encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true, timeout: 10000 });
+      if (lookup.error || lookup.status !== 0 || !lookup.stdout.trim()) throw new Error('short HOME lookup failed: ' + (lookup.error || lookup.stderr));
+      const shortHome = lookup.stdout.trim();
+      if (path.resolve(shortHome).toLowerCase() === path.resolve(HOME).toLowerCase()) skip(shortHomeTest, 'temp HOME has no distinct 8.3 spelling on this volume');
+      else {
+        if (fs.realpathSync.native(shortHome).toLowerCase() !== fs.realpathSync.native(HOME).toLowerCase()) throw new Error('short HOME does not resolve to temp HOME');
+        await child.stop();
+        child = await start(['--root', 'amp=' + HOME, '--root', 'amp=' + shortHome], HOME, { COLLECTOR_WALK_CAP: '3' });
+        add('collector (R-01): short HOME fixture server starts', child.port > 0, child.io());
+        if (!child.port) return;
+        const ampHome = asJson(await api('/api/status')).tools.find((tool) => tool.id === 'amp');
+        const refused = ampHome.refused || [], homeList = await api('/api/list?tool=amp');
+        add(shortHomeTest, ampHome.found === false && ampHome.files === 0 && ampHome.roots.length === 0 && homeList.status === 404
+          && refused.length === 2 && [HOME, shortHome].every((dir) => refused.some((r) => r.dir === dir && r.reason === 'is the home folder')),
+          JSON.stringify({ ampHome, list: homeList.status }));
+      }
+    }
+  } finally { if (child) await child.stop(); }
+}
 
 export async function run() {
-  const results = [];
+  const results = [], skipped = [];
   const add = (name, pass, detail = '') => results.push({ name, pass: !!pass, detail: String(detail) });
-  const summary = () => ({ pass: results.every((r) => r.pass), detail: results.filter((r) => !r.pass).map((r) => r.name + ': ' + r.detail).join(' | '), results });
+  const skip = (name, reason) => { skipped.push({ name, reason }); console.log(`SKIP  ${name}  — ${reason}`); };
+  const summary = () => ({ pass: results.every((r) => r.pass), detail: results.filter((r) => !r.pass).map((r) => r.name + ': ' + r.detail).join(' | '), results, skipped });
   if (!fs.existsSync(path.join(OUT_DIR, 'codex', 'sessions'))) { const { generate } = await import('../fixtures/gen.mjs'); await generate(); }   // standalone run before the suite ever generated fixtures
   seedHome();
   seedWave3();
   seedB6();
+  seedReviewFixtures();
+  const zedDecoys = await seedZedDecoys(HOME);
   let a = null, b = null, c = null;
   const HOME_CW = path.join(OUT_DIR, `collector-cowork-${process.pid}`);   // B1 block: its own HOME (APPDATA / LOCALAPPDATA point at it too — see start())
   try {
@@ -168,6 +383,20 @@ export async function run() {
     const auth = { authorization: 'Bearer ' + token };
     const API = (p, opts) => request(a.port, 'GET', p, opts === false ? {} : { ...auth, ...(opts || {}) });
 
+    const badRequest = await rawBadRequest(a.port).catch((e) => String(e));
+    const afterBad = await API('/api/status').catch((e) => ({ status: e.code || e.message }));
+    add('collector (T2): malformed request returns 400 JSON and the same server survives',
+      /^HTTP\/1\.1 400\b/.test(badRequest) && badRequest.includes('{"error":"bad request"}')
+        && a.exited === null && afterBad.status === 200,
+      JSON.stringify({ badRequest, next: afterBad.status, exited: a.exited }));
+    for (const target of ['//127.0.0.1/api/status', 'http://127.0.0.1/api/status']) {
+      const response = await rawGet(a.port, target, auth, async () => {});
+      const after = await API('/api/status');
+      add('collector (R-03): non-origin request target is refused: ' + target,
+        /^HTTP\/1\.1 400\b/.test(response.head) && response.body.toString() === '{"error":"bad request"}'
+          && after.status === 200 && a.exited === null,
+        JSON.stringify({ head: response.head, body: response.body.toString(), next: after.status, exited: a.exited }));
+    }
     const noTok = await API('/api/status', false);
     const badTok = await request(a.port, 'GET', '/api/status', { authorization: 'Bearer ' + 'f'.repeat(64) });
     const qTok = await request(a.port, 'GET', '/api/status?token=' + token);
@@ -187,8 +416,8 @@ export async function run() {
     const toolOf = (j, id) => ((j || {}).tools || []).find((t) => t.id === id) || {};
     const tool = (id) => toolOf(sj, id);
     const found = (id, n, nRoots = 1) => tool(id).found === true && tool(id).files === n && Array.isArray(tool(id).roots) && tool(id).roots.length === nRoots && typeof tool(id).bytes === 'number' && tool(id).bytes > 0 && typeof tool(id).newestMtime === 'number' && typeof tool(id).scannedAt === 'number';
-    add('collector: /api/status → local (2 files), codex (5), copilot-cli (2), gemini-cli (1) found under the temp HOME — node_modules / checkpoints skipped — cline not found; version/home/os/startedAt present',
-      st.status === 200 && isJsonCT(st) && found('local', 2) && found('codex', 5, 2) && found('copilot-cli', 2) && found('gemini-cli', 1) && tool('cline').found === false && tool('cline').files === 0
+    add('collector: /api/status → local (2 files — CLAUDE.md, projects/…/memory/notes.md, settings.local.json beside them never counted), codex (5), copilot-cli (2 — mcp-config.json never counted), gemini-cli (1: the session-*.json; tmp/not-a-session.jsonl never counted), cline (7 task files; settings/cline_mcp_settings.json never counted) found under the temp HOME — node_modules / checkpoints skipped; version/home/os/startedAt present',
+      st.status === 200 && isJsonCT(st) && found('local', 2) && found('codex', 5, 2) && found('copilot-cli', 2) && found('gemini-cli', 1) && found('cline', 7)
         && path.resolve(tool('local').roots[0]) === path.join(HOME, '.claude')
         && typeof sj.version === 'string' && path.resolve(sj.home || '') === HOME && typeof sj.os === 'string' && !Number.isNaN(Date.parse(sj.startedAt)),
       st.body.toString().slice(0, 1500));
@@ -204,13 +433,13 @@ export async function run() {
     // ---------------------------------------------------------------- Plan 9 B5: Wave 3 coding tools (seedWave3) ----------------------------------------------------------------
     const w3 = (id) => tool(id);
     const w3Roots = (id) => (w3(id).roots || []).map((r) => path.resolve(r));
-    add('collector (B5): /api/status → opencode (3 files: opencode.db + the two legacy msg_*.json; snapshot/ git objects never walked), goose (1), devin (1), kilo (4 — two tasks) and amp (3 threads; history.jsonl / session.json beside threads/ never listed) found under their standard roots; roo NOT found (kilocode.kilo-code is kilo\'s root now, not roo\'s)',
+    add('collector (B5): /api/status → opencode (3 files: opencode.db + the two legacy msg_*.json; snapshot/ git objects never walked), goose (1), devin (1), kilo (4 — two tasks) and amp (3 threads; history.jsonl / session.json beside threads/ never listed) found under their standard roots; roo found under its OWN root rooveterinaryinc.roo-cline with 2 task files (kilocode.kilo-code is kilo\'s root now, not roo\'s; roo\'s settings/mcp_settings.json never counted)',
       found('opencode', 3) && w3Roots('opencode')[0] === path.join(HOME, '.local', 'share', 'opencode')
         && found('goose', 1) && w3Roots('goose')[0] === path.join(HOME, 'Block', 'goose', 'sessions')
         && found('devin', 1) && w3Roots('devin')[0] === path.join(HOME, 'devin', 'cli')
         && found('kilo', 4) && w3Roots('kilo')[0] === path.join(HOME, 'Code', 'User', 'globalStorage', 'kilocode.kilo-code')
         && found('amp', 3) && w3Roots('amp')[0] === path.join(HOME, '.local', 'share', 'amp', 'threads')
-        && w3('roo').found === false && w3('roo').files === 0,
+        && found('roo', 2) && w3Roots('roo')[0] === path.join(HOME, EXT_STORAGE('rooveterinaryinc.roo-cline')),
       JSON.stringify(['opencode', 'goose', 'devin', 'kilo', 'amp', 'roo'].map((id) => [id, w3(id).found, w3(id).files, w3(id).roots])));
     const w3List = async (id) => ((asJson(await API('/api/list?tool=' + id)) || {}).files || []).map((f) => f.path).sort();
     const ocPaths = await w3List('opencode'), ampPaths = await w3List('amp'), kiloPaths = await w3List('kilo'), gooseList = await w3List('goose'), devinList = await w3List('devin');
@@ -229,25 +458,25 @@ export async function run() {
 
     // ---------------------------------------------------------------- Plan 9 B6: Zed (decode=zstd) + GitHub Copilot Chat OTel outfile (seedB6) ----------------------------------------------------------------
     const zedRoot = path.join(HOME, 'Zed', 'threads');
-    add('collector (B6): /api/status → zed found under %LOCALAPPDATA%\\Zed\\threads (3 files: threads.db + the two frame fixtures) and copilot-vscode found under the folder of COPILOT_OTEL_FILE_EXPORTER_PATH (1 file) — the OTel outfile has no fixed location, so the env var (or --root) is the only discovery',
-      found('zed', 3) && path.resolve(w3Roots('zed')[0]) === zedRoot && found('copilot-vscode', 1) && path.resolve(w3Roots('copilot-vscode')[0]) === path.join(HOME, 'copilot-otel'),
+    add('collector (B6): /api/status → zed found under %LOCALAPPDATA%\\Zed\\threads (1 file: threads.db — the thread-fixture.json / thread-corrupt.json frames beside it are not Zed log files, so the include glob keeps them out) and copilot-vscode found under the folder of COPILOT_OTEL_FILE_EXPORTER_PATH (1 file) — the OTel outfile has no fixed location, so the env var (or --root) is the only discovery',
+      found('zed', 1) && path.resolve(w3Roots('zed')[0]) === zedRoot && found('copilot-vscode', 1) && path.resolve(w3Roots('copilot-vscode')[0]) === path.join(HOME, 'copilot-otel'),
       JSON.stringify(['zed', 'copilot-vscode'].map((id) => [id, w3(id).found, w3(id).files, w3(id).roots, w3(id).candidates])));
     const zedList = await w3List('zed'), otelList = await w3List('copilot-vscode');
-    add('collector (B6): /api/list → zed ["thread-corrupt.json", "thread-fixture.json", "threads.db"], copilot-vscode ["copilot-chat.jsonl"]',
-      JSON.stringify(zedList) === JSON.stringify(['thread-corrupt.json', 'thread-fixture.json', 'threads.db']) && JSON.stringify(otelList) === JSON.stringify([OTEL_FILE]), JSON.stringify({ zedList, otelList }));
-    const zedPlain = fs.readFileSync(path.join(OUT_DIR, 'b6', 'zed', 'thread-fixture.plain.json')), zedFrame = fs.readFileSync(path.join(zedRoot, 'thread-fixture.json'));
+    const otelOther = await API('/api/file?tool=copilot-vscode&path=other.jsonl'), otelSecret = await API('/api/file?tool=copilot-vscode&path=secret.json');
+    add('collector (review, single-file root): /api/list → zed ["threads.db"] only; copilot-vscode ["copilot-chat.jsonl"] only — its root is the folder of COPILOT_OTEL_FILE_EXPORTER_PATH but ONLY that file is listed or served: the siblings other.jsonl (would pass the include glob) and secret.json answer 404 "file not found"',
+      JSON.stringify(zedList) === '["threads.db"]' && JSON.stringify(otelList) === JSON.stringify([OTEL_FILE]) && otelOther.status === 404 && /file not found/.test(otelOther.body.toString()) && otelSecret.status === 404 && !otelSecret.body.includes('FIXTURE-PRIVATE'),
+      JSON.stringify({ zedList, otelList, other: otelOther.status, secret: otelSecret.status }));
     const rawFrame = await API('/api/file?tool=zed&path=thread-fixture.json');
-    const decoded = await API('/api/file?tool=zed&path=thread-fixture.json&decode=zstd');
-    add('collector (B6): GET /api/file?tool=zed&path=thread-fixture.json streams the zstd frame as-is (byte-exact, 28 B5 2F FD magic); …&decode=zstd answers the DECOMPRESSED bytes byte-exact (the committed plain JSON, Content-Length = its size, JSON content type, CORS headers) — zlib.zstdDecompressSync on the collector\'s side, bounded',
-      rawFrame.status === 200 && rawFrame.body.equals(zedFrame) && zedFrame.subarray(0, 4).toString('hex') === '28b52ffd' && decoded.status === 200 && decoded.body.equals(zedPlain) && +decoded.headers['content-length'] === zedPlain.length && /json/i.test(decoded.headers['content-type'] || '') && corsOk(decoded),
-      `raw ${rawFrame.status} ${rawFrame.body.length}/${zedFrame.length} · decoded ${decoded.status} ${decoded.body.length}/${zedPlain.length} cl=${decoded.headers['content-length']} ct=${decoded.headers['content-type']}`);
+    const decodedFrame = await API('/api/file?tool=zed&path=thread-fixture.json&decode=zstd');
     const corrupt = await API('/api/file?tool=zed&path=thread-corrupt.json&decode=zstd');
+    add('collector (review, include globs): the zstd frames beside threads.db (thread-fixture.json, thread-corrupt.json — .json passes the extension allow-list) are not Zed log files: GET /api/file answers 404 JSON for them with and without decode=zstd (these filenames fail the include glob; a raw frame named threads.db is tested separately)',
+      rawFrame.status === 404 && decodedFrame.status === 404 && corrupt.status === 404 && [rawFrame, decodedFrame, corrupt].every(isJsonCT),
+      [rawFrame, decodedFrame, corrupt].map((r) => r.status).join(','));
     const otherTool = await API('/api/file?tool=codex&path=' + encodeURIComponent(CODEX_FILE) + '&decode=zstd');
-    const otherCodec = await API('/api/file?tool=zed&path=thread-fixture.json&decode=gzip');
-    add('collector (B6): decode=zstd on a frame that does not decode (zstd magic + garbage) → 422 JSON naming the zstd failure (no stack, no path); decode=zstd on a non-Zed tool (codex) → 400 JSON "only for zed"; decode=gzip → 400 JSON (the only accepted value is zstd)',
-      corrupt.status === 422 && isJsonCT(corrupt) && /zstd/i.test((asJson(corrupt) || {}).error || '') && !/\\|\//.test((asJson(corrupt) || {}).error || '') && !/at .*:\d+/.test(corrupt.body.toString())
-        && otherTool.status === 400 && isJsonCT(otherTool) && /zed/i.test((asJson(otherTool) || {}).error || '') && otherCodec.status === 400 && isJsonCT(otherCodec) && /zstd/.test((asJson(otherCodec) || {}).error || ''),
-      `corrupt ${corrupt.status} ${corrupt.body.toString().slice(0, 160)} · codex ${otherTool.status} ${otherTool.body.toString().slice(0, 120)} · gzip ${otherCodec.status} ${otherCodec.body.toString().slice(0, 120)}`);
+    const otherCodec = await API('/api/file?tool=zed&path=threads.db&decode=gzip');
+    add('collector (B6): decode=zstd on a non-Zed tool (codex) → 400 JSON "only for zed"; decode=gzip → 400 JSON (the only accepted value is zstd)',
+      otherTool.status === 400 && isJsonCT(otherTool) && /zed/i.test((asJson(otherTool) || {}).error || '') && otherCodec.status === 400 && isJsonCT(otherCodec) && /zstd/.test((asJson(otherCodec) || {}).error || ''),
+      `codex ${otherTool.status} ${otherTool.body.toString().slice(0, 120)} · gzip ${otherCodec.status} ${otherCodec.body.toString().slice(0, 120)}`);
     // threads.db: the Zed store is SQLite with one zstd frame per thread row — decode=zstd there means "every row decoded", answered as JSON lines (the page parses them like the
     // raw store). The collector needs node:sqlite for it (Node ≥ 22.13); where this Node lacks it the documented answer is 501 with the Node hint — asserted as such, never skipped.
     const sqliteHere = await import('node:sqlite').then((m) => typeof m.DatabaseSync === 'function').catch(() => false);
@@ -267,7 +496,7 @@ export async function run() {
     await sleep(150);
     const decodeLog = a.out.split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => /decode=/.test(l));
     add('collector (B6): the request log echoes decode=zstd beside tool / path (sanitised like them) — one line per decode request, never the body, never the token (the banner\'s ready URL is the only place the token is printed)',
-      decodeLog.some((l) => /GET \/api\/file\?tool=zed&path=thread-fixture\.json&decode=zstd 200 \d+$/.test(l)) && decodeLog.length >= 5 && decodeLog.every((l) => !l.includes(token) && !/"data"|SQLite format/.test(l)), decodeLog.join(' | ').slice(0, 400));
+      decodeLog.some((l) => /GET \/api\/file\?tool=zed&path=threads\.db&decode=zstd (200|501) \d+$/.test(l)) && decodeLog.length >= 5 && decodeLog.every((l) => !l.includes(token) && !/"data"|SQLite format/.test(l)), decodeLog.join(' | ').slice(0, 400));
 
     const ls = await API('/api/list?tool=codex');
     const lj = asJson(ls) || {};
@@ -293,15 +522,22 @@ export async function run() {
         && tokViaOllamaUpper.status === 404 && !tokViaOllamaUpper.body.includes(token) && !(ollamaList.files || []).some((f) => /collector\.token$/i.test(f.path)),
       `status ${tokViaOllama.status}/${tokViaOllamaUpper.status} · body ${tokViaOllama.body.toString().slice(0, 120)} · ollama found=${tool('ollama').found} roots=${JSON.stringify(tool('ollama').roots)} list=${JSON.stringify((ollamaList.files || []).map((f) => f.path))}`);
 
-    // A0 #17: an extension allow-list (.jsonl .json .md .sqlite .db .csv .txt) and a credential-name deny-list apply to the listing AND to /api/file
-    const lsLocal = (asJson(await API('/api/list?tool=local')) || {}).files || [], lsGem = (asJson(await API('/api/list?tool=gemini-cli')) || {}).files || [], lsCodex = (asJson(await API('/api/list?tool=codex')) || {}).files || [];
-    const deniedFiles = [['local', '.credentials.json'], ['local', 'settings.json'], ['gemini-cli', 'oauth_creds.json'], ['gemini-cli', 'settings.json'], ['gemini-cli', '.env'], ['codex', 'sessions/notes.yaml']];
-    const denied = await Promise.all(deniedFiles.map(async ([t, p]) => [t + ':' + p, (await API(`/api/file?tool=${t}&path=${encodeURIComponent(p)}`)).status]));
-    add('collector (A0 #17): credential-named files that exist under the roots (~/.claude/.credentials.json + settings.json, ~/.gemini/oauth_creds.json + settings.json + .env) and a file outside the extension allow-list (sessions/notes.yaml) are neither listed by /api/list nor served by /api/file (404) — the .jsonl logs beside them still are',
-      deniedFiles.every(([, p]) => fs.existsSync(path.join(HOME, { local: '.claude', 'gemini-cli': '.gemini', codex: '.codex' }[deniedFiles.find(([, q]) => q === p)[0]], ...p.split('/'))))
-        && !lsLocal.some((f) => /credentials|settings/.test(f.path)) && lsLocal.length === 2 && !lsGem.some((f) => /oauth|settings|\.env/.test(f.path)) && lsGem.length === 1 && !lsCodex.some((f) => /\.yaml$/.test(f.path)) && lsCodex.length === 5
-        && denied.every(([, s]) => s === 404),
-      JSON.stringify({ denied, local: lsLocal.map((f) => f.path), gem: lsGem.map((f) => f.path), codexYaml: lsCodex.filter((f) => /yaml/.test(f.path)).map((f) => f.path) }));
+    // A0 #17: an extension allow-list (.jsonl .json .md .sqlite .db .csv .txt) and a credential-name deny-list apply to the listing AND to /api/file.
+    // Plan 9 review: so do the per-tool include globs — a file that passes both lists but is not that tool's log (CLAUDE.md, memory/notes.md, a non-session
+    // .jsonl under ~/.gemini) answers exactly like a missing file; settings.local.json and the MCP settings files are also on the wider deny-list.
+    const listOf = async (id) => ((asJson(await API('/api/list?tool=' + id)) || {}).files || []).map((f) => f.path);
+    const lsLocal = await listOf('local'), lsGem = await listOf('gemini-cli'), lsCodex = await listOf('codex'), lsCop = await listOf('copilot-cli'), lsCline = await listOf('cline'), lsRoo = await listOf('roo');
+    const ROOT_OF = { local: '.claude', 'gemini-cli': '.gemini', codex: '.codex', 'copilot-cli': '.copilot', cline: EXT_STORAGE('saoudrizwan.claude-dev'), roo: EXT_STORAGE('rooveterinaryinc.roo-cline') };
+    const deniedFiles = [['local', '.credentials.json'], ['local', 'settings.json'], ['gemini-cli', 'oauth_creds.json'], ['gemini-cli', 'settings.json'], ['gemini-cli', '.env'], ['codex', 'sessions/notes.yaml'],
+      ['local', 'CLAUDE.md'], ['local', 'projects/-D--proj1/memory/notes.md'], ['local', 'settings.local.json'], ['gemini-cli', 'tmp/not-a-session.jsonl'], ['copilot-cli', 'mcp-config.json'], ['cline', 'settings/cline_mcp_settings.json'], ['roo', 'settings/mcp_settings.json']];
+    const missingRef = await API('/api/file?tool=local&path=' + encodeURIComponent('projects/-D--proj1/nope.jsonl'));
+    const denied = await Promise.all(deniedFiles.map(async ([t, p]) => { const r = await API(`/api/file?tool=${t}&path=${encodeURIComponent(p)}`); return [t + ':' + p, r.status, r.body.toString()]; }));
+    add('collector (A0 #17 + review allow-list): credential-named files under the roots (~/.claude/.credentials.json + settings.json, ~/.gemini/oauth_creds.json + settings.json + .env), a file outside the extension allow-list (sessions/notes.yaml), and files that pass both lists but are not the tool\'s logs (~/.claude/CLAUDE.md, projects/…/memory/notes.md, settings.local.json, ~/.gemini/tmp/not-a-session.jsonl, ~/.copilot/mcp-config.json, cline settings/cline_mcp_settings.json, roo settings/mcp_settings.json) are neither listed nor served — the 404 body is byte-identical to a missing file\'s; the logs beside them still are (local 2, gemini 1, codex 5, copilot-cli 2, cline 7 tasks/*/{ui_messages,task_metadata}.json, roo 2)',
+      deniedFiles.every(([t, p]) => fs.existsSync(path.join(HOME, ...ROOT_OF[t].split('/'), ...p.split('/'))))
+        && !lsLocal.some((p) => /credentials|settings|\.md$/.test(p)) && lsLocal.length === 2 && !lsGem.some((p) => /oauth|settings|\.env|not-a-session/.test(p)) && lsGem.length === 1 && !lsCodex.some((p) => /\.yaml$/.test(p)) && lsCodex.length === 5
+        && !lsCop.some((p) => /mcp/.test(p)) && lsCop.length === 2 && lsCline.length === 7 && lsCline.every((p) => /^tasks\/\d+\/(ui_messages|task_metadata)\.json$/.test(p)) && lsRoo.length === 2 && lsRoo.every((p) => /^tasks\/\d+\/(ui_messages|task_metadata)\.json$/.test(p))
+        && missingRef.status === 404 && denied.every(([, s, body]) => s === 404 && body === missingRef.body.toString()),
+      JSON.stringify({ denied: denied.map(([k, s]) => k + '=' + s), local: lsLocal, gem: lsGem, cop: lsCop, cline: lsCline, roo: lsRoo, codexYaml: lsCodex.filter((p) => /yaml/.test(p)) }));
     const trav = await API('/api/file?tool=codex&path=' + encodeURIComponent('../.ai-usage/collector.token'));
     const abs = await API('/api/file?tool=codex&path=' + encodeURIComponent(tokenFile));
     const slash = await API('/api/file?tool=codex&path=' + encodeURIComponent('/etc/passwd'));
@@ -311,9 +547,17 @@ export async function run() {
     const all400 = [trav, abs, slash, inner, bs].every((r) => r.status === 400 && isJsonCT(r) && !r.body.includes(token));
     add('collector: traversal guard — "../x", an absolute path, "/x", "a/../../x" and a backslash variant → 400 JSON, the token file never leaks, and a ~/.codex file outside sessions/ + archived_sessions/ is not served',
       all400 && sibling.status === 404 && !sibling.body.includes('not a session'), [trav, abs, slash, inner, bs, sibling].map((r) => r.status).join(','));
+    // Case-insensitive skipped-folder matching is checked before realpath; a legitimate case variant still lands on Windows.
+    // checkT2's existing UPLOAD~1 directory and valid history filename isolate the short-name rule.
+    const caseSkip = await API('/api/file?tool=codex&path=' + encodeURIComponent(CKPT_ROLLOUT.replace('checkpoints', 'CHECKPOINTS')));
+    const caseFile = await API('/api/file?tool=codex&path=' + encodeURIComponent('sessions/' + CODEX_FILE.slice('sessions/'.length).toUpperCase()));
+    add('collector (review case folding): CHECKPOINTS is refused and a real rollout case variant streams on Windows',
+      caseSkip.status === 404 && /file not found/.test(caseSkip.body.toString()) && !caseSkip.body.includes('session_meta')
+        && (process.platform === 'win32' ? caseFile.status === 200 && caseFile.body.equals(want) : caseFile.status === 404),
+      [caseSkip, caseFile].map((r) => r.status).join(',') + ' · ' + caseSkip.body.toString().slice(0, 80));
     const missing = await API('/api/file?tool=codex&path=' + encodeURIComponent('sessions/2026/08/10/nope.jsonl'));
     const unknownTool = await API('/api/list?tool=nope');
-    const notFoundTool = await API('/api/list?tool=cline');
+    const notFoundTool = await API('/api/list?tool=lmstudio');
     const dirReq = await API('/api/file?tool=codex&path=' + encodeURIComponent('sessions/2026'));
     const rootReq = await API('/api/file?tool=codex&path=sessions');
     add('collector: a missing file → 404 JSON; an unknown tool id → 404; a tool whose folder does not exist → 404; a directory path → 404; a path that only names a root → 400',
@@ -375,7 +619,7 @@ export async function run() {
     // review m5: /api/file waits for the first walk (or one in flight) only — a dirty tool is re-walked by the next /api/status, never by a file request
     const gem0 = toolOf(c2, 'gemini-cli');
     const mark = a.out.length;   // only a "change detected" line logged AFTER the touch counts (a freshly seeded root fires one spurious event ~2 s after start)
-    fs.writeFileSync(path.join(HOME, '.gemini', 'tmp', 'touched.jsonl'), '{"touched":1}\n');
+    fs.writeFileSync(path.join(HOME, '.gemini', ...TOUCHED_FILE.split('/')), '{"touched":1}\n');
     if (gem0.watch === 'polling') await sleep(Math.max(0, TTL_MS + 1500 - (Date.now() - gem0.scannedAt)));   // no watcher there: the tool is stale once its cache is older than the TTL
     else { const dl = Date.now() + 8000; while (Date.now() < dl && !/gemini-cli: change detected/.test(a.out.slice(mark))) await sleep(100); }
     const dirtySeen = gem0.watch === 'polling' || /gemini-cli: change detected/.test(a.out.slice(mark));
@@ -398,16 +642,17 @@ export async function run() {
       `status ${rs.status}/${rf.status} · ${rf.body.length}/${wantBig.length} bytes · codex ${JSON.stringify(rsCodex).slice(0, 300)}`);
 
     // A0 #8: /api/file streams exactly Content-Length bytes — a log that grows while it streams (a CLI appending to its live session) must not break the framing.
-    // ~/.continue appears now (not in seedHome: 89c's end-to-end block counts the found tools); a 12 MB file, read with the client paused after the first chunk
-    // so the server cannot have reached its tail, then 1 MB appended, then the rest read: the body must stop at the size the request saw.
-    const growDir = path.join(HOME, '.continue'), growPath = path.join(growDir, 'grow.txt');
-    fs.mkdirSync(growDir, { recursive: true });
+    // ~/.continue appears now (not in seedHome: 89c's end-to-end block counts the found tools); a 12 MB file named like Continue's log (the include glob's file), read
+    // with the client paused after the first chunk so the server cannot have reached its tail, then 1 MB appended, then the rest read: the body must stop at the size the request saw.
+    const GROW_FILE = 'dev_data/0.2.0/tokensGenerated.jsonl';
+    const growPath = path.join(HOME, '.continue', ...GROW_FILE.split('/'));
+    fs.mkdirSync(path.dirname(growPath), { recursive: true });
     fs.writeFileSync(growPath, Buffer.alloc(12 * 1024 * 1024, 0x61));
     const contFound = toolOf(asJson(await API('/api/status')), 'continue');   // the new root is picked up by a status walk (a file request never re-walks)
     add('collector: a tool folder created after startup (~/.continue) is discovered by the next plain /api/status — found, 1 file (refreshTool no longer leaves a resolved walking promise behind for a root-less tool)',
       contFound.found === true && contFound.files === 1, JSON.stringify(contFound));
     const growLen = fs.statSync(growPath).size;
-    const grown = await rawGet(a.port, '/api/file?tool=continue&path=grow.txt', auth, async () => { fs.appendFileSync(growPath, Buffer.alloc(1024 * 1024, 0x41)); await sleep(300); });
+    const grown = await rawGet(a.port, '/api/file?tool=continue&path=' + encodeURIComponent(GROW_FILE), auth, async () => { fs.appendFileSync(growPath, Buffer.alloc(1024 * 1024, 0x41)); await sleep(300); });
     const growCL = +((/content-length:\s*(\d+)/i.exec(grown.head) || [])[1] || 0);
     add('collector (A0 #8): a 12 MB file appended with 1 MB while its GET streams (client paused after the first chunk) arrives with body length === Content-Length === the size at request time (end: size − 1), status 200',
       /^HTTP\/1\.1 200/.test(grown.head) && growCL === growLen && grown.body.length === growLen && fs.statSync(growPath).size === growLen + 1024 * 1024,
@@ -422,7 +667,16 @@ export async function run() {
     await a.stop();
 
     // ---------------------------------------------------------------- flags: --no-<id>, --root (single + multi-root) ----------------------------------------------------------------
-    b = await start(['--no-codex', '--root', `cline=${path.join(HOME, '.claude')}`, '--root', `aider=${path.join(HOME, '.codex')}`, '--root', `aider=${path.join(HOME, '.copilot')}`, '--html', path.join(HOME, 'missing-dashboard.html')]);
+    // Plan 9 review additions to this run: --root cline=<the kilo fixture folder> (4 task files — the include glob applies to a --root folder too), two --root zed
+    // folders holding the decode=zstd decoys (seedZedDecoys) under COLLECTOR_ZSTD_BUDGET=1500000, and COPILOT_OTEL_FILE_EXPORTER_PATH=<HOME>/copilot.jsonl whose folder IS the home — refused
+    for (const dir of ['.codex', '.copilot']) {
+      fs.writeFileSync(path.join(HOME, dir, '.aider.chat.history.md'), '# aider history\n');
+      fs.writeFileSync(path.join(HOME, dir, 'beside.json'), '{}\n');
+      fs.writeFileSync(path.join(HOME, dir, 'beside.md'), '# unrelated\n');
+    }
+    const kiloDir = path.join(HOME, EXT_STORAGE('kilocode.kilo-code'));
+    b = await start(['--no-codex', '--root', `cline=${kiloDir}`, '--root', `aider=${path.join(HOME, '.codex')}`, '--root', `aider=${path.join(HOME, '.copilot')}`, '--root', `zed=${path.join(HOME, 'zed-view')}`, '--root', `zed=${path.join(HOME, 'zed-big')}`, '--html', path.join(HOME, 'missing-dashboard.html')],
+      HOME, { COPILOT_OTEL_FILE_EXPORTER_PATH: path.join(HOME, 'copilot.jsonl'), COLLECTOR_ZSTD_BUDGET: '1500000' });
     add('collector: starts with --no-codex and --root flags', b.port > 0, b.io());
     if (!b.port) return summary();
     // review m7: the 404 for a missing dashboard file must not disclose the absolute path (the banner on the terminal still names it)
@@ -435,18 +689,40 @@ export async function run() {
     const B = (p) => request(b.port, 'GET', p, { authorization: 'Bearer ' + tok2 });
     const s2 = asJson(await B('/api/status')) || {};
     const t2 = (id) => (s2.tools || []).find((t) => t.id === id) || {};
-    add('collector: --no-codex → codex listed as disabled / not found; --root cline=<dir> → cline found with that root and 2 files; the token file is reused across runs',
-      t2('codex').found === false && t2('codex').disabled === true && t2('cline').found === true && t2('cline').files === 2 && path.resolve((t2('cline').roots || [''])[0]) === path.join(HOME, '.claude') && tok2 === token,
+    add('collector: --no-codex → codex listed as disabled / not found; --root cline=<the kilo folder> → cline found with that root and its 4 tasks/*/{ui_messages,task_metadata}.json (the include glob applies to a --root folder too); the token file is reused across runs',
+      t2('codex').found === false && t2('codex').disabled === true && t2('cline').found === true && t2('cline').files === 4 && path.resolve((t2('cline').roots || [''])[0]) === kiloDir && tok2 === token,
       JSON.stringify({ codex: t2('codex'), cline: t2('cline') }).slice(0, 600));
+    const cvs = t2('copilot-vscode');
+    const cvsList = await B('/api/list?tool=copilot-vscode');
+    add('collector (review, root refusal): COPILOT_OTEL_FILE_EXPORTER_PATH=<HOME>/copilot.jsonl would make the user\'s home folder a root — refused: copilot-vscode not found, status carries refused [{dir, reason}] naming the home folder, the banner line says "refused", /api/list → 404, nothing listed',
+      cvs.found === false && cvs.files === 0 && Array.isArray(cvs.refused) && cvs.refused.length === 1 && path.resolve(cvs.refused[0].dir) === HOME && /home/i.test(cvs.refused[0].reason) && cvsList.status === 404
+        && /^\s*copilot-vscode\b[^\n]*not found[^\n]*refused/m.test(b.out.slice(0, b.out.indexOf('listening on'))),
+      JSON.stringify(cvs) + ' · list ' + cvsList.status + ' · ' + b.out.split('\n').filter((l) => /copilot-vscode/.test(l)).join(' | ').slice(0, 300));
+    const errOf = (r) => (asJson(r) || {}).error || '';
+    const zedView = await B('/api/file?tool=zed&path=' + encodeURIComponent('zed-view/threads.db') + '&decode=zstd');
+    const zedBig = await B('/api/file?tool=zed&path=' + encodeURIComponent('zed-big/threads.db') + '&decode=zstd');
+    const zedBigRaw = await B('/api/file?tool=zed&path=' + encodeURIComponent('zed-big/threads.db'));
+    const zedAfter = await B('/api/status');
+    add(zedDecoys
+      ? 'collector (review, decode=zstd): two --root zed folders — zed-view/threads.db where `threads` is a VIEW → 415 JSON ("not a table"); zed-big/threads.db (three rows decoding to 1 MB each) under COLLECTOR_ZSTD_BUDGET=1500000 → 413 JSON naming the budget, no crash; the raw store still streams (200) and the collector keeps answering'
+      : 'collector (review, decode=zstd): this Node lacks node:sqlite or zlib zstd — the VIEW / budget stores cannot be built here, so both --root zed folders hold the fixture store and decode=zstd answers 501 for each (asserted, not skipped; CI\'s Node 22 builds and checks the 415 / 413 answers)',
+      (zedDecoys ? zedView.status === 415 && isJsonCT(zedView) && /table/i.test(errOf(zedView)) && zedBig.status === 413 && isJsonCT(zedBig) && /1500000/.test(errOf(zedBig))
+        : zedView.status === 501 && zedBig.status === 501) && zedBigRaw.status === 200 && zedAfter.status === 200 && b.exited === null,
+      `view ${zedView.status} ${errOf(zedView).slice(0, 100)} · big ${zedBig.status} ${errOf(zedBig).slice(0, 100)} · raw ${zedBigRaw.status} · status ${zedAfter.status} · exit=${JSON.stringify(b.exited)}`);
     const l2 = asJson(await B('/api/list?tool=aider')) || {};
     const p2 = (l2.files || []).map((f) => f.path).sort();
-    const want2 = fs.readFileSync(path.join(HOME, '.copilot', ...COPILOT_FILE.split('/')));
-    const f2 = await B('/api/file?tool=aider&path=' + encodeURIComponent('.copilot/' + COPILOT_FILE));
-    // --root aider=~/.codex walks the WHOLE folder (5 rollouts + 1 archived + cache/junk.txt = 7; checkpoints skipped; config.toml and sessions/notes.yaml are outside the extension allow-list — A0 #17) + ~/.copilot (2) = 9
-    add('collector: two --root aider=… folders → one tool with two roots: paths are prefixed with the root folder name (".codex/…", ".copilot/…"), 9 files (config.toml / notes.yaml never listed), and /api/file resolves the prefixed path byte-exact',
-      t2('aider').found === true && (t2('aider').roots || []).length === 2 && t2('aider').files === 9 && p2.length === 9 && p2.every((p) => /^\.(codex|copilot)\//.test(p)) && p2.includes('.copilot/' + COPILOT_FILE) && p2.includes('.codex/cache/junk.txt') && !p2.some((p) => /\.(toml|yaml)$/.test(p)) && f2.status === 200 && f2.body.equals(want2),
-      `roots=${JSON.stringify(t2('aider').roots)} files=${t2('aider').files} paths=${p2.join(',')} file=${f2.status}`);
+    const want2 = fs.readFileSync(path.join(HOME, '.copilot', '.aider.chat.history.md'));
+    const f2 = await B('/api/file?tool=aider&path=.copilot%2F.aider.chat.history.md');
+    const aiderDecoys = await Promise.all(['.codex/beside.json', '.codex/beside.md', '.copilot/beside.json', '.copilot/beside.md']
+      .map((p) => B('/api/file?tool=aider&path=' + encodeURIComponent(p))));
+    add('collector (T2): aider multi-root lists only histories and refuses neighboring JSON/Markdown',
+      t2('aider').found === true && (t2('aider').roots || []).length === 2 && t2('aider').files === 2
+        && JSON.stringify(p2) === JSON.stringify(['.codex/.aider.chat.history.md', '.copilot/.aider.chat.history.md'])
+        && f2.status === 200 && f2.body.equals(want2) && aiderDecoys.every((r) => r.status === 404),
+      JSON.stringify({ p2, file: f2.status, decoys: aiderDecoys.map((r) => r.status) }));
     await b.stop();
+
+    await checkT2(add, token, skip);
 
     // ---------------------------------------------------------------- Plan 9 B1: Cowork — a second `local` root under the Claude app folder ----------------------------------------------------------------
     // ~/.claude/projects (the Claude Code fixture) + <APPDATA>/Claude/local-agent-mode-sessions (the Cowork fixture) → one tool, two roots, paths prefixed
@@ -484,22 +760,21 @@ export async function run() {
     const cwSession = cwAudit ? cwAudit.replace(/audit\.jsonl$/, '') : 'local-agent-mode-sessions/x/y/local_z/';
     const outputsGet = await C('/api/file?tool=local&path=' + encodeURIComponent(cwSession + 'outputs/notes.jsonl'));
     const uploadsGet = await C('/api/file?tool=local&path=' + encodeURIComponent(cwSession + 'uploads/report.csv'));
-    add('collector (B1 trust): a Cowork session\'s outputs/notes.jsonl and uploads/report.csv are neither listed by /api/list nor served by /api/file (404 JSON "file not found", like a missing file, although both exist on disk and pass the extension allow-list)',
+    const shortUpload = await C('/api/file?tool=local&path=' + encodeURIComponent(cwSession + 'UPLOAD~1/notes.jsonl'));   // review 8.3: the short-name spelling of uploads-tmp
+    add('collector (B1 trust): a Cowork session\'s outputs/notes.jsonl and uploads/report.csv are neither listed by /api/list nor served by /api/file (404 JSON "file not found", like a missing file, although both exist on disk and pass the extension allow-list); the 8.3 spelling UPLOAD~1/notes.jsonl → 404 too',
       !p3.some((p) => /\/(outputs|uploads)\//.test(p)) && fs.existsSync(path.join(HOME_CW, 'Claude', ...(cwSession + 'outputs/notes.jsonl').split('/'))) && fs.existsSync(path.join(HOME_CW, 'Claude', ...(cwSession + 'uploads/report.csv').split('/')))
-        && outputsGet.status === 404 && isJsonCT(outputsGet) && /file not found/.test(outputsGet.body.toString()) && uploadsGet.status === 404 && isJsonCT(uploadsGet) && /file not found/.test(uploadsGet.body.toString()) && !uploadsGet.body.includes('FIXTURE-PRIVATE'),
-      `list has outputs/uploads: ${p3.filter((p) => /\/(outputs|uploads)\//.test(p)).join(',') || 'none'} · outputs ${outputsGet.status} ${outputsGet.body.toString().slice(0, 80)} · uploads ${uploadsGet.status} ${uploadsGet.body.toString().slice(0, 80)}`);
+        && outputsGet.status === 404 && isJsonCT(outputsGet) && /file not found/.test(outputsGet.body.toString()) && uploadsGet.status === 404 && isJsonCT(uploadsGet) && /file not found/.test(uploadsGet.body.toString()) && !uploadsGet.body.includes('FIXTURE-PRIVATE') && shortUpload.status === 404,
+      `list has outputs/uploads: ${p3.filter((p) => /\/(outputs|uploads)\//.test(p)).join(',') || 'none'} · outputs ${outputsGet.status} ${outputsGet.body.toString().slice(0, 80)} · uploads ${uploadsGet.status} ${uploadsGet.body.toString().slice(0, 80)} · UPLOAD~1 ${shortUpload.status}`);
     const wantAudit = cwAudit ? fs.readFileSync(path.join(HOME_CW, 'Claude', ...cwAudit.split('/'))) : Buffer.alloc(0);
     const fAudit = await C('/api/file?tool=local&path=' + encodeURIComponent(cwAudit || 'none'));
     add('collector (B1): /api/file resolves the "local-agent-mode-sessions/…/audit.jsonl" path through the second root byte-exact',
       !!cwAudit && fAudit.status === 200 && wantAudit.length > 0 && fAudit.body.equals(wantAudit), `status ${fAudit.status} · ${fAudit.body.length}/${wantAudit.length} bytes`);
     return summary();
   } catch (e) {
-    add('collector: test threw', false, (e && e.stack || String(e)) + ' · ' + (a ? a.io() : '') + (b ? ' · ' + b.io() : '') + (c ? ' · ' + c.io() : ''));
+    add('collector: test threw', false, (e && e.stack || String(e)) + ' · ' + [a, b, c].filter(Boolean).map((h) => h.io()).join(' · '));
     return summary();
   } finally {
-    if (a) await a.stop();
-    if (b) await b.stop();
-    if (c) await c.stop();
+    for (const h of [a, b, c]) if (h) await h.stop();
     for (let i = 0; i < 5; i++) { try { fs.rmSync(HOME, { recursive: true, force: true }); fs.rmSync(HOME_CW, { recursive: true, force: true }); break; } catch { await sleep(200); } }   // Windows: a just-killed child may still hold a handle for a moment
   }
 }

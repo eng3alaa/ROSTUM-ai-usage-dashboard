@@ -7,3 +7,5 @@ src/** text eol=crlf
 tests/fixtures/sqlite/*.db binary
 # Plan 9 B6: the committed Zed zstd frame (thread-fixture.zst = zstd of thread-fixture.json) - CI never depends on the local zlib having zstd
 tests/fixtures/zed/*.zst binary
+# Plan 11 T1: the Zed JSON fixture must match the decompressed zstd frame on every checkout
+tests/fixtures/zed/*.json text eol=lf
