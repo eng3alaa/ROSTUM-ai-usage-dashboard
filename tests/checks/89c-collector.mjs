@@ -18,7 +18,7 @@ import path from 'node:path';
 import http from 'node:http';
 import puppeteer from 'puppeteer-core';
 import { run as runCollectorTest, seedHome, start } from '../tools/collector.test.mjs';
-import { openDashboard, findBrowser, OUT } from '../lib/harness.mjs';
+import { openDashboard, findBrowser, OUT, FIXTURE_CLOCK_AT, installClock } from '../lib/harness.mjs';
 
 export async function run({ browser, ok }) {
   const r = await runCollectorTest();
@@ -109,7 +109,7 @@ async function runE2E({ browser, ok }) {
 
     // ---- (a) the file:// dashboard talks to 127.0.0.1 over HTTP: CORS + Private Network Access in a real Chrome ----
     const connectFileDashboard = async (br) => {
-      const { page: pg, errors } = await openDashboard(br);
+      const { page: pg, errors } = await openDashboard(br, { clockAt: FIXTURE_CLOCK_AT });
       const failed = [];
       // a cancelled body read is not a failure: the parsers cancel a RemoteFile stream they no longer need (a deduplicated or
       // cached file), which Chrome reports as net::ERR_ABORTED on that /api/file request — seen on the slower CI runner, never
@@ -145,6 +145,7 @@ async function runE2E({ browser, ok }) {
 
     // ---- (b) the collector-served page: /?token=… pre-fills, strips the URL, defaults the card's URL to its own origin, connects on a real click ----
     page2 = await browser.newPage();
+    await installClock(page2, FIXTURE_CLOCK_AT);
     const errs2 = [];
     page2.on('pageerror', (e) => errs2.push(String(e)));
     page2.on('console', (m) => { if (m.type() === 'error') errs2.push(m.text()); });

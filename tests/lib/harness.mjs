@@ -6,6 +6,8 @@ import fs from 'node:fs';
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 export const DASH = path.join(ROOT, 'AI Usage Dashboard.html');
 export const OUT = path.join(import.meta.dirname, '..', 'fixtures', 'out');
+// Keep August/September log fixtures inside 90 days, outside the default 30-day view.
+export const FIXTURE_CLOCK_AT = '2026-10-20T12:00:00Z';
 
 export function findBrowser() {
   const cands = [
@@ -22,22 +24,25 @@ export async function launch() {
   return puppeteer.launch({ executablePath: findBrowser(), headless: true });
 }
 
+/** Start each document at clockAt; elapsed time and native timers keep running. */
+export async function installClock(page, clockAt) {
+  await page.evaluateOnNewDocument((iso) => {
+    const RealDate = Date;
+    const offset = new RealDate(iso).getTime() - RealDate.now();
+    class ShimDate extends RealDate {
+      constructor(...args) { if (args.length === 0) super(RealDate.now() + offset); else super(...args); }
+      static now() { return RealDate.now() + offset; }
+    }
+    ShimDate.parse = RealDate.parse; ShimDate.UTC = RealDate.UTC;
+    window.Date = ShimDate;
+  }, clockAt);
+}
+
 /** Open the dashboard in a fresh page. opts: {tz, seedData, clockAt} */
 export async function openDashboard(browser, opts = {}) {
   const page = await browser.newPage();
   if (opts.tz) await page.emulateTimezone(opts.tz);
-  if (opts.clockAt) {
-    await page.evaluateOnNewDocument((iso) => {
-      const RealDate = Date;
-      const offset = new RealDate(iso).getTime() - RealDate.now();
-      class ShimDate extends RealDate {
-        constructor(...args) { if (args.length === 0) super(RealDate.now() + offset); else super(...args); }
-        static now() { return RealDate.now() + offset; }
-      }
-      ShimDate.parse = RealDate.parse; ShimDate.UTC = RealDate.UTC;
-      window.Date = ShimDate;
-    }, opts.clockAt);
-  }
+  if (opts.clockAt) await installClock(page, opts.clockAt);
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });

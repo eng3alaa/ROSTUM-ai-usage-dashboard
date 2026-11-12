@@ -1,12 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { openDashboard, OUT } from '../lib/harness.mjs';
+import { openDashboard, OUT, FIXTURE_CLOCK_AT } from '../lib/harness.mjs';
 
 const read = (...p) => fs.readFileSync(path.join(OUT, ...p), 'utf8');
 const sum = (rows) => rows.reduce((a, r) => ({ in: a.in + (r.in || 0), cw: a.cw + (r.cw || 0), cr: a.cr + (r.cr || 0), out: a.out + (r.out || 0), msgs: a.msgs + (r.msgs || 0) }), { in: 0, cw: 0, cr: 0, out: 0, msgs: 0 });
 
 export async function run({ browser, ok }) {
-  const { page } = await openDashboard(browser);
+  const { page } = await openDashboard(browser, { clockAt: FIXTURE_CLOCK_AT });
   try {
     // ---- T6: generic folder-log driver ----
     const logText = read('usage-log', 'ollama-usage.jsonl');
