@@ -9,3 +9,5 @@ tests/fixtures/sqlite/*.db binary
 tests/fixtures/zed/*.zst binary
 # Plan 11 T1: the Zed JSON fixture must match the decompressed zstd frame on every checkout
 tests/fixtures/zed/*.json text eol=lf
+# Plan 11 T4a: the default-price history fixture (one JSON line, read as data) - explicit attribute for the CI fixture guard
+tests/fixtures/prices/*.json text eol=lf
