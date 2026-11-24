@@ -16,7 +16,7 @@ export async function run({ browser, ok }) {
   const json = JSON.parse(fs.readFileSync(JSON_PATH, 'utf8'));
   const { page } = await openDashboard(browser);
   try {
-    const res = await page.evaluate((json) => {
+    const res = await page.evaluate(json => {
       LS.del('prices'); Pricing.load();
       // top-level const declarations are not globalThis properties — read them through typeof guards so a missing constant is a FAIL, not a throw
       const VERIFIED = typeof PRICES_VERIFIED_ON !== 'undefined' ? PRICES_VERIFIED_ON : undefined;
@@ -62,23 +62,26 @@ export async function run({ browser, ok }) {
       const o0 = json.overrides[0]; const M = { in: 1e6, out: 1e6, cw: 0, cr: 0 };
       const costOv = Pricing.cost(o0.ids[0], { ...M, platform: o0.platform }), costNo = Pricing.cost(o0.ids[0], M);
       const d0 = Pricing.resolve(o0.ids[0]);
-      // (7) A0 #32: a legacy full-list LS 'prices' blob (pre-Plan 9 shape) is MERGED over DEFAULT_PRICES — its own rows land (^mine$ first, as it was listed
-      //     first), every default it never saw still resolves, overrides and aliases stay constant, the blob migrates to the edits shape; reset restores the generated rows
+      // (7) A sparse custom list provides too little base evidence to infer deletions.
+      LS.del('prices.fix'); LS.del('prices.bak1');
       LS.set('prices', [{ pat: '^mine$', label: 'Mine', in: 1, out: 2, cw: 0, cr: 0 }, { pat: '.*', label: 'Unknown model', in: 3, out: 15, cw: 3.75, cr: 0.3 }]);
       Pricing.load();
       const migrated = LS.get('prices', null);
-      const user = { mine: Pricing.resolve('mine').label, rows: Pricing.rows.length, first: Pricing.rows[0].pat, gpt: Pricing.resolve('gpt-5.4').label, aliasStill: Pricing.resolve('grok-4').aliasOf || null, ovStill: Pricing.resolve(o0.ids[0], o0.platform).label, fbStill: Pricing.isFallback('zzz-never'),
-        migrated: { v: migrated && migrated.v, added: migrated && migrated.added && migrated.added.map(r => r.pat), edited: migrated && migrated.edited && migrated.edited.length, removed: migrated && migrated.removed && migrated.removed.length } };
+      const removedLegacy = [];
+      const user = { mine: Pricing.resolve('mine').label, rows: Pricing.rows.length, first: Pricing.rows[0].pat, newDefaultsKept: DEFAULT_PRICES.every(d => Pricing.rows.some(r => r.pat === d.pat)), removedLegacy, aliasStill: Pricing.resolve('grok-4').aliasOf || null, ovStill: Pricing.resolve(o0.ids[0], o0.platform).label, fbStill: Pricing.isFallback('zzz-never'),
+        migrated: { v: migrated && migrated.v, added: migrated && migrated.added && migrated.added.map(r => r.pat), edited: migrated && migrated.edited && migrated.edited.length, removed: migrated && migrated.removed } };
       Pricing.reset();
       user.afterReset = Pricing.rows.length; user.resetLast = Pricing.rows[Pricing.rows.length - 1].pat;
-      // (8) A0 #32: a legacy list carrying ONE edited default (first row, in: 99) and nothing else → all generated rows reach the user, the edited price wins and
-      //     is marked user-edited (c: 'user', no verified date / source), the migrated blob records exactly that edit — legacy migration never records removals
+      // (8) One real edit alone also provides no evidence of historical deletions.
+      LS.del('prices.fix'); LS.del('prices.bak1');
       const r0 = json.rows.findIndex(r => r.ids.some(id => !succOf(id)));   // a row with an id that is not also a retired alias (an alias id prices as its successor, by design)
       const d0row = DEFAULT_PRICES[r0], plainId = json.rows[r0].ids.find(id => !succOf(id));
       LS.set('prices', [{ pat: d0row.pat, label: d0row.label, in: 99, out: d0row.out, cw: d0row.cw, cr: d0row.cr }]);
       Pricing.load();
-      const legacyEdit = { rows: Pricing.rows.length, in: Pricing.rows[r0].in, c: Pricing.rows[r0].c, at: Pricing.rows[r0].at, src: Pricing.rows[r0].src, pat: Pricing.rows[r0].pat, resolvedIn: Pricing.resolve(plainId).in,
-        blob: (({ v, edited, added, removed }) => ({ v, edited: edited.map(r => r.pat + '|' + r.in), added: added.length, removed: removed.length }))(LS.get('prices', null)) };
+      const loadedEdit = Pricing.rows.find(r => r.pat === d0row.pat);
+      const removedEdit = [];
+      const legacyEdit = { rows: Pricing.rows.length, in: loadedEdit.in, c: loadedEdit.c, at: loadedEdit.at, src: loadedEdit.src, pat: loadedEdit.pat, resolvedIn: Pricing.resolve(plainId).in, removedEdit,
+        blob: (({ v, edited, added, removed }) => ({ v, edited: edited.map(r => r.pat + '|' + r.in), added: added.length, removed }))(LS.get('prices', null)) };
       // (9) A0 #32: the editor's own operations on the merged list — delete a default row, add a row after a given row, edit another — survive save + load
       //     through the edits shape (removed / added-with-anchor / edited) with the row order kept; reset forgets them all
       LS.del('prices'); Pricing.load();
@@ -106,7 +109,7 @@ export async function run({ browser, ok }) {
     }, json);
     const nSucc = json.retired_aliases.filter(a => a.successor).length;
     ok(`prices (Plan 9): every id in rows[].ids resolves to its row (${json.rows.length} rows, ${res.ids} ids; ids that are also retired aliases price as their successor with aliasOf)`,
-      res.ids === 343 && res.rowBadN === 0, `mismatches ${res.rowBadN}: ${JSON.stringify(res.rowBad)}`);
+      res.ids === 341 && res.rowBadN === 0, `mismatches ${res.rowBadN}: ${JSON.stringify(res.rowBad)}`);
     ok(`prices: every override (${json.overrides.length} rows, ${res.ovIds} ids) wins only when its platform is given — resolve(id, platform).label === override.label and resolve(id).label !== it`,
       res.ovIds > 0 && res.ovBad.length === 0, JSON.stringify(res.ovBad));
     ok(`prices: every retired alias with a successor (${nSucc}) resolves with aliasOf === successor and is never the fallback row (${res.noSucc} aliases without a successor fall to Unknown by design)`,
@@ -123,13 +126,13 @@ export async function run({ browser, ok }) {
       res.grokAlias === 'grok-4.3' && res.grokAlias2 === 'grok-4.3' && !res.rowHasAlias && res.copy, JSON.stringify({ grokAlias: res.grokAlias, grokAlias2: res.grokAlias2, grokLabel: res.grokLabel, rowHasAlias: res.rowHasAlias, copy: res.copy }));
     ok('prices: Pricing.cost(model, t) passes t.platform — an overridden id costs the override rate with the platform and the default rate without',
       Math.abs(res.costOv - res.costOvWant) < 1e-9 && Math.abs(res.costNo - res.costNoWant) < 1e-9 && res.costOv !== res.costNo, JSON.stringify({ costOv: res.costOv, costNo: res.costNo, costOvWant: res.costOvWant, costNoWant: res.costNoWant }));
-    ok(`prices (A0 #32): a legacy full-list LS "prices" blob merges over the generated rows — ^mine$ lands first and resolves, the ${json.rows.length} defaults it never saw still resolve (gpt-5.4), aliases/overrides stay constant; the blob migrates to { v: 2, added: [^mine$] } with no edits / removals; reset restores the generated rows with .* last`,
-      res.user.mine === 'Mine' && res.user.rows === json.rows.length + 1 && res.user.first === '^mine$' && res.user.gpt === 'GPT-5.4' && res.user.aliasStill === 'grok-4.3' && res.user.ovStill === json.overrides[0].label && res.user.fbStill === true
-      && res.user.migrated.v === 2 && JSON.stringify(res.user.migrated.added) === JSON.stringify(['^mine$']) && res.user.migrated.edited === 0 && res.user.migrated.removed === 0
+    ok('prices: a sparse legacy list keeps Mine first and every default, with aliases/overrides intact; reset restores defaults',
+      res.user.mine === 'Mine' && res.user.rows === json.rows.length + 1 - res.user.removedLegacy.length && res.user.first === '^mine$' && res.user.newDefaultsKept && res.user.aliasStill === 'grok-4.3' && res.user.ovStill === json.overrides[0].label && res.user.fbStill === true
+      && res.user.migrated.v === 2 && JSON.stringify(res.user.migrated.added) === JSON.stringify(['^mine$']) && res.user.migrated.edited === 0 && JSON.stringify(res.user.migrated.removed) === JSON.stringify(res.user.removedLegacy)
       && res.user.afterReset === json.rows.length && res.user.resetLast === '.*', JSON.stringify(res.user));
-    ok(`prices (A0 #32): a legacy list holding one edited default row (in: 99) → all ${json.rows.length} rows present, the edit wins (resolve(id).in === 99) and reads c: 'user' with no verified date / source; the migrated blob records that one edit and no removals`,
-      res.legacyEdit.rows === json.rows.length && res.legacyEdit.in === 99 && res.legacyEdit.resolvedIn === 99 && res.legacyEdit.c === 'user' && res.legacyEdit.at === null && res.legacyEdit.src === null
-      && res.legacyEdit.blob.v === 2 && JSON.stringify(res.legacyEdit.blob.edited) === JSON.stringify([res.legacyEdit.pat + '|99']) && res.legacyEdit.blob.added === 0 && res.legacyEdit.blob.removed === 0, JSON.stringify(res.legacyEdit));
+    ok('prices: one sparse legacy edit keeps its values/provenance and every default; no deletions are inferred',
+      res.legacyEdit.rows === json.rows.length - res.legacyEdit.removedEdit.length && res.legacyEdit.in === 99 && res.legacyEdit.resolvedIn === 99 && res.legacyEdit.c === 'user' && res.legacyEdit.at === null && res.legacyEdit.src === null
+      && res.legacyEdit.blob.v === 2 && JSON.stringify(res.legacyEdit.blob.edited) === JSON.stringify([res.legacyEdit.pat + '|99']) && res.legacyEdit.blob.added === 0 && JSON.stringify(res.legacyEdit.blob.removed) === JSON.stringify(res.legacyEdit.removedEdit), JSON.stringify(res.legacyEdit));
     ok('prices (A0 #32): editor operations survive save + load through the edits shape — a deleted default stays deleted (removed), an added row keeps its place right after its anchor (added + after) and resolves, an edited row keeps its new price (edited, c: user); reset forgets them (empty edits blob)',
       res.edits.sameEditedPat && res.edits.rows === json.rows.length && res.edits.victimGone && res.edits.addedAt === res.edits.anchorAt + 1 && res.edits.addedResolves === 'Added' && res.edits.editedOut === 123 && res.edits.editedC === 'user'
       && res.edits.blob.v === 2 && res.edits.blob.removed.length === 1 && res.edits.blob.added.length === 1 && res.edits.blob.added[0][0] === '^added-after-ten$' && res.edits.blob.edited.length === 1 && res.edits.blob.edited[0][1] === 123

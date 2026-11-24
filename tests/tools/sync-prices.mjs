@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
 import { writeBuilt } from '../../tools/build.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
@@ -26,14 +27,51 @@ const q = (s) => s == null ? 'null' : "'" + String(s).replace(/\\/g, '\\\\').rep
 const num = (v, what) => { if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`${what}: price is not a finite number (${JSON.stringify(v)})`); return String(v); };
 
 function validate(json) {
-  for (const k of ['generated', 'rows', 'overrides', 'retired_aliases']) if (!(k in json)) throw new Error(`JSON lacks "${k}"`);
+  for (const k of ['generated', 'rows', 'overrides', 'retired_aliases', 'history_rows', 'history_lists', 'history_successors']) if (!(k in json)) throw new Error(`JSON lacks "${k}"`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(json.generated)) throw new Error('generated must be YYYY-MM-DD');
+  if (!Array.isArray(json.history_rows)) throw new Error('history_rows must be an array');
+  for (const [i, r] of json.history_rows.entries()) {
+    if (!Array.isArray(r) || r.length !== 6 || typeof r[0] !== 'string' || !r[0] || typeof r[1] !== 'string')
+      throw new Error(`history_rows[${i}]: expected [pat,label,in,out,cw,cr]`);
+    new RegExp(r[0], 'i');
+    for (let j = 2; j < 6; j++) num(r[j], `history_rows[${i}][${j}]`);
+  }
+  const lists = json.history_lists;
+  if (!lists || !Array.isArray(lists.ids) || !lists.ids.length || lists.ids.length > 30 ||
+    lists.ids.some(k => typeof k !== 'string' || !k) || new Set(lists.ids).size !== lists.ids.length || !Array.isArray(lists.pats))
+    throw new Error('history_lists must contain unique ids (1..30) and [pattern,mask] pairs');
+  const patterns = new Set();
+  for (const p of lists.pats) {
+    if (!Array.isArray(p) || (p.length !== 2 && p.length !== 3) || typeof p[0] !== 'string' || !p[0] || patterns.has(p[0]) ||
+      !Number.isInteger(p[1]) || p[1] < 1 || p[1] >= 2 ** lists.ids.length)
+      throw new Error('history_lists has an invalid or duplicate pattern/mask');
+    new RegExp(p[0], 'i'); patterns.add(p[0]);
+    if (p.length === 3) {
+      if (!Array.isArray(p[2]) || p[2].length !== 5 || typeof p[2][0] !== 'string')
+        throw new Error('history_lists base must be [label,in,out,cw,cr]');
+      for (let j = 1; j < 5; j++) num(p[2][j], 'history_lists base');
+    }
+  }
   const all = json.rows.map((r, i) => [`rows[${i}]`, r]).concat(json.overrides.map((o, i) => [`overrides[${i}]`, o]));
   for (const [where, r] of all) {
     if (typeof r.pat !== 'string' || !r.pat) throw new Error(`${where}: empty pattern`);
     try { new RegExp(r.pat, 'i'); } catch (e) { throw new Error(`${where}: pattern does not compile: ${e.message}`); }
     if (typeof r.label !== 'string' || !r.label) throw new Error(`${where}: empty label`);
     for (const k of ['in', 'out', 'cw', 'cr']) num(r[k], `${where}.${k}`);
+  }
+  const successors = json.history_successors;
+  if (!successors || typeof successors !== 'object' || Array.isArray(successors))
+    throw new Error('history_successors must be an object');
+  const historical = new Set(json.history_rows.map(r => r[0]));
+  const defaults = new Set(json.rows.map(r => r.pat));
+  for (const [pat, next] of Object.entries(successors)) {
+    const entry = `history_successors[${JSON.stringify(pat)}]`;
+    if (!historical.has(pat) || defaults.has(pat))
+      throw new Error(`${entry}: key must be historical and not a current default`);
+    if (Object.hasOwn(successors, next))
+      throw new Error(`${entry}: successor ${JSON.stringify(next)} forms a chain`);
+    if (typeof next !== 'string' || !defaults.has(next))
+      throw new Error(`${entry}: stale successor ${JSON.stringify(next)} is not a current default`);
   }
   for (const [i, o] of json.overrides.entries()) if (typeof o.platform !== 'string' || !o.platform) throw new Error(`overrides[${i}]: missing platform`);
   const last = json.rows[json.rows.length - 1];
@@ -49,6 +87,31 @@ function validate(json) {
 }
 
 const rowLit = (r, extra) => `{ ${extra}pat: ${q(r.pat)}, label: ${q(r.label)}, in: ${num(r.in)}, out: ${num(r.out)}, cw: ${num(r.cw)}, cr: ${num(r.cr)}, v: ${q(r.vendor ?? r.platform ?? null)}, at: ${q(r.verified_on ?? null)}, c: ${q(r.confidence ?? null)}, src: ${q(r.source_url ?? null)} }`;
+
+const PRICE_FIELDS = ['pat', 'label', 'in', 'out', 'cw', 'cr'];
+const compactRow = r => PRICE_FIELDS.map(k => r[k]);
+
+/** history_rows: oldest first; history_lists: {ids, pats: [[pattern, membership bitmask, base?], ...]}.
+ * base is immutable [label,in,out,cw,cr]; initially omitted when the whole-list base equals the current default.
+ * Preserve generated history first, then seed rows, then outgoing defaults; never reorder existing variants. */
+export function retainHistory(json, part) {
+  validate(json);
+  const { start, end } = locate(part);
+  const old = runInNewContext(part.slice(start, end) +
+    '\n;({ rows: DEFAULT_PRICES, history: typeof PRICE_HISTORY === "undefined" ? [] : PRICE_HISTORY, lists: typeof PRICE_HISTORY_LISTS === "undefined" ? null : PRICE_HISTORY_LISTS })',
+    Object.create(null), { timeout: 1000 });
+  const current = new Set(json.rows.map(r => JSON.stringify(compactRow(r))));
+  const rows = [...old.history, ...json.history_rows, ...old.rows.map(compactRow)];
+  const keys = [...new Set(rows.map(r => JSON.stringify(r)))].filter(k => !current.has(k));
+  const outgoing = new Map(old.rows.map(r => [r.pat, compactRow(r)]));
+  const bases = new Map((old.lists?.pats || []).filter(p => p[2]).map(p => [p[0], p[2]]));
+  const pats = json.history_lists.pats.map(([pat, mask, base]) => {
+    const row = outgoing.get(pat);
+    base = bases.get(pat) || base || (row && !current.has(JSON.stringify(row)) ? row.slice(1) : null);
+    return base ? [pat, mask, base] : [pat, mask];
+  });
+  return { ...json, history_rows: keys.map(k => JSON.parse(k)), history_lists: { ...json.history_lists, pats } };
+}
 
 /** the block, as an array of lines (no line terminators) */
 export function renderLines(json) {
@@ -80,6 +143,9 @@ export function renderLines(json) {
   }
   if (none.length) out.push(`  // no successor (shut down; fall to the Unknown-model row): ${none.join(', ')}`);
   out.push('};');
+  out.push('const PRICE_HISTORY = ' + JSON.stringify(json.history_rows) + ';');
+  out.push('const PRICE_SUCCESSORS = ' + JSON.stringify(json.history_successors) + ';');
+  out.push('const PRICE_HISTORY_LISTS = ' + JSON.stringify(json.history_lists) + ';');
   out.push(END);
   return out;
 }
@@ -103,13 +169,19 @@ export function main(argv = process.argv.slice(2)) {
   const check = argv.includes('--check');
   const ji = argv.indexOf('--json');
   const jsonPath = ji >= 0 && argv[ji + 1] ? path.resolve(argv[ji + 1]) : DEFAULT_JSON;
-  const json = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+  const jsonText = fs.readFileSync(jsonPath, 'utf8'), input = JSON.parse(jsonText);
   const part = fs.readFileSync(PART, 'utf8');
+  const json = retainHistory(input, part);
+  const historyChanged = ['history_rows', 'history_lists'].some(k => JSON.stringify(input[k]) !== JSON.stringify(json[k]));
   const eol = part.includes('\r\n') ? '\r\n' : '\n';
   const block = renderLines(json).join(eol);
   const { start, end, fresh } = locate(part);
   const current = part.slice(start, end);
-  if (current === block) { console.log(`prices: in sync (${json.rows.length} rows, ${json.overrides.length} overrides, ${json.retired_aliases.filter(a => a.successor).length} aliases; verified ${json.generated})`); return 0; }
+  if (current === block && !historyChanged) { console.log(`prices: in sync (${json.rows.length} rows, ${json.overrides.length} overrides, ${json.retired_aliases.filter(a => a.successor).length} aliases; verified ${json.generated})`); return 0; }
+  if (check && historyChanged) {
+    console.error('prices: DRIFT - JSON history must retain the outgoing defaults, list bases and generated history. Run: node tests/tools/sync-prices.mjs');
+    return 1;
+  }
   if (check) {
     const a = current.split(eol), b = block.split(eol);
     let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++;
@@ -120,6 +192,12 @@ export function main(argv = process.argv.slice(2)) {
   }
   const next = part.slice(0, start) + block + part.slice(end);
   if (/[\x00-\x08]/.test(next)) throw new Error('refusing to write: the render contains raw control bytes');
+  if (historyChanged) {
+    const jsonEol = jsonText.includes('\r\n') ? '\r\n' : '\n';
+    const indent = jsonText.match(/\n([\t ]+)"/)?.[1] || '';
+    const tail = jsonText.match(/(?:\r?\n)+$/)?.[0] || '';
+    fs.writeFileSync(jsonPath, JSON.stringify(json, null, indent).replace(/\n/g, jsonEol) + tail);
+  }
   fs.writeFileSync(PART, next);
   const builtBytes = writeBuilt();
   console.log(`prices: ${fresh ? 'created the PRICES block' : 'rewrote the PRICES block'} in ${path.relative(ROOT, PART)} — ${json.rows.length} rows, ${json.overrides.length} overrides, ${json.retired_aliases.filter(a => a.successor).length} aliases; verified ${json.generated}; ${Buffer.byteLength(next)} bytes; built AI Usage Dashboard.html (${builtBytes} bytes)`);

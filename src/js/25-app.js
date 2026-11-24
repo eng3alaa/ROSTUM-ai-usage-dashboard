@@ -2297,12 +2297,26 @@ const App = {
    *  first open), the read-only Platform overrides group last, the verified banner above. Re-run by the editor (add / delete / reset) and by
    *  refreshPricingOnDataChange() — never under an edit in progress. */
   renderPricing() {
+    this.renderPriceRepair();
     this.renderPriceBanner();
     const matches = this.priceMatches(Store.allRows());
     const host = clear($('pricing-groups'));
     for (const g of this.priceGroups(matches)) host.appendChild(this.renderPriceGroup(g, matches));
     host.appendChild(this.renderPriceGroup(this.overrideGroup(matches), matches));
     this._priceDataSig = this._priceDataSignature();
+  },
+  renderPriceRepair() {
+    const notice = Pricing.notice;
+    if (!notice) { $('prices-repair')?.remove(); return; }
+    if ($('prices-repair')?.firstChild?.textContent !== notice.text) showStorageBanner('prices-repair', notice.text);
+    const banner = $('prices-repair');
+    if (!notice.undo) { $('prices-undo')?.remove(); $('prices-keep')?.remove(); return; }
+    if (!$('prices-undo')) banner.appendChild(el('button', { id: 'prices-undo', class: 'btn small', text: 'Undo', onclick: () => {
+      Pricing.undoRepair(); this.renderPricing(); this.render();
+    } }));
+    if (!$('prices-keep')) banner.appendChild(el('button', { id: 'prices-keep', class: 'btn small', text: 'Keep', onclick: () => {
+      Pricing.keepRepair(); this.renderPricing(); this.render();
+    } }));
   },
   /** "Prices verified <date> — N days ago." (amber past 90 days) + the list-price sentence; the clock is Date.now() (the harness shims it). */
   renderPriceBanner() {
@@ -2400,7 +2414,8 @@ const App = {
     const inp = el('input', { class: cls, value: String(r[key]), 'aria-label': key });
     inp.addEventListener('change', () => {
       r[key] = cls === 'price' ? (parseFloat(inp.value) || 0) : inp.value;
-      Pricing.save(); refreshProvenance(); this.render();
+      if (!Pricing.save()) { this.renderPricing(); this.render(); return; }
+      refreshProvenance(); this.render();
     });
     return inp;
   },
@@ -2610,6 +2625,12 @@ const App = {
     });
     $('reset-prices').addEventListener('click', () => { if (confirm('Reset all prices to the built-in list (verified ' + PRICES_VERIFIED_ON + ')?')) { Pricing.reset(); this.renderPricing(); this.render(); } });
 
+    window.addEventListener('storage', event => {
+      if (event.storageArea !== localStorage || !['aiusage:prices', 'aiusage:prices.fix', null].includes(event.key)) return;
+      Pricing.load();
+      if (!Pricing.notice) Pricing._notice('Prices changed in another tab - reloaded.');
+      this.renderPricing(); this.render();
+    });
     this.setupAutoRefresh();
 
     let rt = null;
