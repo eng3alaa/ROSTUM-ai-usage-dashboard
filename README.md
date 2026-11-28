@@ -375,4 +375,4 @@ Then set `OLLAMA_HOST=127.0.0.1:11435` (or `base_url=http://127.0.0.1:11435/v1` 
 
 This repository is published for reading, running and auditing. **No open-source license has been chosen yet, so all rights are reserved** by the author: you may use the dashboard and the helper scripts for yourself, but please ask before redistributing or building on the code. A license decision is pending and this section will change when it lands.
 
-Security policy: [`SECURITY.md`](SECURITY.md). Development plans, reviews and the design debates that shaped the roadmap are under `docs/superpowers/`.
+Security policy: [`SECURITY.md`](SECURITY.md). What is likely to be built next, and what will not be: [`docs/ROADMAP.md`](docs/ROADMAP.md). Development plans, reviews and the design debates that shaped the roadmap are under `docs/superpowers/`.
