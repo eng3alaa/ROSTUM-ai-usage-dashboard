@@ -65,7 +65,7 @@
    "vendor": "Anthropic",
    "label": "Claude Opus 4 / 4.1",
    "ids": [],
-   "pat": "claude-opus-4(-1)?(?=$|-\\d{8})",
+   "pat": "claude-opus-4(-[01])?(?=$|-\\d{8})",
    "in": 15,
    "out": 75,
    "cw": 18.75,
@@ -742,7 +742,7 @@
    "vendor": "Google",
    "label": "Gemini 3.6/3.7/3.8 Flash",
    "ids": [],
-   "pat": "gemini-3[.-]?[678]-flash",
+   "pat": "gemini-3[.-]?[678]-flash(?!-lite)",
    "in": 0.75,
    "out": 3.75,
    "cw": 0,
@@ -1951,24 +1951,6 @@
   },
   {
    "vendor": "sambanova",
-   "label": "DeepSeek-V3.1 / V3.2 (SambaNova)",
-   "ids": [
-    "DeepSeek-V3.1",
-    "DeepSeek-V3.2"
-   ],
-   "pat": "^deepseek-v3\\.[12]$",
-   "in": 3,
-   "out": 4.5,
-   "cw": 0,
-   "cr": 0,
-   "unit_note": "USD/1M tokens",
-   "source_url": "https://cloud.sambanova.ai/pricing",
-   "verified_on": "2026-10-15",
-   "confidence": "high",
-   "notes": "Bare ids (no 'deepseek-ai/' prefix) are SambaNova-specific."
-  },
-  {
-   "vendor": "sambanova",
    "label": "gemma-4-31B-it (SambaNova)",
    "ids": [
     "gemma-4-31B-it"
@@ -2390,7 +2372,7 @@
    "vendor": "DeepSeek",
    "label": "DeepSeek chat (V3 list)",
    "ids": [],
-   "pat": "^deepseek(?!-ai/)",
+   "pat": "^deepseek(?!-ai/|-v3\\.[12](?!\\d))",
    "in": 0.27,
    "out": 1.1,
    "cw": 0,
@@ -2399,7 +2381,7 @@
    "source_url": null,
    "verified_on": null,
    "confidence": "existing",
-   "notes": "not on https://api-docs.deepseek.com/quick_start/pricing on 2026-10-27 — retired? Page lists only deepseek-flash ($0.30 / $0.006 / $1.20, peak) and deepseek-v4-pro ($1.32 / $0.044 / $3.96, peak); deepseek-chat is not mentioned. Last known 0.27/1.1/0/0.07 kept.",
+   "notes": "not on https://api-docs.deepseek.com/quick_start/pricing on 2026-10-27 — retired? Page lists only deepseek-flash ($0.30 / $0.006 / $1.20, peak) and deepseek-v4-pro ($1.32 / $0.044 / $3.96, peak); deepseek-chat is not mentioned. Last known 0.27/1.1/0/0.07 kept. V3.1/V3.2 ids are excluded on purpose because no DeepSeek-API list price for them is on file.",
    "candidate_retire": true
   },
   {
@@ -2598,7 +2580,7 @@
     "ministral-14b-2512",
     "ministral-14b-latest"
    ],
-   "pat": "^ministral-14b-(2512|latest)$",
+   "pat": "^ministral-14b(-(2512|latest))?$",
    "in": 0.2,
    "out": 0.2,
    "cw": 0,
@@ -2607,7 +2589,7 @@
    "source_url": "https://docs.mistral.ai/inference/pricing",
    "verified_on": "2026-10-15",
    "confidence": "high",
-   "notes": "ids from https://docs.mistral.ai/models/ministral-3-14b-25-12"
+   "notes": "ids from https://docs.mistral.ai/models/ministral-3-14b-25-12. Assumption: bare ministral-14b is treated as the latest of that size (Ministral 3 14B)."
   },
   {
    "vendor": "Mistral AI",
@@ -2616,7 +2598,7 @@
     "ministral-8b-2512",
     "ministral-8b-latest"
    ],
-   "pat": "^ministral-8b-(2512|latest)$",
+   "pat": "^ministral-8b(-(2512|latest))?$",
    "in": 0.15,
    "out": 0.15,
    "cw": 0,
@@ -2625,7 +2607,7 @@
    "source_url": "https://docs.mistral.ai/inference/pricing",
    "verified_on": "2026-10-15",
    "confidence": "high",
-   "notes": "ids from https://docs.mistral.ai/models/ministral-3-8b-25-12. ministral-8b-2410 retired 2025-12-31."
+   "notes": "ids from https://docs.mistral.ai/models/ministral-3-8b-25-12. ministral-8b-2410 retired 2025-12-31. Assumption: bare ministral-8b is treated as the latest of that size (Ministral 3 8B)."
   },
   {
    "vendor": "Mistral AI",
@@ -2634,7 +2616,7 @@
     "ministral-3b-2512",
     "ministral-3b-latest"
    ],
-   "pat": "^ministral-3b-(2512|latest)$",
+   "pat": "^ministral-3b(-(2512|latest))?$",
    "in": 0.1,
    "out": 0.1,
    "cw": 0,
@@ -2643,7 +2625,7 @@
    "source_url": "https://docs.mistral.ai/inference/pricing",
    "verified_on": "2026-10-15",
    "confidence": "high",
-   "notes": "ids from https://docs.mistral.ai/models/ministral-3-3b-25-12. ministral-3b-2410 retired 2025-12-31."
+   "notes": "ids from https://docs.mistral.ai/models/ministral-3-3b-25-12. ministral-3b-2410 retired 2025-12-31. Assumption: bare ministral-3b is treated as the latest of that size (Ministral 3 3B)."
   },
   {
    "vendor": "Mistral AI",
@@ -4588,7 +4570,26 @@
    "notes": "USD/1M tokens"
   },
   {
-   "platform": "SambaNova",
+   "platform": "SambaNova Cloud",
+   "vendor": "sambanova",
+   "label": "DeepSeek-V3.1 / V3.2 (SambaNova)",
+   "ids": [
+    "DeepSeek-V3.1",
+    "DeepSeek-V3.2"
+   ],
+   "pat": "^deepseek-v3\\.[12]$",
+   "in": 3,
+   "out": 4.5,
+   "cw": 0,
+   "cr": 0,
+   "unit_note": "USD/1M tokens",
+   "source_url": "https://cloud.sambanova.ai/pricing",
+   "verified_on": "2026-10-15",
+   "confidence": "high",
+   "notes": "Bare ids (no 'deepseek-ai/' prefix) are SambaNova-specific."
+  },
+  {
+   "platform": "SambaNova Cloud",
    "pat": "^minimax-m3$",
    "label": "MiniMax-M3 (SambaNova)",
    "ids": [
@@ -4603,7 +4604,7 @@
    "notes": ""
   },
   {
-   "platform": "SambaNova",
+   "platform": "SambaNova Cloud",
    "pat": "^deepseek-r1$",
    "label": "DeepSeek-R1 (SambaNova) (last known)",
    "ids": [
@@ -4618,7 +4619,7 @@
    "notes": "Bare id is also used by Azure AI Foundry; default resolution = existing DeepSeek Reasoner row, so SambaNova is an override only."
   },
   {
-   "platform": "SambaNova",
+   "platform": "SambaNova Cloud",
    "pat": "^deepseek-v3-0324$",
    "label": "DeepSeek-V3-0324 (SambaNova) (last known)",
    "ids": [
@@ -4633,7 +4634,7 @@
    "notes": "Bare id also used by Azure AI Foundry; default resolution = DeepSeek chat (V3 list) row."
   },
   {
-   "platform": "SambaNova",
+   "platform": "SambaNova Cloud",
    "pat": "^qwen3-32b$",
    "label": "Qwen3-32B (SambaNova) (last known)",
    "ids": [
@@ -5101,13 +5102,13 @@
   },
   {
    "id": "ministral-8b-2410",
-   "successor": "ministral-8b-latest / ministral-3b-latest",
-   "note": "Retired 2025-12-31; resolve to the Mistral catch-all."
+   "successor": "ministral-8b-latest",
+   "note": "Retired 2025-12-31. Assumption: priced as the successor (Ministral 3 8B), the same convention every alias uses; the retired 24.10 list price is not on file."
   },
   {
    "id": "ministral-3b-2410",
-   "successor": "ministral-8b-latest / ministral-3b-latest",
-   "note": "Retired 2025-12-31; resolve to the Mistral catch-all."
+   "successor": "ministral-3b-latest",
+   "note": "Retired 2025-12-31. Assumption: priced as the successor (Ministral 3 3B), the same convention every alias uses; the retired 24.10 list price is not on file."
   },
   {
    "id": "zai-glm-5-2",
@@ -5124,5 +5125,1339 @@
    "successor": "sonar-reasoning-pro",
    "note": "Retired; kept as its own last-known row (1.00/5.00)."
   }
- ]
+ ],
+ "history_rows": [
+  [
+   "claude-opus-4(-1)?$",
+   "Claude Opus 4 / 4.1",
+   15,
+   75,
+   18.75,
+   1.5
+  ],
+  [
+   "gpt-5[.-]?6-sol|gpt-5[.-]?5(?!-pro)",
+   "GPT-5.6 Sol / 5.5",
+   5,
+   30,
+   0,
+   0.5
+  ],
+  [
+   "gpt-5[.-]?5-pro",
+   "GPT-5.5 Pro",
+   30,
+   180,
+   0,
+   3
+  ],
+  [
+   "gpt-5",
+   "GPT-5 / 5.x (other)",
+   2,
+   12,
+   0,
+   0.2
+  ],
+  [
+   "o3-pro",
+   "o3-pro",
+   20,
+   80,
+   0,
+   5
+  ],
+  [
+   "o1-pro",
+   "o1-pro",
+   150,
+   600,
+   0,
+   75
+  ],
+  [
+   "^auto$|^gpt$|chatgpt",
+   "ChatGPT (auto)",
+   2,
+   12,
+   0,
+   0.2
+  ],
+  [
+   "gemini-3[.-]?[67]-flash",
+   "Gemini 3.6/3.7 Flash",
+   0.75,
+   3.75,
+   0,
+   0.075
+  ],
+  [
+   "^(llama|qwen|mistral|mixtral|gemma|phi|deepseek-r1|codellama|tinyllama)",
+   "Local open-weight (runs on your hardware)",
+   0,
+   0,
+   0,
+   0
+  ],
+  [
+   "grok-3-mini|grok-4-fast",
+   "Grok fast/mini",
+   0.2,
+   0.5,
+   0,
+   0.05
+  ],
+  [
+   "deepseek-reasoner|deepseek-r1",
+   "DeepSeek Reasoner",
+   0.55,
+   2.19,
+   0,
+   0.14
+  ],
+  [
+   "deepseek",
+   "DeepSeek chat (V3 list)",
+   0.27,
+   1.1,
+   0,
+   0.07
+  ],
+  [
+   "claude-opus-4(-1)?(?=$|-\\d{8})",
+   "Claude Opus 4 / 4.1",
+   15,
+   75,
+   18.75,
+   1.5
+  ],
+  [
+   "^deepseek-v3\\.[12]$",
+   "DeepSeek-V3.1 / V3.2 (SambaNova)",
+   3,
+   4.5,
+   0,
+   0
+  ],
+  [
+   "^deepseek(?!-ai/)",
+   "DeepSeek chat (V3 list)",
+   0.27,
+   1.1,
+   0,
+   0.07
+  ],
+  [
+   "^ministral-8b-(2512|latest)$",
+   "Ministral 3 8B",
+   0.15,
+   0.15,
+   0,
+   0.015
+  ],
+  [
+   "^ministral-3b-(2512|latest)$",
+   "Ministral 3 3B",
+   0.1,
+   0.1,
+   0,
+   0.01
+  ],
+  [
+   "gemini-3[.-]?[678]-flash",
+   "Gemini 3.6/3.7/3.8 Flash",
+   0.75,
+   3.75,
+   0,
+   0.075
+  ],
+  [
+   "^ministral-14b-(2512|latest)$",
+   "Ministral 3 14B",
+   0.2,
+   0.2,
+   0,
+   0.02
+  ]
+ ],
+ "history_lists": {
+  "ids": [
+   "cba6091a",
+   "fc355335",
+   "2c75a893",
+   "a849ce88",
+   "c4aa977b"
+  ],
+  "pats": [
+   [
+    "claude-(fable|mythos)-5",
+    31
+   ],
+   [
+    "claude-opus-(5|4-[5-9])",
+    31
+   ],
+   [
+    "claude-opus-4(-1)?$",
+    7,
+    [
+     "Claude Opus 4 / 4.1",
+     15,
+     75,
+     18.75,
+     1.5
+    ]
+   ],
+   [
+    "claude-sonnet-5",
+    31
+   ],
+   [
+    "claude-sonnet-4|claude-3-7-sonnet|claude-3-5-sonnet",
+    31
+   ],
+   [
+    "claude-haiku-4-5",
+    31
+   ],
+   [
+    "claude-3-5-haiku",
+    31
+   ],
+   [
+    "claude-3-haiku",
+    31
+   ],
+   [
+    "claude",
+    31
+   ],
+   [
+    "gpt-5[.-]?6-sol|gpt-5[.-]?5(?!-pro)",
+    31,
+    [
+     "GPT-5.6 Sol / 5.5",
+     5,
+     30,
+     0,
+     0.5
+    ]
+   ],
+   [
+    "gpt-5[.-]?5-pro",
+    31,
+    [
+     "GPT-5.5 Pro",
+     30,
+     180,
+     0,
+     3
+    ]
+   ],
+   [
+    "gpt-5[.-]?6-terra",
+    31
+   ],
+   [
+    "gpt-5[.-]?6-luna",
+    31
+   ],
+   [
+    "gpt-5[.-]?4-mini",
+    31
+   ],
+   [
+    "gpt-5[.-]?4-nano",
+    31
+   ],
+   [
+    "gpt-5[.-]?4",
+    31
+   ],
+   [
+    "gpt-5-mini",
+    31
+   ],
+   [
+    "gpt-5-nano",
+    31
+   ],
+   [
+    "gpt-5",
+    31,
+    [
+     "GPT-5 / 5.x (other)",
+     2,
+     12,
+     0,
+     0.2
+    ]
+   ],
+   [
+    "gpt-4o-mini",
+    31
+   ],
+   [
+    "gpt-4o|chatgpt-4o",
+    31
+   ],
+   [
+    "o3-pro",
+    31,
+    [
+     "o3-pro",
+     20,
+     80,
+     0,
+     5
+    ]
+   ],
+   [
+    "o3-mini",
+    31
+   ],
+   [
+    "o1-pro",
+    31,
+    [
+     "o1-pro",
+     150,
+     600,
+     0,
+     75
+    ]
+   ],
+   [
+    "^auto$|^gpt$|chatgpt",
+    3,
+    [
+     "ChatGPT (auto)",
+     2,
+     12,
+     0,
+     0.2
+    ]
+   ],
+   [
+    "gemini-3[.-]?[67]-flash",
+    31,
+    [
+     "Gemini 3.6/3.7 Flash",
+     0.75,
+     3.75,
+     0,
+     0.075
+    ]
+   ],
+   [
+    "gemini-3[.-]?5-flash-lite",
+    31
+   ],
+   [
+    "gemini-3[.-]?5-flash",
+    31
+   ],
+   [
+    "gemini-3.*pro",
+    31
+   ],
+   [
+    "gemini-3.*flash-lite",
+    31
+   ],
+   [
+    "gemini-3",
+    31
+   ],
+   [
+    "gemini-2[.-]?5-pro",
+    31
+   ],
+   [
+    "gemini-2[.-]?5-flash-lite",
+    31
+   ],
+   [
+    "gemini-2[.-]?5-flash",
+    31
+   ],
+   [
+    "gemini",
+    31
+   ],
+   [
+    ".*",
+    31
+   ],
+   [
+    "^(llama|qwen|mistral|mixtral|gemma|phi|deepseek-r1|codellama|tinyllama)",
+    2,
+    [
+     "Local open-weight (runs on your hardware)",
+     0,
+     0,
+     0,
+     0
+    ]
+   ],
+   [
+    "^auto$|^gpt$|chatgpt|^copilot$",
+    28
+   ],
+   [
+    "grok-3-mini|grok-4-fast",
+    12,
+    [
+     "Grok fast/mini",
+     0.2,
+     0.5,
+     0,
+     0.05
+    ]
+   ],
+   [
+    "^grok-4|^grok$",
+    28
+   ],
+   [
+    "deepseek-reasoner|deepseek-r1",
+    4,
+    [
+     "DeepSeek Reasoner",
+     0.55,
+     2.19,
+     0,
+     0.14
+    ]
+   ],
+   [
+    "deepseek",
+    12,
+    [
+     "DeepSeek chat (V3 list)",
+     0.27,
+     1.1,
+     0,
+     0.07
+    ]
+   ],
+   [
+    "^sonar|^perplexity$",
+    28
+   ],
+   [
+    "^meta-ai$",
+    28
+   ],
+   [
+    "claude-opus-4(-1)?(?=$|-\\d{8})",
+    24,
+    [
+     "Claude Opus 4 / 4.1",
+     15,
+     75,
+     18.75,
+     1.5
+    ]
+   ],
+   [
+    "deepseek-reasoner|deepseek[.-]r1",
+    24
+   ],
+   [
+    "^gpt-5-codex(?!-mini)",
+    16
+   ],
+   [
+    "^codex-mini",
+    16
+   ],
+   [
+    "^gpt-5\\.3-codex",
+    16
+   ],
+   [
+    "^gpt-4\\.1(?!-mini|-nano)",
+    16
+   ],
+   [
+    "^gpt-4\\.1-mini",
+    16
+   ],
+   [
+    "^gpt-4\\.1-nano",
+    16
+   ],
+   [
+    "^gpt-4-(turbo|0125-preview|1106-preview)",
+    16
+   ],
+   [
+    "^gpt-4(-0613|-0314)?$",
+    16
+   ],
+   [
+    "^gpt-3\\.5-turbo(-0125)?$",
+    16
+   ],
+   [
+    "^gpt-3\\.5-turbo-1106",
+    16
+   ],
+   [
+    "^gpt-3\\.5-turbo-instruct",
+    16
+   ],
+   [
+    "^o4-mini",
+    16
+   ],
+   [
+    "^o3(-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^o1(-2024-12-17|-preview.*)?$",
+    16
+   ],
+   [
+    "^o1-mini",
+    16
+   ],
+   [
+    "^gemini-2\\.0-flash(?!-lite)",
+    16
+   ],
+   [
+    "^gemini-2\\.0-flash-lite",
+    16
+   ],
+   [
+    "^gemini-1\\.5-pro",
+    16
+   ],
+   [
+    "^gemini-1\\.5-flash(?!-8b)",
+    16
+   ],
+   [
+    "^gemini-1\\.5-flash-8b",
+    16
+   ],
+   [
+    "^gemma-3",
+    16
+   ],
+   [
+    "^openai/gpt-oss-120b",
+    16
+   ],
+   [
+    "^openai/gpt-oss-20b",
+    16
+   ],
+   [
+    "^openai/gpt-oss-safeguard-20b",
+    16
+   ],
+   [
+    "^qwen/qwen3\\.8-27b",
+    16
+   ],
+   [
+    "^meta-llama/llama-prompt-guard-2",
+    16
+   ],
+   [
+    "^llama-3\\.3-70b-versatile",
+    16
+   ],
+   [
+    "^llama-3\\.1-8b-instant",
+    16
+   ],
+   [
+    "^moonshotai/kimi-k2-instruct",
+    16
+   ],
+   [
+    "^deepseek-r1-distill-llama-70b",
+    16
+   ],
+   [
+    "^meta-llama/llama-4-maverick-17b-128e-instruct$",
+    16
+   ],
+   [
+    "^meta-llama/llama-4-scout-17b-16e-instruct$",
+    16
+   ],
+   [
+    "^meta-llama/llama-3\\.3-70b-instruct-turbo",
+    16
+   ],
+   [
+    "^meta-llama/meta-llama-3-8b-instruct-lite",
+    16
+   ],
+   [
+    "^qwen/qwen2\\.5-7b-instruct-turbo",
+    16
+   ],
+   [
+    "^qwen/qwen3-235b-a22b-instruct-2507-tput",
+    16
+   ],
+   [
+    "^moonshotai/kimi-k3",
+    16
+   ],
+   [
+    "^deepseek-ai/deepseek-v4-pro",
+    16
+   ],
+   [
+    "^deepseek-ai/deepseek-v4\\.1-flash",
+    16
+   ],
+   [
+    "^zai-org/glm-5\\.[23]$",
+    16
+   ],
+   [
+    "^zai-org/glm-5\\.3-flash",
+    16
+   ],
+   [
+    "^minimaxai/minimax-m3",
+    16
+   ],
+   [
+    "^qwen/qwen3\\.8-2\\.4t-a95b$",
+    16
+   ],
+   [
+    "^qwen/qwen3\\.7-max$",
+    16
+   ],
+   [
+    "^qwen/qwen3\\.7-plus$",
+    16
+   ],
+   [
+    "^qwen/qwen3\\.6-plus$",
+    16
+   ],
+   [
+    "^qwen/qwen3\\.8-flash$",
+    16
+   ],
+   [
+    "^qwen/qwen3\\.5-9b$",
+    16
+   ],
+   [
+    "^qwen/qwen3\\.5-397b-a17b$",
+    16
+   ],
+   [
+    "^meta-llama/llama-4-maverick-17b-128e-instruct-fp8",
+    16
+   ],
+   [
+    "^meta-llama/meta-llama-3\\.1-70b-instruct-turbo",
+    16
+   ],
+   [
+    "^meta-llama/meta-llama-3\\.1-405b-instruct-turbo",
+    16
+   ],
+   [
+    "^accounts/fireworks/models/gpt-oss-120b",
+    16
+   ],
+   [
+    "^accounts/fireworks/models/kimi-k3",
+    16
+   ],
+   [
+    "^accounts/fireworks/models/deepseek-v4p1-flash",
+    16
+   ],
+   [
+    "^accounts/fireworks/models/glm-5p3$",
+    16
+   ],
+   [
+    "^accounts/fireworks/models/glm-5p3-flash",
+    16
+   ],
+   [
+    "^accounts/fireworks/models/qwen3p8-max",
+    16
+   ],
+   [
+    "^accounts/fireworks/models/minimax-m3",
+    16
+   ],
+   [
+    "^accounts/fireworks/models/nemotron-lightning-3p5",
+    16
+   ],
+   [
+    "^accounts/fireworks/models/(llama-v3p[13]-70b|qwen3-32b|.*-70b-instruct)",
+    16
+   ],
+   [
+    "^accounts/fireworks/models/llama-v3p1-8b",
+    16
+   ],
+   [
+    "^accounts/fireworks/models/llama4-scout",
+    16
+   ],
+   [
+    "^accounts/fireworks/models/llama4-maverick",
+    16
+   ],
+   [
+    "^accounts/fireworks/models/gpt-oss-20b",
+    16
+   ],
+   [
+    "^meta-llama/meta-llama-3\\.1-8b-instruct-turbo",
+    16
+   ],
+   [
+    "^deepseek-ai/deepseek-r1(-0528)?$",
+    16
+   ],
+   [
+    "^deepseek-ai/deepseek-v3$",
+    16
+   ],
+   [
+    "^deepseek-ai/deepseek-v3\\.1",
+    16
+   ],
+   [
+    "^deepseek-ai/deepseek-v3\\.2",
+    16
+   ],
+   [
+    "^qwen/qwen3-32b$",
+    16
+   ],
+   [
+    "^qwen/qwen3-235b-a22b-instruct-2507$",
+    16
+   ],
+   [
+    "^moonshotai/kimi-k2\\.6",
+    16
+   ],
+   [
+    "^google/gemma-4-(31b|26b-a4b)-it",
+    16
+   ],
+   [
+    "^meta-llama-3\\.3-70b-instruct$",
+    16
+   ],
+   [
+    "^gpt-oss-120b$",
+    16
+   ],
+   [
+    "^deepseek-v3\\.[12]$",
+    16,
+    [
+     "DeepSeek-V3.1 / V3.2 (SambaNova)",
+     3,
+     4.5,
+     0,
+     0
+    ]
+   ],
+   [
+    "^gemma-4-31b-it$",
+    16
+   ],
+   [
+    "^meta-llama-3\\.1-8b-instruct$",
+    16
+   ],
+   [
+    "^meta-llama-3\\.1-405b-instruct$",
+    16
+   ],
+   [
+    "^llama-4-maverick-17b-128e-instruct(-fp8)?$",
+    16
+   ],
+   [
+    "^llama3\\.1-8b$",
+    16
+   ],
+   [
+    "^llama-3\\.3-70b$",
+    16
+   ],
+   [
+    "^qwen-3-32b$",
+    16
+   ],
+   [
+    "^qwen-3-235b-a22b",
+    16
+   ],
+   [
+    "^llama-4-scout-17b-16e-instruct$",
+    16
+   ],
+   [
+    "^grok-4\\.7",
+    16
+   ],
+   [
+    "^grok-4\\.6",
+    16
+   ],
+   [
+    "^grok-4\\.5",
+    16
+   ],
+   [
+    "^grok-4\\.3",
+    16
+   ],
+   [
+    "^grok-4\\.20",
+    16
+   ],
+   [
+    "^grok-(build|code-fast)",
+    16
+   ],
+   [
+    "^grok-4(-0709|-latest)?$",
+    16
+   ],
+   [
+    "^grok-4-fast",
+    16
+   ],
+   [
+    "^grok-4-1-fast",
+    16
+   ],
+   [
+    "^grok-3(-latest|-beta|-fast(-latest|-beta)?)?$",
+    16
+   ],
+   [
+    "^grok-3-mini",
+    16
+   ],
+   [
+    "^grok-2",
+    16
+   ],
+   [
+    "^deepseek(?!-ai/)",
+    16,
+    [
+     "DeepSeek chat (V3 list)",
+     0.27,
+     1.1,
+     0,
+     0.07
+    ]
+   ],
+   [
+    "^sonar$",
+    16
+   ],
+   [
+    "^sonar-pro$",
+    16
+   ],
+   [
+    "^sonar-reasoning-pro",
+    16
+   ],
+   [
+    "^sonar-reasoning$",
+    16
+   ],
+   [
+    "^sonar-deep-research",
+    16
+   ],
+   [
+    "^mistral-large-4(-0)?$",
+    16
+   ],
+   [
+    "^mistral-large-(2512|latest)$",
+    16
+   ],
+   [
+    "^mistral-medium-(3-5|3|latest|2604)$",
+    16
+   ],
+   [
+    "^mistral-small-(2603|latest)$",
+    16
+   ],
+   [
+    "^ministral-14b-(2512|latest)$",
+    16,
+    [
+     "Ministral 3 14B",
+     0.2,
+     0.2,
+     0,
+     0.02
+    ]
+   ],
+   [
+    "^ministral-8b-(2512|latest)$",
+    16,
+    [
+     "Ministral 3 8B",
+     0.15,
+     0.15,
+     0,
+     0.015
+    ]
+   ],
+   [
+    "^ministral-3b-(2512|latest)$",
+    16,
+    [
+     "Ministral 3 3B",
+     0.1,
+     0.1,
+     0,
+     0.01
+    ]
+   ],
+   [
+    "^codestral-(2508|latest)$",
+    16
+   ],
+   [
+    "^zai-glm-5-3$",
+    16
+   ],
+   [
+    "^(open-)?(mistral(?!ai/)|ministral|codestral|magistral|devstral|pixtral|labs-|zai-glm-)",
+    16
+   ],
+   [
+    "^command-a(-\\d{2}-\\d{4})?$",
+    16
+   ],
+   [
+    "^command-r-plus-08-2024$",
+    16
+   ],
+   [
+    "^command-r-plus(-04-2024)?$",
+    16
+   ],
+   [
+    "^command-r-08-2024$",
+    16
+   ],
+   [
+    "^command-r(-03-2024)?$",
+    16
+   ],
+   [
+    "^command-r7b(-\\d{2}-\\d{4})?$",
+    16
+   ],
+   [
+    "^command(-nightly)?$",
+    16
+   ],
+   [
+    "^command-light(-nightly)?$",
+    16
+   ],
+   [
+    "^c4ai-aya-(expanse|vision)-(8b|32b)$",
+    16
+   ],
+   [
+    "^(command|c4ai-)",
+    16
+   ],
+   [
+    "^muse-wonder-",
+    16
+   ],
+   [
+    "^muse-spark-\\d+\\.\\d+$",
+    16
+   ],
+   [
+    "^muse-spark-\\d+\\.\\d+-contributor$",
+    16
+   ],
+   [
+    "^muse-",
+    16
+   ],
+   [
+    "nova-micro",
+    16
+   ],
+   [
+    "nova-lite",
+    16
+   ],
+   [
+    "nova-pro",
+    16
+   ],
+   [
+    "nova-premier",
+    16
+   ],
+   [
+    "nova-2(\\.0)?-lite",
+    16
+   ],
+   [
+    "nova-2-pro",
+    16
+   ],
+   [
+    "nova-2-omni",
+    16
+   ],
+   [
+    "amazon\\.nova|^nova-",
+    16
+   ],
+   [
+    "^phi-4$",
+    16
+   ],
+   [
+    "^phi-4-mini(-instruct|-reasoning)?$",
+    16
+   ],
+   [
+    "^phi-4-multimodal(-instruct)?$",
+    16
+   ],
+   [
+    "^phi-4-reasoning(-plus)?$",
+    16
+   ],
+   [
+    "^phi-3(\\.5)?-mini",
+    16
+   ],
+   [
+    "^phi-3-small",
+    16
+   ],
+   [
+    "^phi-3-medium",
+    16
+   ],
+   [
+    "^phi-3\\.5-moe",
+    16
+   ],
+   [
+    "^(microsoft/)?phi-",
+    16
+   ],
+   [
+    "^qwen3\\.8-max(-\\d{4})?$",
+    16
+   ],
+   [
+    "^qwen3\\.7-max(-preview|-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^qwen-max$",
+    16
+   ],
+   [
+    "^qwen3\\.7-plus(-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^qwen3\\.6-plus(-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^qwen3\\.5-plus(-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^qwen-plus(-latest|-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^qwen3\\.8-flash$",
+    16
+   ],
+   [
+    "^qwen3\\.7-flash(-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^qwen3\\.6-flash(-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^qwen3\\.5-flash(-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^qwen-flash(-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^qwen3\\.8-2\\.4t-a95b$",
+    16
+   ],
+   [
+    "^qwen3\\.8-27b$",
+    16
+   ],
+   [
+    "^qwen3\\.6-35b-a3b$",
+    16
+   ],
+   [
+    "^qwen3\\.6-27b$",
+    16
+   ],
+   [
+    "^qwen3\\.5-397b-a17b$",
+    16
+   ],
+   [
+    "^qwen3\\.5-122b-a10b$",
+    16
+   ],
+   [
+    "^qwen3\\.5-27b$",
+    16
+   ],
+   [
+    "^qwen3\\.5-35b-a3b$",
+    16
+   ],
+   [
+    "^qwen3-coder-flash(-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^qwen3-vl-plus(-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^qwen-vl-ocr(-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^qwen3(\\.6)?-max(-preview|-\\d{4}-\\d{2}-\\d{2})?$",
+    16
+   ],
+   [
+    "^(qwen(?!/)|qwq)",
+    16
+   ],
+   [
+    "^kimi-k3$",
+    16
+   ],
+   [
+    "^kimi-k2\\.7-code$",
+    16
+   ],
+   [
+    "^kimi-k2\\.7-code-highspeed$",
+    16
+   ],
+   [
+    "^kimi-k2\\.6$",
+    16
+   ],
+   [
+    "^(kimi|moonshot(?!ai/))",
+    16
+   ],
+   [
+    "^glm-5\\.3$",
+    16
+   ],
+   [
+    "^glm-5\\.2$",
+    16
+   ],
+   [
+    "^glm-5\\.1$",
+    16
+   ],
+   [
+    "^glm-5$",
+    16
+   ],
+   [
+    "^glm-5\\.3-flash$",
+    16
+   ],
+   [
+    "^glm-5\\.3-flashx$",
+    16
+   ],
+   [
+    "^glm-4\\.7$",
+    16
+   ],
+   [
+    "^glm-4\\.6$",
+    16
+   ],
+   [
+    "^glm-4\\.7-flashx$",
+    16
+   ],
+   [
+    "^glm-4\\.5$",
+    16
+   ],
+   [
+    "^glm-4\\.5-x$",
+    16
+   ],
+   [
+    "^glm-4\\.5-air$",
+    16
+   ],
+   [
+    "^glm-4\\.5-airx$",
+    16
+   ],
+   [
+    "^glm-4-32b-0414-128k$",
+    16
+   ],
+   [
+    "^glm-4\\.(7|5|6v)-flash$",
+    16
+   ],
+   [
+    "^glm-4\\.6v$",
+    16
+   ],
+   [
+    "^glm-4\\.6v-flashx$",
+    16
+   ],
+   [
+    "^glm-4\\.5v$",
+    16
+   ],
+   [
+    "^glm-ocr$",
+    16
+   ],
+   [
+    "^glm",
+    16
+   ],
+   [
+    "^minimax-m3$",
+    16
+   ],
+   [
+    "^minimax-m2\\.7$",
+    16
+   ],
+   [
+    "^minimax-m2\\.7-highspeed$",
+    16
+   ],
+   [
+    "^minimax-m2\\.5$",
+    16
+   ],
+   [
+    "^minimax-m2\\.5-highspeed$",
+    16
+   ],
+   [
+    "^minimax-m2\\.1$",
+    16
+   ],
+   [
+    "^minimax-m2\\.1-highspeed$",
+    16
+   ],
+   [
+    "^minimax-m2$",
+    16
+   ],
+   [
+    "^minimax(?!ai/)",
+    16
+   ],
+   [
+    "^ernie-5\\.1$",
+    16
+   ],
+   [
+    "^ernie-5\\.0",
+    16
+   ],
+   [
+    "^ernie-4\\.5-turbo-(32k|128k)(-preview)?$",
+    16
+   ],
+   [
+    "^ernie-4\\.5-turbo-vl(-32k)?$",
+    16
+   ],
+   [
+    "^ernie",
+    16
+   ],
+   [
+    "^composer-2\\.5",
+    16
+   ],
+   [
+    "^composer-1",
+    16
+   ]
+  ]
+ },
+ "history_successors": {
+  "claude-opus-4(-1)?$": "claude-opus-4(-[01])?(?=$|-\\d{8})",
+  "gpt-5[.-]?6-sol|gpt-5[.-]?5(?!-pro)": "gpt-5[.-]?6-sol",
+  "^auto$|^gpt$|chatgpt": "^auto$|^gpt$|chatgpt|^copilot$",
+  "gemini-3[.-]?[67]-flash": "gemini-3[.-]?[678]-flash(?!-lite)",
+  "grok-3-mini|grok-4-fast": "^grok-3-mini",
+  "deepseek-reasoner|deepseek-r1": "deepseek-reasoner|deepseek[.-]r1",
+  "deepseek": "^deepseek(?!-ai/|-v3\\.[12](?!\\d))",
+  "claude-opus-4(-1)?(?=$|-\\d{8})": "claude-opus-4(-[01])?(?=$|-\\d{8})",
+  "^deepseek(?!-ai/)": "^deepseek(?!-ai/|-v3\\.[12](?!\\d))",
+  "^ministral-8b-(2512|latest)$": "^ministral-8b(-(2512|latest))?$",
+  "^ministral-3b-(2512|latest)$": "^ministral-3b(-(2512|latest))?$",
+  "gemini-3[.-]?[678]-flash": "gemini-3[.-]?[678]-flash(?!-lite)",
+  "^ministral-14b-(2512|latest)$": "^ministral-14b(-(2512|latest))?$"
+ }
 }

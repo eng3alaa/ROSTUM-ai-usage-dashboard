@@ -19,7 +19,7 @@ const seed = () => {
   Store.sources = {}; Store.billed = {}; Store.projects = []; Store.connectors = {}; LS.del('prices'); Pricing.load();
   App.filters.range = '30'; App._drill = null; App.filters.hiddenPlatforms = new Set();
   const r = (platform, model) => ({ d: dayKey(new Date(Date.now() - 3 * 86400000)), platform, model, in: 1_000_000, cw: 0, cr: 0, out: 1_000_000, msgs: 2 });
-  Store.setSource('csv', [r('xAI', 'grok-4'), r('SambaNova', 'minimax-m3'), r('Anthropic API', 'claude-sonnet-5'), r('Ollama', 'llama-mystery')], {});
+  Store.setSource('csv', [r('xAI', 'grok-4'), r('SambaNova Cloud', 'minimax-m3'), r('Anthropic API', 'claude-sonnet-5'), r('Ollama', 'llama-mystery')], {});
   App.renderPricing(); App._render();
 };
 
@@ -92,15 +92,15 @@ export async function run({ browser, ok }) {
         ovRows: rows.length, ovMatchedN: rows.filter(t => t.classList.contains('matched')).length, ovFirstIsHit: rows[0] === hit,
         hit: hit && { platform: (hit.querySelector('.platform') || {}).textContent, label: (hit.querySelector('.label') || {}).textContent, inputs: hit.querySelectorAll('input').length, buttons: hit.querySelectorAll('button').length,
           pill: (hit.querySelector('.pill') || {}).textContent, verified: (hit.querySelector('.verified') || {}).textContent, src: !!hit.querySelector('a.src'), models: (hit.querySelector('.matched-models') || {}).textContent },
-        res: pick(Pricing.resolve('minimax-m3', 'SambaNova')), base: pick(Pricing.resolve('minimax-m3')), grok: pick(Pricing.resolve('grok-4', 'xAI')), fb: pick(Pricing.resolve('zzz-never', 'xAI')) };
+        res: pick(Pricing.resolve('minimax-m3', 'SambaNova Cloud')), base: pick(Pricing.resolve('minimax-m3')), grok: pick(Pricing.resolve('grok-4', 'xAI')), fb: pick(Pricing.resolve('zzz-never', 'xAI')) };
     });
-    ok('price-ui (A2 amendment): the MiniMax default row for minimax-m3 carries ".wins-for" — "wins for SambaNova: $0.6 in / $2.4 out" — and is not itself marked matched',
-      ov.hasWins && /^wins for SambaNova: \$0\.6 in \/ \$2\.4 out/.test(ov.wins) && /edit/i.test(ov.winsTitle || '') && !ov.rowMatched, JSON.stringify({ hasWins: ov.hasWins, wins: ov.wins, winsTitle: ov.winsTitle, rowMatched: ov.rowMatched }));
+    ok('price-ui (A2 amendment): the MiniMax default row for minimax-m3 carries ".wins-for" — "wins for SambaNova Cloud: $0.6 in / $2.4 out" — and is not itself marked matched',
+      ov.hasWins && /^wins for SambaNova Cloud: \$0\.6 in \/ \$2\.4 out/.test(ov.wins) && /edit/i.test(ov.winsTitle || '') && !ov.rowMatched, JSON.stringify({ hasWins: ov.hasWins, wins: ov.wins, winsTitle: ov.winsTitle, rowMatched: ov.rowMatched }));
     ok('price-ui (A2): the Platform overrides group is read-only (no inputs, no delete), names the platform per row, lists the matched SambaNova MiniMax-M3 row first with its pill / verified / source and the model that landed',
-      ov.ovRows === 17 && ov.ovMatchedN === 1 && ov.ovFirstIsHit && ov.hit && ov.hit.platform === 'SambaNova' && ov.hit.label === 'MiniMax-M3 (SambaNova)' && ov.hit.inputs === 0 && ov.hit.buttons === 0 && ov.hit.pill === 'high' && ov.hit.verified === 'unverified since Aug 2026' && ov.hit.src && /minimax-m3/.test(ov.hit.models || ''),
+      ov.ovRows === 18 && ov.ovMatchedN === 1 && ov.ovFirstIsHit && ov.hit && ov.hit.platform === 'SambaNova Cloud' && ov.hit.label === 'MiniMax-M3 (SambaNova)' && ov.hit.inputs === 0 && ov.hit.buttons === 0 && ov.hit.pill === 'high' && ov.hit.verified === 'unverified since Aug 2026' && ov.hit.src && /minimax-m3/.test(ov.hit.models || ''),
       JSON.stringify({ ovRows: ov.ovRows, ovMatchedN: ov.ovMatchedN, ovFirstIsHit: ov.ovFirstIsHit, hit: ov.hit }));
-    ok('price-ui (A2): Pricing.resolve() says which rate won — source "override" + overrideFor "SambaNova" with the platform, source "default" without; grok-4 → default with aliasOf grok-4.3; the fallback is default with c existing',
-      ov.res.source === 'override' && ov.res.overrideFor === 'SambaNova' && ov.res.label === 'MiniMax-M3 (SambaNova)' && ov.base.source === 'default' && ov.base.overrideFor === null && ov.base.label === 'MiniMax-M3 (MiniMax API default)'
+    ok('price-ui (A2): Pricing.resolve() says which rate won — source "override" + overrideFor "SambaNova Cloud" with the platform, source "default" without; grok-4 → default with aliasOf grok-4.3; the fallback is default with c existing',
+      ov.res.source === 'override' && ov.res.overrideFor === 'SambaNova Cloud' && ov.res.label === 'MiniMax-M3 (SambaNova)' && ov.base.source === 'default' && ov.base.overrideFor === null && ov.base.label === 'MiniMax-M3 (MiniMax API default)'
       && ov.grok.source === 'default' && ov.grok.aliasOf === 'grok-4.3' && ov.grok.overrideFor === null && ov.fb.source === 'default' && ov.fb.c === 'existing', JSON.stringify({ res: ov.res, base: ov.base, grok: ov.grok, fb: ov.fb }));
 
     // (4) the banner (12 days after the verified date → plain) + the KPI footer + the CSV export's provenance line
